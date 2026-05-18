@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/titan-pi-banner.png" alt="titan-pi-memory banner" width="100%">
+</p>
+
 # 🪞 titan-pi-memory
 
 > **Persistent evolutionary memory for the Pi coding agent.**
