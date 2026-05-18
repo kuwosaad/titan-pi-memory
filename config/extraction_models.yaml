@@ -1,0 +1,38 @@
+# Extraction Models Configuration
+# API keys must come from environment variables.
+
+current: gemini
+
+ollama:
+  enabled: false
+  base_url: http://localhost:11434
+  model: llama3.1:8b
+
+openrouter:
+  enabled: false
+  api_key_env: OPENROUTER_API_KEY
+  base_url: https://openrouter.ai/api/v1
+  model: meta-llama/llama-3.1-8b-instruct:free
+
+openai:
+  enabled: false
+  api_key_env: OPENAI_API_KEY
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-mini
+
+gemini:
+  enabled: true
+  api_key_env: GEMINI_API_KEY
+  base_url: https://generativelanguage.googleapis.com/v1beta
+  model: gemini-2.5-pro
+  request_timeout: 300
+
+dedup:
+  enabled: true
+  api_key_env: GEMINI_API_KEY
+  base_url: https://generativelanguage.googleapis.com/v1beta
+  model: gemini-2.5-flash
+  temperature: 0.1
+  request_timeout: 120
+  max_retries: 2
+  retry_backoff_seconds: 1.0

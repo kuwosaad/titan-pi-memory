@@ -1,0 +1,15 @@
+# Embedding Models Configuration
+# This converts atomic memories into vector representations
+
+current: ollama
+
+ollama:
+  enabled: true
+  base_url: http://localhost:11434
+  model: nomic-embed-text:v1.5
+
+openai:
+  enabled: false
+  api_key_env: OPENAI_API_KEY
+  base_url: https://api.openai.com/v1
+  model: text-embedding-3-small

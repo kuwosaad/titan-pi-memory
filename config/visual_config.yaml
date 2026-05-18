@@ -1,0 +1,211 @@
+theme:
+  mode: dark
+  background_color: "#050810"
+  fog_enabled: true
+  fog_color: "#0c1424"
+  fog_density: 0.0008
+  ambient_light_color: "#6ba8ff"
+  ambient_light_intensity: 0.9
+  key_light_color: "#5bf2ff"
+  key_light_intensity: 1.0
+  key_light_position:
+    x: 120
+    y: 150
+    z: 240
+  fill_light_color: "#b14cff"
+  fill_light_intensity: 0.55
+  fill_light_position:
+    x: -190
+    y: -70
+    z: -160
+
+  background:
+    gradient_enabled: true
+    gradient_color: "#3c2b8f"
+    gradient_opacity: 0.28
+    gradient_position: "54% 40%"
+    gradient_size: 78
+
+    grid_enabled: true
+    grid_size: 28
+    grid_color: "#1a3260"
+    grid_opacity: 0.12
+
+3d_rendering:
+  antialias: true
+  alpha: true
+  shadows: false
+
+physics:
+  warmup_ticks: 120
+  cooldown_ticks: 60
+  d3_alpha_min: 0.04
+  d3_alpha_decay: 0.018
+  velocity_decay: 0.28
+
+  forces:
+    charge:
+      strength: -120
+      distance_min: 25
+      distance_max: 900
+
+    link:
+      distance: 65
+      strength: 1.1
+      iterations: 2
+
+    collision:
+      radius: 8
+      strength: 0.8
+
+    center:
+      x: 0
+      y: 0
+      z: 0
+
+nodes:
+  geometry: sphere
+  base_size: 1.4
+  hub_size_multiplier: 1.6
+  hub_threshold: 5
+
+  style:
+    point_mode: true
+    selected_color: "#fff27d"
+    hub_subtlety: 0.65
+    sphere_resolution: 32
+
+  colors:
+    use_community_colors: true
+    palette:
+      - "#d4687a"
+      - "#e8a0b0"
+      - "#f0c8a0"
+      - "#c8889a"
+      - "#b87888"
+      - "#e0909a"
+      - "#d8a8b0"
+      - "#f0b8a8"
+
+    source_node_color: "#e8a0b0"
+    hub_node_color: "#f0c8a0"
+    default_color: "#d4a0b0"
+
+  glow:
+    enabled: true
+    intensity: 0.3
+    distance: 12
+
+  transparency:
+    enabled: true
+    opacity: 0.92
+
+edges:
+  geometry: line
+
+  colors:
+    similarity: "#d4687a"
+    source: "#b87888"
+    accent: "#f0c8a0"
+    highlight: "#e8a0b0"
+    selected: "rgba(240, 200, 160, 0.40)"
+
+  style:
+    source_opacity: 0.18
+    similarity_min_opacity: 0.12
+    similarity_max_opacity: 0.40
+    accent_min_weight: 0.68
+    accent_opacity: 0.48
+    global_opacity: 0.30
+
+  width:
+    min: 0.16
+    max: 0.72
+    source_width: 0.22
+
+  glow:
+    enabled: true
+    intensity: 0.2
+
+  transparency:
+    enabled: true
+    base_opacity: 0.08
+    max_opacity: 0.28
+
+interaction:
+  controls:
+    enable_zoom: true
+    enable_rotate: true
+    enable_pan: true
+    rotate_speed: 1.0
+    zoom_speed: 1.0
+
+  auto_rotation:
+    enabled: false
+    speed: 0.001
+    pause_on_interaction: true
+
+  hover:
+    enabled: true
+    soft_highlight: true
+    highlight_neighbors: true
+    highlight_color: "#d9ff73"
+    link_highlight_color: "rgba(137, 255, 198, 0.48)"
+    show_label: true
+    label_font_size: 10
+
+  click:
+    enabled: true
+    show_full_memory: true
+    keep_highlight: true
+
+camera:
+  initial_position:
+    x: 0
+    y: 0
+    z: 400
+  fov: 60
+  near: 1
+  far: 2000
+
+hud:
+  enabled: true
+  position:
+    top: 16
+    right: 16
+  width: 280
+  max_height: 200
+
+  styling:
+    background: "rgba(9, 15, 30, 0.56)"
+    border: "1px solid rgba(115, 197, 255, 0.36)"
+    box_shadow: "0 8px 30px rgba(68, 101, 255, 0.22)"
+    backdrop_filter: "blur(10px)"
+    color: "#e3efff"
+    font_family: "'Inter', 'Segoe UI', sans-serif"
+    font_size: "11px"
+    border_radius: "12px"
+
+  content:
+    show_title: true
+    title_text: "memory graph"
+    hint_text: "click a node to inspect memory details"
+    show_scope: true
+    show_stats: true
+
+performance:
+  max_nodes_visible: 500
+  node_detail_level: auto
+  enable_framerate_limit: true
+  target_fps: 60
+
+post_processing:
+  bloom:
+    enabled: true
+    strength: 0.35
+    radius: 0.4
+    threshold: 0.82
+
+  vignette:
+    enabled: true
+    amount: 0.25

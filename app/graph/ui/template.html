@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;0,8..60,600;0,8..60,700;1,8..60,400&display=swap" rel="stylesheet">
+    <script src="//cdn.jsdelivr.net/npm/3d-force-graph@1.79.0"></script>
+    <script src="//cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <style>{{CSS}}</style>
+</head>
+<body>
+    <canvas id="starfield"></canvas>
+    <div id="graph"></div>
+
+    <header class="dashboard-header">
+        <span class="dashboard-brand">titan memory</span>
+        <div class="dashboard-stats">
+            <span class="stat-chip"><span class="stat-dot memories"></span><span class="stat-num" data-count="${stat_memories}">0</span><span class="stat-label"> memories</span></span>
+            <span class="stat-chip"><span class="stat-dot connections"></span><span class="stat-num" data-count="${stat_connections}">0</span><span class="stat-label"> connections</span></span>
+            <span class="stat-chip"><span class="stat-dot clusters"></span><span class="stat-num" data-count="${stat_clusters}">0</span><span class="stat-label"> clusters</span></span>
+        </div>
+        <span class="dashboard-scope">${scope_label}</span>
+    </header>
+
+    <input type="checkbox" id="memorySidebarToggle" class="memory-toggle-checkbox" />
+    <label class="memory-toggle" for="memorySidebarToggle">
+        <span class="open-label">&#9776; memories</span>
+        <span class="close-label">&#10005; close</span>
+    </label>
+    <aside class="memory-sidebar" id="memorySidebar">
+        <div class="memory-sidebar-header">
+            <h2 class="memory-sidebar-title">saved memories</h2>
+            <div class="memory-sidebar-subtitle" id="memorySidebarSubtitle">${sidebar_subtitle}</div>
+            <div class="memory-sidebar-controls" id="memoryViewSwitch">
+                <button type="button" class="memory-view-pill active" data-view="recent">recent 24h</button>
+                <button type="button" class="memory-view-pill" data-view="all">all</button>
+            </div>
+        </div>
+        <div class="sidebar-search">
+            <input type="text" id="sidebarSearch" placeholder="search memories..." autocomplete="off" />
+        </div>
+        <div class="sidebar-filters" id="sidebarFilters">
+            <span class="filter-pill active" data-filter="all">all</span>
+        </div>
+        <div class="memory-list" id="memoryList">${sidebar_cards_markup}</div>
+        ${recent_empty_markup}
+    </aside>
+
+    <div class="${hud_class}" id="nodeInspector">
+        <div class="inspector-header">
+            <span class="title">${hud_title_text}</span>
+            <button class="close-btn" id="inspectorClose" title="Deselect">&#10005;</button>
+        </div>
+        <div class="scope">${scope_label}</div>
+        <div class="stats">${stats_label}</div>
+        <div class="hint"><span class="pulse-dot"></span> click a node to inspect memory details</div>
+        <div class="node-details" id="nodeInfo"></div>
+    </div>
+
+    <div class="memory-preview-dim" id="memoryPreviewDim"></div>
+    <div class="node-hover-card" id="nodeHoverCard" aria-hidden="true">
+        <div class="node-hover-kicker" id="nodeHoverKicker">memory</div>
+        <div class="node-hover-text" id="nodeHoverText"></div>
+    </div>
+    <div class="memory-preview" id="memoryPreview" aria-hidden="true">
+        <div class="memory-preview-header">
+            <div>
+                <div class="memory-preview-kicker" id="memoryPreviewKicker">memory preview</div>
+                <div class="memory-preview-title" id="memoryPreviewTitle">selected memory</div>
+            </div>
+            <button type="button" class="memory-preview-close" id="memoryPreviewClose" aria-label="Close preview">&#10005;</button>
+        </div>
+        <div class="memory-preview-body" id="memoryPreviewBody"></div>
+        <div class="memory-preview-meta" id="memoryPreviewMeta"></div>
+        <div class="memory-preview-connections" id="memoryPreviewConnections"></div>
+    </div>
+
+    <script>{{JS}}</script>
+</body>
+</html>

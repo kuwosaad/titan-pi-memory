@@ -1,0 +1,330 @@
+# General Settings for Titan Memory v2
+
+# Directories
+output_dir: out
+sessions_dir: out/sessions
+memories_dir: out/memories
+traces_dir: out/traces
+graphs_dir: out/graphs
+
+# File names (core)
+memories_file: memories.json
+memory_store_backend: sqlite
+memory_store_sqlite_path: out/memories/memory_store.db
+memory_store_read_fallback: json
+trace_packets_file: trace_packets.json
+trace_events_file: events.jsonl
+event_index_file: event_index.json
+checkpoints_file: checkpoints.json
+
+# Sidecar graph outputs (not required for save/retrieve)
+graph_file: graph.html
+graph_artifacts_file: graph_artifacts.json
+
+# Memory Extraction Settings
+extraction_backend: gemini
+min_memory_length: 6
+max_fallback_sentences: 3
+
+# Server Settings
+host: 127.0.0.1
+port: 8000
+
+# Ingest Settings
+ingest_mode: event_first
+plugin_spool_dir: .opencode/titan/traces
+ingest_spool_mode: incremental
+ingest_spool_max_lines_per_pass: 20000
+ingest_debug_metrics_enabled: true
+
+# Retrieval Settings
+retrieval_enabled: true
+retrieval_top_k: 8
+retrieval_min_similarity: 0.25
+retrieval_recency_days: 60
+retrieval_session_bias: true
+retrieval_rerank_enabled: true
+retrieval_rerank_alpha: 1.0
+retrieval_rerank_pool_k: 34
+
+# Memory Notes Settings
+notes_max_items: 6
+notes_max_chars: 700
+
+# Router Settings
+router_schema_version: v2
+router_mode: rule_based
+
+# Source Reliability Configuration
+source_reliability:
+  user: 0.9
+  assistant: 0.3
+  code: 1.0
+  mixed: 0.5
+  legacy: 0.3
+
+# Verification Settings (optional sidecar)
+verification:
+  enabled: true
+  verify_code_facts: true
+  verify_api_claims: true
+  max_verification_time: 5
+  verification_cache_enabled: true
+
+# Retrieval Filtering
+retrieval:
+  min_reliability: 0.4
+  allow_unverified: true
+  show_source_notes: false
+
+# Extraction Guardrails
+extraction:
+  assistant_hallucination_warning: true
+  require_user_corroboration: true
+  skip_unverifiable_technical: true
+
+# ──────────────────────────────────────────────
+# Step 2.1: Attention-First Retrieval Extensions
+# ──────────────────────────────────────────────
+step2:
+  # Phase A: Query-conditioned attention mask (Extension 2)
+  attention_mask_enabled: true
+
+  # Phase B: Explanatory centrality (Extension 1)
+  centrality_enabled: true
+  centrality_lambda: 0.3
+  centrality_iterations: 2
+  centrality_sim_floor: 0.45
+  centrality_diversity_penalty: true
+
+  # Shared attention matrix parameters
+  sim_floor: 0.45
+  softmax_temp: 0.5
+  gate_offset: 2.0
+  gate_steepness: 0.8
+  residual_weight: 0.3
+
+  # Intent-specific attention masks
+  attention_mask:
+    timeline:
+      rough_to_rough: 0.35
+      rough_to_learnings: 0.30
+      learnings_to_rough: 0.20
+      learnings_to_learnings: 0.15
+    explanatory:
+      rough_to_rough: 0.10
+      rough_to_learnings: 0.15
+      learnings_to_rough: 0.55
+      learnings_to_learnings: 0.20
+    pattern:
+      rough_to_rough: 0.10
+      rough_to_learnings: 0.10
+      learnings_to_rough: 0.20
+      learnings_to_learnings: 0.60
+    decision:
+      rough_to_rough: 0.15
+      rough_to_learnings: 0.30
+      learnings_to_rough: 0.10
+      learnings_to_learnings: 0.45
+    balanced:
+      rough_to_rough: 0.25
+      rough_to_learnings: 0.25
+      learnings_to_rough: 0.25
+      learnings_to_learnings: 0.25
+
+  # Extension 4: Contradiction detection
+  contradiction_enabled: true
+  contradiction_sim_threshold: 0.7
+  contradiction_tension_weight: 0.3
+  contradiction_antonyms:
+    - ["dark", "light"]
+    - ["accept", "reject"]
+    - ["use", "avoid"]
+    - ["prefer", "dislike"]
+    - ["work", "break"]
+    - ["enable", "disable"]
+    - ["keep", "remove"]
+    - ["add", "drop"]
+
+  # Extension 5: Cluster compression
+  cluster_compression_enabled: true
+  cluster_llm_synthesis: false
+  cluster_max_clusters: 5
+
+  # Extension 6: Temporal attention head
+  temporal_head_enabled: true
+  temporal_tau_minutes: 30
+  temporal_head_weight: 0.2
+  semantic_head_weight: 0.8
+
+# ──────────────────────────────────────────────
+# Step 1: Multi-Head QKV Semantic Search Extensions
+# ──────────────────────────────────────────────
+step1:
+  enabled: false
+
+  # Extension S1-A: Multi-Head Subspace Search
+  multi_head_enabled: false
+  multi_head_num_subspaces: 4
+  multi_head_subspace_blend: 0.3
+  multi_head_query_decompose: false
+  multi_head_aspect_alpha: 0.5
+  multi_head_intent_weights:
+    timeline:
+      subspace_2: 1.5
+      aspect_verbs: 1.5
+    explanatory:
+      subspace_1: 1.5
+      aspect_nouns: 1.5
+    pattern:
+      subspace_4: 1.5
+      aspect_core: 1.5
+    decision:
+      subspace_2: 1.3
+      subspace_3: 1.3
+      aspect_verbs: 1.3
+    balanced: {}
+
+  # Extension S1-B: Value Assessment
+  value_assessment_enabled: false
+  value_beta: 0.3
+  value_info_density_weight: 0.25
+  value_reliability_weight: 0.25
+  value_specificity_weight: 0.20
+  value_stream_weight: 0.15
+  value_connectivity_weight: 0.10
+  value_recency_weight: 0.05
+  value_info_density_saturation: 200
+
+  # Extension S1-C: Candidate-Aware Soft Threshold
+  soft_threshold_enabled: false
+  soft_threshold_neighborhood_weight: 0.3
+  soft_threshold_value_weight: 0.15
+  soft_threshold_neighborhood_sim_min: 0.5
+  soft_threshold_floor: 0.10
+
+  # Extension S1-D: Query-Conditioned Embedding
+  query_conditioning_enabled: false
+  query_conditioning_prefixes:
+    timeline: "CHRONOLOGICAL SEQUENCE: Focus on events, dates, and order of actions: "
+    explanatory: "CAUSAL EXPLANATION: Focus on reasons, causes, and why decisions were made: "
+    pattern: "RECURRING PATTERN: Focus on repeated behaviors, rules, and conventions: "
+    decision: "DECISION CONTEXT: Focus on choices made, alternatives considered, and rationale: "
+    balanced: ""
+
+  # Extension S1-E: Recency-Weighted Subspace
+  recency_weighted_enabled: false
+  recency_tau_days: 30
+  recency_intent_weights:
+    timeline: 0.30
+    explanatory: 0.20
+    pattern: 0.05
+    decision: 0.25
+    balanced: 0.15
+
+  # Extension S1-G: Sequence Positional Encoding
+  sequence_encoding_enabled: false
+  sequence_encoding_dim: 16
+  sequence_score_weight: 0.15
+  sequence_neighbor_window: 3
+  sequence_intent_weights:
+    timeline: 0.35
+    explanatory: 0.25
+    decision: 0.20
+    pattern: 0.05
+    balanced: 0.10
+
+  # Extension S1-F: Increased Candidate Pool (last - depends on smarter scoring)
+  adaptive_pool_k_enabled: false
+  adaptive_pool_k_base: 34
+  adaptive_pool_k_max: 96
+
+# ──────────────────────────────────────────────
+# Deduplication Buffer
+# ──────────────────────────────────────────────
+dedup:
+  enabled: true
+  buffer_window_seconds: 300
+  min_buffer_size: 5
+  dedup_model: dedup
+
+# Deferred for later phase:
+# automatic pre-answer injection via opencode tui.prompt.append hook
+
+# ──────────────────────────────────────────────
+# Liquid Neural Memory
+# ──────────────────────────────────────────────
+lnn:
+  enabled: true
+
+  # ODE solver
+  ode_dt: 0.1
+  ode_steps: 10
+  ode_method: euler
+
+  # Gains
+  alpha: 0.3
+  beta: 1.0
+
+  # Activation
+  activation_default: 0.0
+  activation_floor: 0.001
+
+  # Time constants
+  tau_default: 0.5
+  tau_boost: 0.05
+  tau_contradiction_penalty: 0.1
+  tau_disuse_decay: 0.01
+
+  # Weight initialization
+  weights_sim_floor: 0.45
+  weights_init_sigma: 0.1
+  max_weight: 1.0
+
+  # Learning
+  learning_rate: 0.01
+  hebbian_threshold: 0.3
+  weight_decay: 0.001
+  inhibitory_by_contradiction: true
+
+  # Tick worker
+  tick_enabled: true
+  decay_tick_seconds: 60.0
+
+  # Step 2.1 integration — set both to true to enable ODE reranking
+  use_ode_rerank: true
+  stored_weight_blend: 0.7
+
+  # Version 2: Expanding Activation (requires enabled + use_ode_rerank also true)
+  expanding_activation: false
+
+  # Seed and pool sizing
+  seed_top_n: 60
+  final_top_k: 10
+
+  # Expansion control
+  max_expansion_hops: 2
+  neighbors_per_active_memory: 8
+  max_active_memories: 200
+
+  # Thresholds
+  expansion_threshold: 0.35
+  min_edge_weight: 0.30
+  min_expansion_score: 0.12
+  inherited_activation_gamma: 0.5
+
+  # Final score blending weights
+  final_score:
+    activation_weight: 0.35
+    similarity_weight: 0.45
+    support_weight: 0.15
+    tau_weight: 0.05
+
+  # Cluster density penalty (0.0 = off, 0.30 = dampen dense clusters by up to 30%)
+  density_penalty: 0.30
+
+  # Minimum query relevance (cosine similarity) for an expanded neighbor to be included
+  expansion_relevance_floor: 0.25
+
+  # Debug
+  debug_activation_trace: true

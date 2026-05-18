@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+requests
+pyyaml
+numpy
+networkx
+pydantic
+mcp
+rich
