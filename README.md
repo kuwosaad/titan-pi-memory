@@ -175,7 +175,8 @@ npx tsc --noEmit tools/pi_extension/index.ts
 ## 🔗 Links
 
 - **npm:** [npmjs.com/package/titan-pi-memory](https://www.npmjs.com/package/titan-pi-memory)
-- **Repository:** [github.com/kuwosaad/titan-karu](https://github.com/kuwosaad/titan-karu)
+- **Repository:** [github.com/kuwosaad/titan-pi-memory](https://github.com/kuwosaad/titan-pi-memory)
+- **Full dev environment:** [github.com/kuwosaad/titan-karu](https://github.com/kuwosaad/titan-karu) (experiments, tests, docs, agent guides)
 - **Pi packages:** [pi.dev/packages](https://pi.dev/packages)
 
 ---
@@ -184,12 +185,10 @@ npx tsc --noEmit tools/pi_extension/index.ts
 
 ```
 app/             → Memory engine (save pipeline, retrieval, graph, storage, API)
-tools/           → Pi extension (pi_extension/), CLI, benchmarks
-entrypoints/     → HTTP server and MCP server
+tools/           → Pi extension
+entrypoints/     → HTTP server
 config/          → Model and runtime configuration
-assets/          → Brand, logos, design files
-docs/            → Contributor docs, plans, benchmarks
-experiments/     → Research code (not product runtime)
+assets/          → Package card image
 ```
 
 ---
@@ -250,22 +249,12 @@ curl "http://127.0.0.1:8000/api/retrieve?query=what+database+does+the+project+us
 
 ### CLI Commands
 
-If installed via pip, use `titan`. Otherwise: `python3 tools/cli/titan.py`
-
-| Command | What it does |
-|---------|-------------|
-| `titan doctor --agent <name>` | Verify memory readiness |
-| `titan init --agent <name>` | Prepare runtime home for an agent |
-| `titan mcp --agent <name>` | Start MCP server for that agent |
-| `titan config show` | Show current model config |
-| `titan config set-model` | Change extraction/embedding models |
-| `titan key set <KEY_NAME>` | Set an API key |
-| `titan graph --agent <name>` | Build and open the knowledge graph |
+The `titan` CLI is available in the full dev environment at [github.com/kuwosaad/titan-karu](https://github.com/kuwosaad/titan-karu). In Pi, all Titan features are available as slash commands.
 
 ### Project Structure
 
 ```
-titan-karu/
+titan-pi-memory/
 ├── app/
 │   ├── save_pipeline/      # Save flow: ingest → extract → embed → store
 │   │   └── extraction/     # LLM-based memory extraction
@@ -275,19 +264,15 @@ titan-karu/
 │   ├── api/                # FastAPI HTTP endpoints
 │   └── storage/            # SQLite-backed memory store
 ├── config/                 # YAML configuration
-├── entrypoints/            # HTTP server, MCP server
+├── entrypoints/            # HTTP server
 ├── tools/
-│   ├── cli/titan.py        # CLI tool
-│   ├── pi_extension/       # Pi extension (TypeScript + Python)
-│   └── benchmarks/         # Benchmark harnesses
-└── docs/                   # Contributor docs
+│   └── pi_extension/       # Pi extension (TypeScript + Python)
+└── assets/                 # Package card image
 ```
 
 ### Running Tests
 
-```bash
-pytest
-```
+Tests live in the full dev environment at [github.com/kuwosaad/titan-karu](https://github.com/kuwosaad/titan-karu).
 
 ### Security
 
