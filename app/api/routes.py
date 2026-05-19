@@ -136,6 +136,87 @@ def retrieve(
     )
 
 
+@router.get("/api/storage/stats")
+def storage_stats() -> dict:
+    from pathlib import Path
+    from app.storage.sessions import BASE_DIR
+    import os, statistics
+
+    stats: dict = {}
+    base = BASE_DIR
+
+    # DB file
+    db_path = base / "out" / "memories" / "memory_store.db"
+    if db_path.exists():
+        stats["db_file_size_bytes"] = db_path.stat().st_size
+    else:
+        stats["db_file_size_bytes"] = 0
+
+    # Spool directory
+    spool_dir = base / "traces"
+    spool_size = 0
+    spool_files = 0
+    if spool_dir.exists():
+        for f in spool_dir.iterdir():
+            if f.is_file():
+                spool_size += f.stat().st_size
+                spool_files += 1
+    stats["spool_size_bytes"] = spool_size
+    stats["spool_file_count"] = spool_files
+
+    # Memory & scene text stats from SQLite
+    import sqlite3
+    conn = None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+
+        # Memory text lengths
+        mem_rows = conn.execute(
+            "SELECT COUNT(*) as cnt, SUM(LENGTH(text)) as total_bytes, "
+            "AVG(LENGTH(text)) as avg_bytes FROM memories"
+        ).fetchone()
+        if mem_rows and mem_rows["cnt"] > 0:
+            stats["memory_count"] = mem_rows["cnt"]
+            stats["memory_text_bytes"] = mem_rows["total_bytes"]
+            stats["memory_avg_text_bytes"] = round(mem_rows["avg_bytes"], 1)
+
+            # Median text length
+            lengths = [
+                row[0] for row in conn.execute(
+                    "SELECT LENGTH(text) FROM memories ORDER BY LENGTH(text)"
+                ).fetchall()
+            ]
+            if lengths:
+                stats["memory_median_text_bytes"] = statistics.median(lengths)
+
+        # Scene counts and size
+        scene_rows = conn.execute(
+            "SELECT COUNT(*) as cnt, "
+            "SUM(LENGTH(extraction_user_text) + LENGTH(extraction_assistant_text)) as text_bytes, "
+            "SUM(LENGTH(raw_events_json) + LENGTH(messages_json)) as json_bytes "
+            "FROM scenes"
+        ).fetchone()
+        if scene_rows and scene_rows["cnt"] > 0:
+            stats["scene_count"] = scene_rows["cnt"]
+            stats["scene_text_bytes"] = scene_rows["text_bytes"]
+            stats["scene_json_bytes"] = scene_rows["json_bytes"]
+            stats["scene_total_bytes"] = (scene_rows["text_bytes"] or 0) + (scene_rows["json_bytes"] or 0)
+
+    except Exception:
+        pass
+    finally:
+        if conn:
+            conn.close()
+
+    stats["db_path"] = str(db_path)
+    total = (stats.get("db_file_size_bytes", 0) +
+             stats.get("spool_size_bytes", 0))
+    stats["total_footprint_bytes"] = total
+
+    return stats
+
+
 @router.get("/api/debug/pipeline")
 def debug_pipeline(session_id: Optional[str] = None) -> dict:
     return get_pipeline_debug_status(session_id=session_id)

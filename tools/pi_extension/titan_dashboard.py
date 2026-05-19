@@ -60,6 +60,10 @@ def fetch_pipeline_debug(session_id: Optional[str] = None) -> Dict[str, Any]:
     return _get("/api/debug/pipeline", session_id=session_id)
 
 
+def fetch_storage_stats() -> Dict[str, Any]:
+    return _get("/api/storage/stats")
+
+
 # ---------------------------------------------------------------------------
 # Dashboard renderer
 # ---------------------------------------------------------------------------
@@ -140,6 +144,7 @@ def build_dashboard(
     clusters = fetch_clusters(session_id=session_id, detail_limit=6)
     memories = fetch_memories(session_id=session_id, limit=12)
     pipeline = fetch_pipeline_debug(session_id=session_id)
+    storage = fetch_storage_stats()
 
     # Determine status
     server_ok = "status" in health and health.get("status") == "ok"
@@ -219,6 +224,35 @@ def build_dashboard(
         stats_table.add_row("Retry queue", f"{retry_queue_size}")
 
     stats_panel = panel("📊 Stats", stats_table, border_style="bright_blue")
+
+    # --- Storage stats ---
+    storage_table = Table(show_header=False, box=None, padding=(0, 3), expand=False)
+    storage_table.add_column(style=DIM, justify="right")
+    storage_table.add_column(style="bold white")
+
+    def _fmt_bytes(b: Any) -> str:
+        b = _safe_int(b)
+        if b >= 1048576:
+            return f"{b / 1048576:.2f} MB"
+        if b >= 1024:
+            return f"{b / 1024:.1f} KB"
+        return f"{b} B"
+
+    mem_count = storage.get("memory_count", 0)
+    if mem_count:
+        storage_table.add_row("Memory text", _fmt_bytes(storage.get("memory_text_bytes")))
+        storage_table.add_row("Median memory", _fmt_bytes(storage.get("memory_median_text_bytes")))
+        storage_table.add_row("Scenes text", _fmt_bytes(storage.get("scene_total_bytes")))
+        storage_table.add_row("DB file", _fmt_bytes(storage.get("db_file_size_bytes")))
+        spool_sz = storage.get("spool_size_bytes", 0)
+        if spool_sz:
+            storage_table.add_row("Spool", _fmt_bytes(spool_sz))
+        storage_table.add_row("", "───", style="bold white")
+        storage_table.add_row("Total", _fmt_bytes(storage.get("total_footprint_bytes")), style="bold")
+    else:
+        storage_table.add_row("Stats", "unavailable", style=DIM)
+
+    storage_panel = panel("💾 Storage", storage_table, border_style="bright_green")
 
     # --- Cluster topics ---
     cluster_list = clusters.get("clusters", [])
@@ -308,7 +342,7 @@ def build_dashboard(
     console.print()
 
     # Stats + Pipeline side by side
-    console.print(Columns([stats_panel, panel("⚙️ Pipeline", pipeline_text, border_style="yellow")]))
+    console.print(Columns([stats_panel, panel("⚙️ Pipeline", pipeline_text, border_style="yellow"), storage_panel]))
     console.print()
 
     # Clusters full width
@@ -338,6 +372,7 @@ def _build_plain_dashboard(session_id: Optional[str] = None) -> str:
     clusters = fetch_clusters(session_id=session_id, detail_limit=6)
     memories = fetch_memories(session_id=session_id, limit=10)
     pipeline = fetch_pipeline_debug(session_id=session_id)
+    storage = fetch_storage_stats()
 
     server_ok = "status" in health and health.get("status") == "ok"
     lines: List[str] = []
@@ -364,6 +399,22 @@ def _build_plain_dashboard(session_id: Optional[str] = None) -> str:
         lines.append(f"  Spool: {_safe_int(spool_ev)} events  |  Buffer: {_safe_int(buf)}")
     elif retry:
         lines.append(f"  Retry queue: {retry}")
+
+    # Storage
+    if storage.get("memory_count", 0):
+        def _fmt(b):
+            b = _safe_int(b)
+            if b >= 1048576: return f"{b/1048576:.2f} MB"
+            if b >= 1024: return f"{b/1024:.1f} KB"
+            return f"{b} B"
+        lines.append(f"  Memory text: {_fmt(storage.get('memory_text_bytes'))}")
+        lines.append(f"  Median memory: {_fmt(storage.get('memory_median_text_bytes'))}")
+        lines.append(f"  Scenes: {_fmt(storage.get('scene_total_bytes'))}")
+        lines.append(f"  DB file: {_fmt(storage.get('db_file_size_bytes'))}")
+        sp = storage.get("spool_size_bytes", 0)
+        if sp:
+            lines.append(f"  Spool: {_fmt(sp)}")
+        lines.append(f"  Total: {_fmt(storage.get('total_footprint_bytes'))}")
     lines.append("")
 
     # Clusters
