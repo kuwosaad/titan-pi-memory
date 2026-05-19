@@ -1090,6 +1090,8 @@ def retrieve_memory_brief(
     limit: int = 8,
     max_items: Optional[int] = None,
     max_chars: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> Dict[str, Any]:
     from app.retrieval_pipeline.retriever import retrieve_memories
     from app.retrieval_pipeline.config import load_settings
@@ -1117,6 +1119,8 @@ def retrieve_memory_brief(
         top_k=selected_limit,
         mode=selected_mode,
         intent=selected_intent,
+        date_from=date_from,
+        date_to=date_to,
     )
     brief = build_memory_notes(
         hits, max_items=max_items, max_chars=max_chars,

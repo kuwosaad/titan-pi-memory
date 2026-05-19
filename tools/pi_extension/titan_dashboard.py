@@ -47,7 +47,7 @@ def fetch_health() -> Dict[str, Any]:
     return _get("/health")
 
 
-def fetch_clusters(session_id: Optional[str] = None, limit: int = 500,
+def fetch_clusters(session_id: Optional[str] = None, limit: int = 1000,
                    detail_limit: int = 6) -> Dict[str, Any]:
     return _get("/api/clusters", session_id=session_id, limit=limit, detail_limit=detail_limit)
 
@@ -188,25 +188,35 @@ def build_dashboard(
     stats_table.add_column(style=DIM, justify="right")
     stats_table.add_column(style="bold white")
 
-    # Get accurate counts — use clusters API for total memory/connection/cluster counts
-    # (the /api/memories "count" is response size, not total)
-    total_mem_count = _safe_int(clusters.get("raw_memory_count", clusters.get("memory_count", 0)))
+    # Get accurate counts. /api/memories "count" is page size; "total" is the full DB count.
+    # Clusters may analyze a capped sample, so keep total vs analyzed separate.
+    total_mem_count = _safe_int(
+        memories.get("total", clusters.get("total_memory_count", clusters.get("raw_memory_count", 0)))
+    )
+    analyzed_mem_count = _safe_int(clusters.get("raw_memory_count", clusters.get("memory_count", 0)))
     cluster_count = _safe_int(clusters.get("cluster_count", 0))
     # Only count similarity edges (graph UI includes source edges which inflates the count)
     connection_count = _safe_int(clusters.get("connection_count", 0))
     skipped_no_emb = _safe_int(clusters.get("skipped_missing_embeddings", 0))
 
-    # Pipeline stats
-    spool_events = _safe_int(pipeline.get("spool_events", 0))
-    buffer_size = _safe_int(pipeline.get("dedup_buffer_size", 0))
+    # Pipeline stats are only available for session-scoped debug payloads.
+    spool_events = pipeline.get("spool_events")
+    buffer_size = pipeline.get("dedup_buffer_size")
+    retry_queue_size = _safe_int(pipeline.get("retry_queue_size", 0))
 
     stats_table.add_row("Memories", f"{total_mem_count}")
+    if analyzed_mem_count and analyzed_mem_count != total_mem_count:
+        stats_table.add_row("Analyzed", f"{analyzed_mem_count} recent")
     stats_table.add_row("Clusters", f"{cluster_count}")
     stats_table.add_row("Edges", f"{connection_count} similarity")
     if skipped_no_emb:
         stats_table.add_row("No embedding", f"{skipped_no_emb} skipped")
-    stats_table.add_row("Spool", f"{spool_events} events")
-    stats_table.add_row("Buffer", f"{buffer_size}")
+    if spool_events is not None:
+        stats_table.add_row("Spool", f"{_safe_int(spool_events)} events")
+    if buffer_size is not None:
+        stats_table.add_row("Buffer", f"{_safe_int(buffer_size)}")
+    if retry_queue_size:
+        stats_table.add_row("Retry queue", f"{retry_queue_size}")
 
     stats_panel = panel("📊 Stats", stats_table, border_style="bright_blue")
 
@@ -276,12 +286,16 @@ def build_dashboard(
     # --- Pipeline status ---
     pipeline_ok = pipeline.get("status") == "ok" or pipeline.get("auto_ingest_running", False)
     pipeline_text = Text()
-    if pipeline_ok:
+    if not session_id and "spool_latest_ts" not in pipeline:
+        pipeline_text.append("●  ", style=SUCCESS)
+        pipeline_text.append("Global memory view", style=SUCCESS)
+        pipeline_text.append("\nUse /titan-dashboard <session_id> for ingest lag.", style=DIM)
+    elif pipeline_ok:
         pipeline_text.append("●  ", style=SUCCESS)
         pipeline_text.append("Pipeline active", style=SUCCESS)
     else:
         pipeline_text.append("●  ", style=WARNING)
-        pipeline_text.append("Pipeline idle", style=WARNING)
+        pipeline_text.append("Pipeline status unknown", style=WARNING)
 
     last_ingest = pipeline.get("last_ingest_ts")
     if last_ingest:
@@ -335,14 +349,21 @@ def _build_plain_dashboard(session_id: Optional[str] = None) -> str:
     lines.append("")
 
     # Status
-    total_mem = _safe_int(clusters.get("raw_memory_count", clusters.get("memory_count", 0)))
+    total_mem = _safe_int(memories.get("total", clusters.get("total_memory_count", clusters.get("raw_memory_count", 0))))
+    analyzed_mem = _safe_int(clusters.get("raw_memory_count", clusters.get("memory_count", 0)))
     lines.append(f"  Server: {'● ONLINE' if server_ok else '○ OFFLINE'}  ({_api_base()})")
     lines.append(f"  Memories: {total_mem}")
+    if analyzed_mem and analyzed_mem != total_mem:
+        lines.append(f"  Analyzed: {analyzed_mem} recent memories")
     lines.append(f"  Clusters: {_safe_int(clusters.get('cluster_count', 0))}")
     lines.append(f"  Edges: {_safe_int(clusters.get('connection_count', 0))} similarity")
-    spool_ev = _safe_int(pipeline.get("spool_events", 0))
-    buf = _safe_int(pipeline.get("dedup_buffer_size", 0))
-    lines.append(f"  Spool: {spool_ev} events  |  Buffer: {buf}")
+    spool_ev = pipeline.get("spool_events")
+    buf = pipeline.get("dedup_buffer_size")
+    retry = _safe_int(pipeline.get("retry_queue_size", 0))
+    if spool_ev is not None or buf is not None:
+        lines.append(f"  Spool: {_safe_int(spool_ev)} events  |  Buffer: {_safe_int(buf)}")
+    elif retry:
+        lines.append(f"  Retry queue: {retry}")
     lines.append("")
 
     # Clusters

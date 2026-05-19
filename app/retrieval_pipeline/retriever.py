@@ -106,6 +106,16 @@ def _memory_matches_candidate_filters(memory: Dict[str, Any], filters: Optional[
         cutoff = datetime.now(timezone.utc) - timedelta(days=filters.recency_days)
         if (parse_timestamp(memory.get("ts")) or cutoff) < cutoff:
             return False
+    if filters.date_from:
+        date_from_dt = parse_timestamp(filters.date_from)
+        mem_ts = parse_timestamp(memory.get("ts"))
+        if date_from_dt and (mem_ts is None or mem_ts < date_from_dt):
+            return False
+    if filters.date_to:
+        date_to_dt = parse_timestamp(filters.date_to)
+        mem_ts = parse_timestamp(memory.get("ts"))
+        if date_to_dt and (mem_ts is None or mem_ts > date_to_dt):
+            return False
     if filters.session_id and filters.session_bias and memory.get("session_id") != filters.session_id:
         return False
     if filters.memory_types:
@@ -1433,6 +1443,8 @@ def retrieve_memories(
     min_reliability: Optional[float] = None,
     mode: str = "both",
     intent: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     from .config import load_settings
     settings = load_settings()
@@ -1455,6 +1467,8 @@ def retrieve_memories(
         memory_types=memory_types,
         mode=mode,
         min_reliability=min_reliability,
+        date_from=date_from,
+        date_to=date_to,
     )
     filtered = query_memory_candidates(filters)
     filtered = apply_hidden_metadata_filter(filtered)

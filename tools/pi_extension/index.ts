@@ -418,6 +418,7 @@ interface TitanCluster {
 interface TitanClustersResponse {
   scope: string;
   session_id?: string;
+  total_memory_count?: number;
   memory_count: number;
   raw_memory_count: number;
   skipped_missing_embeddings: number;
@@ -490,9 +491,9 @@ async function apiGetScene(sceneId: string): Promise<Record<string, unknown>> {
   return safeJson(res);
 }
 
-async function apiGetRecentMemories(limit = 8): Promise<{ memories: TitanMemory[]; count: number }> {
+async function apiGetRecentMemories(limit = 8): Promise<{ memories: TitanMemory[]; count: number; total?: number }> {
   const res = await fetch(`${TITAN_API_BASE}/api/memories?limit=${limit}`);
-  return (await safeJson(res)) as unknown as { memories: TitanMemory[]; count: number };
+  return (await safeJson(res)) as unknown as { memories: TitanMemory[]; count: number; total?: number };
 }
 
 async function apiGetClusters(options: {
@@ -1151,7 +1152,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       if (healthy) {
         try {
           const data = await apiGetRecentMemories(1);
-          stats = { memory_count: data.count };
+          stats = { memory_count: data.total ?? data.count };
         } catch {
           stats = { memory_count: "unknown" };
         }

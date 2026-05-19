@@ -121,6 +121,8 @@ def retrieve(
     limit: int = 8,
     max_items: Optional[int] = None,
     max_chars: Optional[int] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
 ) -> dict:
     return retrieve_memory_brief(
         query=query,
@@ -129,6 +131,8 @@ def retrieve(
         limit=limit,
         max_items=max_items,
         max_chars=max_chars,
+        date_from=from_date,
+        date_to=to_date,
     )
 
 

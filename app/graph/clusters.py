@@ -10,6 +10,7 @@ import numpy as np
 from networkx.algorithms.community import greedy_modularity_communities
 
 from app.graph.builder import DEFAULT_GRAPH_MEMORY_LIMIT, load_memories, load_visual_config
+from app.storage.memories import get_memory_count
 
 
 MIN_SIMILARITY = 0.35
@@ -141,6 +142,7 @@ def inspect_memory_clusters(
     safe_limit = max(1, min(int(limit or DEFAULT_GRAPH_MEMORY_LIMIT), 1000))
     detail_limit = max(1, min(int(detail_limit or DEFAULT_DETAIL_LIMIT), 50))
     raw_memories = [_memory_dict(mem) for mem in load_memories(session_id=session_id, limit=safe_limit)]
+    total_memory_count = get_memory_count(session_id=session_id)
 
     key = _cache_key(session_id, safe_limit, raw_memories)
     if key in _CACHE:
@@ -222,6 +224,7 @@ def inspect_memory_clusters(
         payload = {
             "scope": "session" if session_id else "global",
             "session_id": session_id,
+            "total_memory_count": total_memory_count,
             "memory_count": len(indexed_memories),
             "raw_memory_count": len(raw_memories),
             "skipped_missing_embeddings": skipped_missing_embeddings,

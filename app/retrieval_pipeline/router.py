@@ -34,6 +34,16 @@ OPT_OUT_TRIGGERS = [
 ]
 
 INTENT_TRIGGERS = {
+    "temporal": [
+        "when did",
+        "when was",
+        "what date",
+        "which day",
+        "first time",
+        "on what day",
+        "at what time",
+        "which date",
+    ],
     "timeline": [
         "what happened",
         "timeline",
@@ -130,6 +140,14 @@ def route_intent(lowered_query: str) -> str:
 
     if not hits:
         return "balanced"
+
+    if hits.get("temporal", 0) > 0 and (
+        hits["temporal"] >= hits.get("timeline", 0)
+        and hits["temporal"] >= hits.get("pattern", 0)
+        and hits["temporal"] >= hits.get("decision", 0)
+        and hits["temporal"] >= hits.get("explanatory", 0)
+    ):
+        return "temporal"
 
     if hits.get("timeline", 0) > hits.get("pattern", 0) and hits.get("timeline", 0) > hits.get("decision", 0):
         return "timeline"

@@ -195,6 +195,24 @@ class JsonMemoryRepository:
             cutoff = datetime.now(timezone.utc) - timedelta(days=filters.recency_days)
             memories = [mem for mem in memories if (_parse_timestamp(mem.get("ts")) or cutoff) >= cutoff]
 
+        if filters.date_from:
+            date_from_dt = _parse_timestamp(filters.date_from)
+            if date_from_dt:
+                memories = [
+                    mem for mem in memories
+                    if (mem_ts := _parse_timestamp(mem.get("ts"))) is not None
+                    and mem_ts >= date_from_dt
+                ]
+
+        if filters.date_to:
+            date_to_dt = _parse_timestamp(filters.date_to)
+            if date_to_dt:
+                memories = [
+                    mem for mem in memories
+                    if (mem_ts := _parse_timestamp(mem.get("ts"))) is not None
+                    and mem_ts <= date_to_dt
+                ]
+
         if filters.memory_types:
             allowed = {item.lower() for item in filters.memory_types}
             memories = [mem for mem in memories if str(mem.get("type", "")).lower() in allowed]
@@ -562,6 +580,14 @@ class SqliteMemoryRepository:
             cutoff = datetime.now(timezone.utc) - timedelta(days=filters.recency_days)
             clauses.append("ts >= ?")
             params.append(cutoff.isoformat())
+
+        if filters.date_from:
+            clauses.append("ts >= ?")
+            params.append(filters.date_from)
+
+        if filters.date_to:
+            clauses.append("ts <= ?")
+            params.append(filters.date_to)
 
         if filters.memory_types:
             placeholders = ",".join("?" for _ in filters.memory_types)

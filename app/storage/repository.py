@@ -12,6 +12,8 @@ class CandidateFilters:
     memory_types: Optional[List[str]]
     mode: str
     min_reliability: float
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
 
 
 class MemoryRepository(Protocol):
