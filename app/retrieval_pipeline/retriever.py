@@ -1474,8 +1474,18 @@ def retrieve_memories(
     filtered = apply_hidden_metadata_filter(filtered)
     filtered = _dedupe_prefer_latest(filtered)
 
-    if not filtered or not query.strip():
+    if not filtered:
         return []
+
+    if not query.strip():
+        # Date-only query: return filtered candidates sorted by recency, no semantic scoring.
+        from datetime import timezone as tz
+        filtered.sort(
+            key=lambda m: parse_timestamp(m.get("ts")) or datetime.min.replace(tzinfo=tz.utc),
+            reverse=True,
+        )
+        return [{"memory": m, "score": 0.0, "base_score": 0.0, "final_score": 0.0,
+                 "step2_bonus": 0.0, "support_score": 0.0} for m in filtered[:top_k]]
 
     from .router import route_intent
     resolved_intent = intent if intent else route_intent(query.lower().strip())

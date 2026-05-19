@@ -480,8 +480,15 @@ async function safeJson(res: Response): Promise<Record<string, unknown>> {
 async function apiRetrieve(
   query: string,
   limit = 8,
+  date_from?: string,
+  date_to?: string,
 ): Promise<TitanRetrieveResponse> {
-  const url = `${TITAN_API_BASE}/api/retrieve?query=${encodeURIComponent(query)}&limit=${limit}`;
+  const params = new URLSearchParams();
+  params.set("query", query);
+  params.set("limit", String(limit));
+  if (date_from) params.set("from_date", date_from);
+  if (date_to) params.set("to_date", date_to);
+  const url = `${TITAN_API_BASE}/api/retrieve?${params.toString()}`;
   const res = await fetch(url);
   return (await safeJson(res)) as unknown as TitanRetrieveResponse;
 }
@@ -880,12 +887,22 @@ export default function titanPiExtension(pi: ExtensionAPI) {
     ],
     parameters: Type.Object({
       query: Type.String({
-        description: "What to search for (e.g. 'auth middleware bug', 'dark mode preference')",
+        description: "What to search for. Leave empty to retrieve all memories within a date bracket (use with date_from/date_to).",
       }),
       limit: Type.Optional(
         Type.Number({
           description: "Max results to return (default: 8)",
           default: 8,
+        }),
+      ),
+      date_from: Type.Optional(
+        Type.String({
+          description: "Start of date range (ISO 8601, e.g. '2026-05-15' or '2026-05-15T00:00:00'). Filters memories at or after this timestamp.",
+        }),
+      ),
+      date_to: Type.Optional(
+        Type.String({
+          description: "End of date range (ISO 8601, e.g. '2026-05-16' or '2026-05-16T00:00:00'). Filters memories at or before this timestamp.",
         }),
       ),
     }),
@@ -900,7 +917,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
           ],
         };
       }
-      const data = await apiRetrieve(params.query, params.limit ?? 8);
+      const data = await apiRetrieve(params.query, params.limit ?? 8, params.date_from, params.date_to);
       const memories = data.memories ?? [];
       if (memories.length === 0) {
         return {
@@ -1467,6 +1484,19 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         ctx.ui.notify("Titan server started on port 8002", "success");
       } else {
         ctx.ui.notify("Failed to start Titan server.", "error");
+      }
+    },
+  });
+
+  pi.registerCommand("titan-restart", {
+    description: "Restart the Titan memory server (picks up new code changes)",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify("Restarting Titan server...", "info");
+      const ok = await restartOwnedServer();
+      if (ok) {
+        ctx.ui.notify("Titan server restarted on port 8002 with latest code.", "success");
+      } else {
+        ctx.ui.notify("Failed to restart Titan server. Try /titan-start.", "error");
       }
     },
   });

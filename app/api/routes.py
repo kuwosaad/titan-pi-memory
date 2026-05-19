@@ -115,7 +115,7 @@ def ingest_spool(session_id: str, spool_dir: str = ".opencode/titan/traces") -> 
 
 @router.get("/api/retrieve")
 def retrieve(
-    query: str,
+    query: Optional[str] = None,
     session_id: Optional[str] = None,
     mode: Optional[str] = None,
     limit: int = 8,
@@ -125,7 +125,7 @@ def retrieve(
     to_date: Optional[str] = None,
 ) -> dict:
     return retrieve_memory_brief(
-        query=query,
+        query=query or "",
         session_id=session_id,
         mode=mode,
         limit=limit,

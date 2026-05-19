@@ -1084,7 +1084,7 @@ def handle_trace_packet(req: TracePacketRequest) -> Dict[str, Any]:
 
 
 def retrieve_memory_brief(
-    query: str,
+    query: Optional[str] = None,
     session_id: Optional[str] = None,
     mode: Optional[str] = None,
     limit: int = 8,
@@ -1097,10 +1097,11 @@ def retrieve_memory_brief(
     from app.retrieval_pipeline.config import load_settings
 
     settings = load_settings()
-    route = route_query(query)
+    safe_query = query or ""
+    route = route_query(safe_query)
     if not bool(route.get("use_memory", True)):
         return {
-            "query": query,
+            "query": safe_query,
             "mode": "none",
             "count": 0,
             "memories": [],
@@ -1114,7 +1115,7 @@ def retrieve_memory_brief(
     selected_limit = limit if limit is not None else int(route.get("top_k") or 8)
     selected_intent = str(route.get("intent") or "balanced")
     hits = retrieve_memories(
-        query,
+        safe_query,
         session_id=session_id,
         top_k=selected_limit,
         mode=selected_mode,
@@ -1139,7 +1140,7 @@ def retrieve_memory_brief(
     if _is_dedup_active(settings):
         _merge_buffer_memories(memories, session_id)
     response: Dict[str, Any] = {
-        "query": query,
+        "query": safe_query,
         "mode": selected_mode,
         "count": len(memories),
         "memories": memories,
