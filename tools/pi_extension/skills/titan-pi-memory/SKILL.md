@@ -52,6 +52,7 @@ titan_doctor                  — Diagnostics: "is Titan working?"
 /titan-graph              — Open the local Titan knowledge graph in a browser
 /titan-dashboard          — Open the rich terminal memory dashboard
 /titan-start              — Start the Titan server
+/titan-restart            — Restart the server (picks up new code after updates)
 ```
 
 ## Usage patterns
@@ -82,19 +83,24 @@ After completing significant work:
 
 ### Pattern 4: Temporal queries — "What happened on the 17th of May?"
 
-Titan's `/api/retrieve` endpoint now supports `from_date` and `to_date` query parameters (ISO 8601 format). When the user asks about a specific date or date range:
+The `titan_query_memories` tool now supports `date_from` and `date_to` parameters (ISO 8601 format). When the user asks about a specific date or date range:
 
 ```
 User: "What happened on the 17th of May?"
-→ I know Titan can bracket by date.
-→ I retrieve memories with from_date="2026-05-17" and to_date="2026-05-18"
-→ If the user adds a topic ("What happened with the ODE solver on May 17?"),
-  semantic search is automatically scoped inside that date bracket.
+→ titan_query_memories("",
+    date_from="2026-05-17", date_to="2026-05-18")
+→ Empty query + date bracket = all memories from that day, no semantic filter
+
+User: "What happened with the ODE solver on May 17?"
+→ titan_query_memories("ODE solver",
+    date_from="2026-05-17", date_to="2026-05-18")
+→ Semantic search automatically scoped inside the date bracket
 ```
 
 **How it works under the hood:**
-- `from_date`/`to_date` are passed through `CandidateFilters` → SQL `WHERE ts >= ? AND ts <= ?`
-- The date filter runs **before** semantic scoring — it narrows the candidate pool first, then searches within that scope
+- `date_from`/`date_to` are passed through `CandidateFilters` → SQL `WHERE ts >= ? AND ts <= ?`
+- The date filter runs **before** semantic scoring — narrows the candidate pool first, then searches within that scope
+- Empty query + date range skips embedding/scoring entirely and returns raw memories sorted by recency
 - A `"temporal"` intent is automatically detected for queries containing "when did", "what date", "first time", "which day"
 
 ### Pattern 5: Vague temporal navigation — "When did we first talk about X?"
@@ -129,6 +135,17 @@ Phase 2 — Navigate temporally from anchor:
 2. If a returned memory has a `scene_id`, open the scene for richer context
 3. Memories are semantically ranked — the first results are most relevant
 4. If you find contradictory memories, open both scenes to resolve
+
+## Temporal query cheat sheet
+
+| Question type | How to query |
+|---|---|
+| "What happened on May 17?" | `titan_query_memories("", date_from="2026-05-17", date_to="2026-05-18")` — empty query = all memories, no filter |
+| "What did we do about X in March?" | `titan_query_memories("X", date_from="2026-03-01", date_to="2026-03-31")` — semantic search inside bracket |
+| "When did we first talk about X?" | Phase 1: `titan_query_memories("X")` → earliest ts is anchor. Phase 2: `titan_query_memories("X", date_from=anchor-1d, date_to=anchor+1d)` |
+| "Server not picking up new code" | Run `/titan-restart` to reload with latest changes |
+
+**Key principle:** Bracket by time first, search semantically within that scope. The date filter runs at the SQL level before any embedding computation.
 
 ## Related skills
 
