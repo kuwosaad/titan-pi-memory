@@ -2,7 +2,7 @@
   <img src="assets/titan-pi-banner.png" alt="titan-pi-memory banner" width="100%">
 </p>
 
-# 🪞 titan-pi-memory
+# titan-pi-memory
 
 > **Persistent evolutionary memory for the Pi coding agent.**
 > Titan remembers across sessions — decisions, bugs, architecture,
@@ -14,7 +14,7 @@ pi install npm:titan-pi-memory
 
 ---
 
-## 🚀 Install (60 seconds)
+## Install (60 seconds)
 
 ### What you need
 
@@ -55,7 +55,7 @@ Select **Gemini**, paste your key when prompted. Done.
 You should see:
 
 ```
-Server:     ✅ running
+Server:     running
 Workspace:  ~/.titan/agents/pi
 Memories:   {"memory_count": 0}
 ```
@@ -72,7 +72,7 @@ Come back tomorrow — Pi will know what you were working on.
 
 ---
 
-## ✨ Features
+## Features
 
 ### Agent memory (always on)
 
@@ -92,7 +92,7 @@ Titan finds the most relevant memories, even when you don't remember the exact w
 
 Every memory links back to the conversation it came from. When your agent finds a relevant memory, it can pull up the full discussion with a single tool call — so it understands the *why* behind the fact, not just the fact itself.
 
-### Work pattern discovery ⭐
+### Work pattern discovery
 
 As your memory graph grows, something interesting happens. You start seeing patterns in your own work — what you consistently care about, how your thinking evolves, what kinds of problems you keep running into.
 
@@ -110,7 +110,7 @@ The graph shows your memories as clusters of related topics. Look at the connect
 
 ---
 
-## 🛠 Tools (what Pi can do)
+## Tools (what Pi can do)
 
 Your Pi agent has these tools available automatically:
 
@@ -124,7 +124,7 @@ Your Pi agent has these tools available automatically:
 
 ---
 
-## 📋 Commands (what you can type)
+## Commands (what you can type)
 
 | Command | What it does |
 |---------|-------------|
@@ -141,7 +141,7 @@ Your Pi agent has these tools available automatically:
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### Switch extraction model
 
@@ -161,7 +161,7 @@ Edit `~/.titan/agents/pi/config/embedding_models.yaml` to switch.
 
 ---
 
-## 🔧 Development
+## Development
 
 ```bash
 # Edit the extension
@@ -176,7 +176,7 @@ npx tsc --noEmit tools/pi_extension/index.ts
 
 ---
 
-## 🔗 Links
+## Links
 
 - **npm:** [npmjs.com/package/titan-pi-memory](https://www.npmjs.com/package/titan-pi-memory)
 - **Repository:** [github.com/kuwosaad/titan-pi-memory](https://github.com/kuwosaad/titan-pi-memory)
@@ -185,7 +185,7 @@ npx tsc --noEmit tools/pi_extension/index.ts
 
 ---
 
-## 📁 Repository Layout
+## Repository Layout
 
 ```
 app/             → Memory engine (save pipeline, retrieval, graph, storage, API)
@@ -197,7 +197,7 @@ assets/          → Package card image
 
 ---
 
-## 🧠 For Developers
+## For Developers
 
 ### How It Works
 
@@ -229,7 +229,7 @@ Agent session
 └──────┬───────┘
        │
        ▼
-  🔍 Agent asks "what do you remember about X?"
+  Agent asks "what do you remember about X?"
      → Semantic search → Compact brief → Returned to agent
 ```
 
