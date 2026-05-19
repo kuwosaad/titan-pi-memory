@@ -283,3 +283,7 @@ Tests live in the full dev environment at [github.com/kuwosaad/titan-karu](https
 - All API keys stored in `.env` (gitignored)
 - Server runs on `127.0.0.1` (localhost only) by default
 - All data stays on your machine
+
+---
+
+<a href="https://www.producthunt.com/products/titan-memory?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-titan-memory" target="_blank" rel="noopener noreferrer"><img alt="Titan Memory - A Persistent evolutionary memory layer for AI agents | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1149745&amp;theme=light&amp;t=1779175404906"></a>
