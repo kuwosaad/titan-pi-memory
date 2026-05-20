@@ -47,7 +47,17 @@ This creates your Titan workspace and installs everything needed.
 Titan will walk you through picking a **provider**, selecting a **model**, and entering your **API key**.
 Choose from Gemini, OpenAI, OpenRouter, or DeepSeek. Done.
 
-### Step 4: Verify it's working
+### Step 4: Embedding model (optional)
+
+By default, Titan runs a local embedding model via Ollama for semantic search.
+
+```bash
+~/.titan/agents/pi/config/embedding_models.yaml
+```
+
+Edit that file to switch to **OpenAI embeddings** or keep the local default (no setup needed if Ollama is running).
+
+### Step 5: Verify it's working
 
 ```
 /titan-status
@@ -61,7 +71,7 @@ Workspace:  ~/.titan/agents/pi
 Memories:   {"memory_count": 0}
 ```
 
-### Step 5: Done
+### Step 6: Done
 
 Every conversation from now on gets remembered.
 
