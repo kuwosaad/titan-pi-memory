@@ -98,6 +98,11 @@ class OpenAIExtractionAdapter(ExtractionAdapter):
         return data["choices"][0]["message"]["content"]
 
 
+class DeepSeekExtractionAdapter(OpenAIExtractionAdapter):
+    def __init__(self, model: str, api_key: str, base_url: str = "https://api.deepseek.com/v1", temperature: float = 0.1) -> None:
+        super().__init__(model=model, api_key=api_key, base_url=base_url, temperature=temperature)
+
+
 class GeminiExtractionAdapter(ExtractionAdapter):
     def __init__(
         self,
@@ -239,6 +244,14 @@ def get_extraction_adapter(config_path: str = "config/extraction_models.yaml") -
             max_retries=int(gemini_cfg.get("max_retries", 3) or 3),
             retry_backoff_seconds=float(gemini_cfg.get("retry_backoff_seconds", 2.0) or 2.0),
         )
+    if current == "deepseek":
+        deepseek_cfg = config["deepseek"]
+        return DeepSeekExtractionAdapter(
+            model=deepseek_cfg["model"],
+            api_key=_resolve_api_key(deepseek_cfg, "deepseek"),
+            base_url=deepseek_cfg.get("base_url", "https://api.deepseek.com/v1"),
+            temperature=_read_temperature(deepseek_cfg),
+        )
     raise ValueError(f"Unsupported extraction backend: {current}")
 
 
@@ -276,6 +289,13 @@ def get_dedup_adapter(config_path: str = "config/extraction_models.yaml") -> Ext
             base_url=dedup_cfg.get("base_url", "http://localhost:11434"),
             temperature=_read_temperature(dedup_cfg),
         )
+    if backend == "deepseek":
+        return DeepSeekExtractionAdapter(
+            model=dedup_cfg.get("model", "deepseek-chat"),
+            api_key=_resolve_api_key(dedup_cfg, "dedup"),
+            base_url=dedup_cfg.get("base_url", "https://api.deepseek.com/v1"),
+            temperature=_read_temperature(dedup_cfg),
+        )
     return get_extraction_adapter(config_path=config_path)
 
 
@@ -290,6 +310,7 @@ __all__ = [
     "OllamaExtractionAdapter",
     "OpenRouterExtractionAdapter",
     "OpenAIExtractionAdapter",
+    "DeepSeekExtractionAdapter",
     "GeminiExtractionAdapter",
     "get_extraction_adapter",
     "get_extraction_adapter_with_config",

@@ -1226,20 +1226,131 @@ export default function titanPiExtension(pi: ExtensionAPI) {
     },
   });
 
+  // ── Provider model catalog ─────────────────────────────────────────
+  // Matches what's in config/extraction_models.yaml
+  const PROVIDERS: Array<{
+    id: string;
+    label: string;
+    keyEnv: string;
+    keyPlaceholder: string;
+    models: Array<{ id: string; label: string }>;
+  }> = [
+    {
+      id: "gemini",
+      label: "Gemini",
+      keyEnv: "GEMINI_API_KEY",
+      keyPlaceholder: "AIza...",
+      models: [
+        { id: "gemini-2.5-flash", label: "gemini-2.5-flash (recommended)" },
+        { id: "gemini-2.5-pro", label: "gemini-2.5-pro" },
+      ],
+    },
+    {
+      id: "openai",
+      label: "OpenAI",
+      keyEnv: "OPENAI_API_KEY",
+      keyPlaceholder: "sk-...",
+      models: [
+        { id: "gpt-4o-mini", label: "gpt-4o-mini (recommended)" },
+        { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
+        { id: "gpt-4.1", label: "gpt-4.1" },
+      ],
+    },
+    {
+      id: "openrouter",
+      label: "OpenRouter",
+      keyEnv: "OPENROUTER_API_KEY",
+      keyPlaceholder: "sk-or-...",
+      models: [
+        { id: "meta-llama/llama-3.1-8b-instruct:free", label: "Llama 3.1 8B (free)" },
+        { id: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet" },
+        { id: "openai/gpt-4o-mini", label: "GPT-4o-mini" },
+      ],
+    },
+    {
+      id: "deepseek",
+      label: "DeepSeek",
+      keyEnv: "DEEPSEEK_API_KEY",
+      keyPlaceholder: "sk-...",
+      models: [
+        { id: "deepseek-chat", label: "deepseek-chat (recommended — V3)" },
+        { id: "deepseek-reasoner", label: "deepseek-reasoner (R1 thinking)" },
+      ],
+    },
+  ];
+
+  function updateExtractionConfig(
+    providerId: string,
+    modelId: string,
+  ): string {
+    const configDir = resolve(TITAN_HOME, "config");
+    const configPath = resolve(configDir, "extraction_models.yaml");
+    if (!existsSync(configPath)) return configPath;
+
+    let yaml = readFileSync(configPath, "utf-8");
+
+    // 1. Set current provider
+    yaml = yaml.replace(/^current:\s*.*$/m, `current: ${providerId}`);
+
+    // 2. For each provider key, update enabled and model inside its block
+    for (const p of PROVIDERS) {
+      const key = p.id;
+      // Match block: "key:\n" then indented lines until next top-level key or EOF
+      const blockRegex = new RegExp(
+        `^${key}:\\s*\\n((?:\\s+.*\\n?)*)`,
+        "m",
+      );
+      const match = yaml.match(blockRegex);
+      if (!match) continue;
+
+      const body = match[1];
+      const isChosen = p.id === providerId;
+
+      // Update enabled line
+      let newBody = body.replace(
+        /^(\s+)enabled:\s*\S+\s*$/m,
+        `$1enabled: ${isChosen}`,
+      );
+
+      // Update model line (only for chosen provider)
+      if (isChosen) {
+        newBody = newBody.replace(
+          /^(\s+)model:\s*.*$/m,
+          `$1model: ${modelId}`,
+        );
+      }
+
+      yaml = yaml.replace(blockRegex, `${key}:\n${newBody}`);
+    }
+
+    writeFileSync(configPath, yaml, "utf-8");
+    return configPath;
+  }
+
   pi.registerCommand("titan-key", {
-    description: "Add or update the Titan extraction API key",
+    description: "Set Titan extraction provider, model, and API key",
     handler: async (_args, ctx) => {
       ensurePiWorkspace();
 
-      const provider = await ctx.ui.select("Choose Titan extraction provider", [
-        "Gemini (GEMINI_API_KEY)",
+      // 1. Pick provider
+      const provider = await ctx.ui.select("Choose your Titan extraction provider", [
+        ...PROVIDERS.map((p) => p.label),
       ]);
       if (!provider) return;
+      const prov = PROVIDERS.find((p) => p.label === provider)!;
 
-      const keyName = "GEMINI_API_KEY";
+      // 2. Pick model for that provider
+      const modelChoice = await ctx.ui.select(
+        `Choose a ${prov.label} model`,
+        prov.models.map((m) => m.label),
+      );
+      if (!modelChoice) return;
+      const model = prov.models.find((m) => m.label === modelChoice)!;
+
+      // 3. Enter API key
       const value = await ctx.ui.input(
-        `Paste your ${keyName}`,
-        "AIza...",
+        `Paste your ${prov.keyEnv}`,
+        prov.keyPlaceholder,
       );
       const cleaned = value?.trim();
       if (!cleaned) {
@@ -1247,16 +1358,23 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         return;
       }
 
-      const envPath = upsertEnvKey(keyName, cleaned);
+      // 4. Save key to .env
+      const envPath = upsertEnvKey(prov.keyEnv, cleaned);
+
+      // 5. Update extraction config YAML
+      const configPath = updateExtractionConfig(prov.id, model.id);
+
+      // 6. Restart server
       const serverOk = await restartOwnedServer();
       const suffix = cleaned.length >= 4 ? cleaned.slice(-4) : "****";
 
       ctx.ui.notify(
         [
-          "Titan API key saved.",
-          `Provider: ${provider}`,
-          `Saved: ${keyName}=...${suffix}`,
-          `File: ${envPath}`,
+          "Titan extraction configured!",
+          `Provider: ${prov.label}`,
+          `Model: ${model.id}`,
+          `Key saved: ${prov.keyEnv}=...${suffix}`,
+          `Config: ${configPath}`,
           `Server: ${serverOk ? "running" : "not running — run /titan-status"}`,
         ].join("\n"),
         serverOk ? "success" : "warning",

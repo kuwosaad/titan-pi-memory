@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/titan-pi-banner.png" alt="titan-pi-memory banner" width="100%">
-</p>
-
 # titan-pi-memory
 
 > **Persistent evolutionary memory for the Pi coding agent.**
@@ -20,7 +16,11 @@ pi install npm:titan-pi-memory
 
 - **Pi coding agent** installed (`npm install -g @earendil-works/pi-coding-agent`)
 - **Python 3.10+** (check with `python3 --version`)
-- A **Gemini API key** (free tier works fine — get one at [aistudio.google.com](https://aistudio.google.com))
+- An API key for your chosen extraction provider:
+  - **Gemini** — free tier at [aistudio.google.com](https://aistudio.google.com) (recommended)
+  - **OpenAI** — [platform.openai.com](https://platform.openai.com)
+  - **DeepSeek** — [platform.deepseek.com](https://platform.deepseek.com)
+  - **OpenRouter** — [openrouter.ai](https://openrouter.ai)
 
 ### Step 1: Install the package
 
@@ -44,7 +44,8 @@ This creates your Titan workspace and installs everything needed.
 /titan-key
 ```
 
-Select **Gemini**, paste your key when prompted. Done.
+Titan will walk you through picking a **provider**, selecting a **model**, and entering your **API key**.
+Choose from Gemini, OpenAI, OpenRouter, or DeepSeek. Done.
 
 ### Step 4: Verify it's working
 
@@ -151,7 +152,9 @@ Default is **Gemini 2.5 Pro**. Edit:
 ~/.titan/agents/pi/config/extraction_models.yaml
 ```
 
-Set `current:` to `openai`, `openrouter`, or `ollama`, then add the corresponding API key via `/titan-key`.
+Set `current:` to `openai`, `openrouter`, `deepseek`, or `ollama`, then add the corresponding API key via `/titan-key`.
+
+Or use `/titan-key` directly — it walks you through picking provider, model, and key all at once.
 
 ### Switch embedding model
 
@@ -179,8 +182,7 @@ npx tsc --noEmit tools/pi_extension/index.ts
 ## Links
 
 - **npm:** [npmjs.com/package/titan-pi-memory](https://www.npmjs.com/package/titan-pi-memory)
-- **Repository:** [github.com/kuwosaad/titan-pi-memory](https://github.com/kuwosaad/titan-pi-memory)
-- **Full dev environment:** [github.com/kuwosaad/titan-karu](https://github.com/kuwosaad/titan-karu) (experiments, tests, docs, agent guides)
+- **Repository:** [github.com/kuwosaad/titan-karu](https://github.com/kuwosaad/titan-karu)
 - **Pi packages:** [pi.dev/packages](https://pi.dev/packages)
 
 ---
@@ -189,10 +191,12 @@ npx tsc --noEmit tools/pi_extension/index.ts
 
 ```
 app/             → Memory engine (save pipeline, retrieval, graph, storage, API)
-tools/           → Pi extension
-entrypoints/     → HTTP server
+tools/           → Pi extension (pi_extension/), CLI, benchmarks
+entrypoints/     → HTTP server and MCP server
 config/          → Model and runtime configuration
-assets/          → Package card image
+assets/          → Brand, logos, design files
+docs/            → Contributor docs, plans, benchmarks
+experiments/     → Research code (not product runtime)
 ```
 
 ---
@@ -253,12 +257,22 @@ curl "http://127.0.0.1:8000/api/retrieve?query=what+database+does+the+project+us
 
 ### CLI Commands
 
-The `titan` CLI is available in the full dev environment at [github.com/kuwosaad/titan-karu](https://github.com/kuwosaad/titan-karu). In Pi, all Titan features are available as slash commands.
+If installed via pip, use `titan`. Otherwise: `python3 tools/cli/titan.py`
+
+| Command | What it does |
+|---------|-------------|
+| `titan doctor --agent <name>` | Verify memory readiness |
+| `titan init --agent <name>` | Prepare runtime home for an agent |
+| `titan mcp --agent <name>` | Start MCP server for that agent |
+| `titan config show` | Show current model config |
+| `titan config set-model` | Change extraction/embedding models |
+| `titan key set <KEY_NAME>` | Set an API key |
+| `titan graph --agent <name>` | Build and open the knowledge graph |
 
 ### Project Structure
 
 ```
-titan-pi-memory/
+titan-karu/
 ├── app/
 │   ├── save_pipeline/      # Save flow: ingest → extract → embed → store
 │   │   └── extraction/     # LLM-based memory extraction
@@ -268,15 +282,19 @@ titan-pi-memory/
 │   ├── api/                # FastAPI HTTP endpoints
 │   └── storage/            # SQLite-backed memory store
 ├── config/                 # YAML configuration
-├── entrypoints/            # HTTP server
+├── entrypoints/            # HTTP server, MCP server
 ├── tools/
-│   └── pi_extension/       # Pi extension (TypeScript + Python)
-└── assets/                 # Package card image
+│   ├── cli/titan.py        # CLI tool
+│   ├── pi_extension/       # Pi extension (TypeScript + Python)
+│   └── benchmarks/         # Benchmark harnesses
+└── docs/                   # Contributor docs
 ```
 
 ### Running Tests
 
-Tests live in the full dev environment at [github.com/kuwosaad/titan-karu](https://github.com/kuwosaad/titan-karu).
+```bash
+pytest
+```
 
 ### Security
 

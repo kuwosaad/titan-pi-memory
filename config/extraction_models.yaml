@@ -27,6 +27,12 @@ gemini:
   model: gemini-2.5-pro
   request_timeout: 300
 
+deepseek:
+  enabled: false
+  api_key_env: DEEPSEEK_API_KEY
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+
 dedup:
   enabled: true
   api_key_env: GEMINI_API_KEY
