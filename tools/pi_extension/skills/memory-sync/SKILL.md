@@ -24,6 +24,7 @@ Historical note: this workflow was originally called Claude Sync. Treat `claude-
 - Always prefer distilled trace packets over verbatim session logs.
 - Always record imported and skipped session fingerprints in a manifest so repeated runs skip duplicates.
 - Always verify retrieval after import by querying Titan for representative imported topics.
+- Always tag every stored memory with its source agent (`[source:codex]`, `[source:claude-code]`, etc.) so future queries can filter by origin.
 
 ## Core Mental Model
 
@@ -318,7 +319,30 @@ token=...
 
 If a session appears credential-heavy, skip it and report that it was skipped for safety.
 
-### 9. Store In Titan
+### 9. Source Tag Every Memory
+
+Every memory stored from an import MUST carry source provenance. Titan currently stores all memories from a Pi session under a single session ID with no distinction between "memory about the import process" and "memory extracted from the source agent's sessions." Without explicit tagging, imported memories drown in process noise and become unqueryable.
+
+**Tagging rule:** Prefix every individual finding in the `thoughts` field with the source agent so Titan's extraction pipeline embeds the tag into each extracted memory text.
+
+Correct format for `thoughts`:
+
+```txt
+[source:codex] Kuwo is a beginner learning Python and benefits from direct, simple commands.
+[source:codex] Root cause of Titan-Mem issue was store-path drift: MCP inherited stale TITAN_BASE_DIR.
+[source:codex] OpenClaw does not auto-inject arbitrary karu.md; put persona in SOUL.md and identity in IDENTITY.md.
+```
+
+For Claude Code:
+
+```txt
+[source:claude-code] Kuwo prefers direct instructions; when told "commit and push", just do it without overthinking.
+[source:claude-code] The local Claude Code data on this machine is sparse — mostly metadata, few full project transcripts.
+```
+
+**Why this matters:** The earlier Codex import on 2026-05-30 stored 83 learnings in Titan but they were unqueryable because they shared the same session ID as the ~99 process-level memories about npm publish and git commits. The source tag makes imported memories distinguishable from import-process noise.
+
+### 10. Store In Titan
 
 In Pi, use the native tool:
 
@@ -328,13 +352,13 @@ titan_store_trace_packet
 
 Use one trace packet per meaningful session or per cluster of tightly related sessions. Do not create dozens of tiny memories from the same session unless the user explicitly wants a deep import.
 
-Trace packet format:
+Trace packet format (with source tagging):
 
 ```json
 {
-  "goal": "Import Codex session cluster into Titan: <cluster name>",
-  "thoughts": "Sources: ... Session ids: ... Projects: ... Durable findings: ... Decisions: ... User preferences: ... Redactions: none/secrets skipped.",
-  "outcome": "Stored distilled memory from this cluster so future agents can recall project context without reading raw transcripts."
+  "goal": "Import Codex session cluster into Titan (source:codex): <cluster name>",
+  "thoughts": "[source:codex] Decision: ... [source:codex] Root cause: ... [source:codex] User preference: ... [source:codex] Architecture: ... Redactions: none.",
+  "outcome": "Stored <N> source-tagged memories from Codex sessions <ids> into Titan. Query with '[source:codex]' to retrieve only Codex memories."
 }
 ```
 
@@ -342,15 +366,27 @@ For Claude Code:
 
 ```json
 {
-  "goal": "Import Claude Code history into Titan",
-  "thoughts": "Source: ~/.claude/... Session ids: ... Project: ... Durable findings: ... Source quality: rich/sparse/metadata-only.",
-  "outcome": "Backfilled Titan with Claude Code context while leaving Claude files unchanged."
+  "goal": "Import Claude Code history into Titan (source:claude-code)",
+  "thoughts": "[source:claude-code] Durable finding 1... [source:claude-code] Durable finding 2... Source quality: sparse metadata on this machine.",
+  "outcome": "Backfilled Titan with source-tagged Claude Code context while leaving Claude files unchanged."
 }
 ```
 
 If Titan tools are unavailable, stop and tell the user to install/start the Titan Pi package. Do not fake a memory import.
 
-### 10. Write Manifest
+### 10a. Future: Scene-Based Import (Ideal Architecture)
+
+The current approach bundles an entire cluster of sessions into one trace packet. While this works with source tagging, the ideal architecture mirrors Titan's own pipeline:
+
+1. Each imported source session becomes a synthetic Titan session with ID like `import-codex-<original-session-id>`.
+2. The source session's conversational turns are broken into Titan scenes (as Titan does for Pi conversations).
+3. Titan's normal extraction pipeline extracts memories from those scenes.
+4. The session and all its scenes/memories carry `source_agent: "codex"` metadata natively.
+5. On query, `titan_query_memories` can filter by `source_agent` without relying on text-prefix matching.
+
+This is the long-term architecture. Today, the `[source:agent]` text prefix achieves the same outcome within Titan's current tool surface. When Titan gains native source-agent metadata support, this skill should adopt it.
+
+### 11. Write Manifest
 
 After a successful Titan write, append one manifest record per processed source session.
 
@@ -395,22 +431,31 @@ failed_titan_store
 
 Only write `imported_*` manifest records after the Titan store call succeeds. For skipped records, write after the reason is known.
 
-### 11. Verify Retrieval
+### 12. Verify Retrieval (With Source Filtering)
 
-After import, query Titan for representative topics from the imported clusters.
+After import, query Titan for representative topics from the imported clusters. Always include the source tag in queries to isolate imported memories from process noise.
 
-Examples:
+Query examples:
 
 ```txt
-Titan-Mem store-path drift
-OpenClaw SOUL.md IDENTITY.md
-pipx-only packaging Titan-Mem
-Codex imported Claude Code sparse metadata
+[source:codex] Titan-Mem store-path drift
+[source:codex] OpenClaw SOUL.md IDENTITY.md
+[source:codex] pipx-only packaging Titan-Mem
+[source:claude-code] Kuwo preferences
+```
+
+Also try broader semantic queries to confirm the memories are discoverable:
+
+```txt
+what did we learn from Codex about Titan-Mem architecture
+what did Kuwo prefer in Codex sessions about project structure
 ```
 
 Report whether imported memories appear in retrieval. If storage succeeded but retrieval fails, say so and recommend re-indexing/restarting Titan if applicable.
 
-### 12. Final Report
+**Success criteria:** Imported memories should surface in semantic search when queried with source-related terms, not just when searched by exact source-tag prefix.
+
+### 13. Final Report
 
 Report concisely:
 
@@ -480,6 +525,8 @@ Patterns worth preserving:
 - A manifest should track imported and skipped sessions, not just successes.
 - Import success means stored and retrievable, not merely that `titan_store_trace_packet` returned successfully.
 - Raw transcript import is almost always the wrong default.
+- **Source tagging is mandatory.** Without `[source:codex]` or `[source:claude-code]` prefixes on every stored finding, imported memories share the same Titan session ID as the import process conversation and become unqueryable. This was discovered during the 2026-05-30 first import run: 83 Codex learnings were stored but couldn't be surfaced because 99 process-level memories drowned them out.
+- **Future architecture:** When Titan natively supports `source_agent` metadata on sessions, scenes, and memories, switch from text-prefix tagging to native metadata fields for cleaner filtering.
 
 ## Mental Model
 
