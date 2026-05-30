@@ -13,6 +13,7 @@
   "pi": {
     "extensions": ["./tools/pi_extension"],
     "skills": ["./tools/pi_extension/skills"],
+    "prompts": ["./tools/pi_extension/prompts"],
     "image": "https://raw.githubusercontent.com/kuwosaad/titan-pi-memory/main/assets/titan-pi-card.png"
   },
   "files": [
@@ -22,9 +23,12 @@
     "package.json",
     "tools/pi_extension/index.ts",
     "tools/pi_extension/server.py",
-    "tools/pi_extension/titan_dashboard.py",
-    "tools/pi_extension/skills/titan-pi-memory/SKILL.md",
+    "tools/pi_extension/README.md",
     "tools/pi_extension/install.sh",
+    "tools/pi_extension/skills/titan-pi-memory/SKILL.md",
+    "tools/pi_extension/skills/memory-sync/SKILL.md",
+    "tools/pi_extension/prompts/memory-sync.md",
+    "tools/pi_extension/titan_dashboard.py",
     "entrypoints/__init__.py",
     "entrypoints/main.py",
     "app/__init__.py",

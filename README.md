@@ -149,6 +149,8 @@ Your Pi agent has these tools available automatically:
 | `/titan-start` | Start the Titan server |
 | `/titan-dashboard` | Open a rich terminal memory dashboard |
 | `/titan-clusters` | List your memory topic clusters |
+| `/memory-sync` | Import useful memories from local Claude Code/Codex sessions into Titan |
+| `/skill:memory-sync` | Load the Memory Sync skill directly |
 
 ---
 

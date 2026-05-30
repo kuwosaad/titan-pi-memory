@@ -108,6 +108,8 @@ session ends      →  session_closed
 | `/titan-status` | Check server health |
 | `/titan-save <goal>` | Save a manual trace packet |
 | `/titan-start` | Start Titan server |
+| `/memory-sync` | Import useful local Claude Code/Codex session memories into Titan |
+| `/skill:memory-sync` | Load the Memory Sync skill directly |
 
 ---
 
