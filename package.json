@@ -1,6 +1,6 @@
 {
   "name": "titan-pi-memory",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Persistent evolutionary memory for the Pi coding agent",
   "keywords": [
     "pi-package",
@@ -11,9 +11,15 @@
     "coding-agent"
   ],
   "pi": {
-    "extensions": ["./tools/pi_extension"],
-    "skills": ["./tools/pi_extension/skills"],
-    "prompts": ["./tools/pi_extension/prompts"],
+    "extensions": [
+      "./tools/pi_extension"
+    ],
+    "skills": [
+      "./tools/pi_extension/skills"
+    ],
+    "prompts": [
+      "./tools/pi_extension/prompts"
+    ],
     "image": "https://raw.githubusercontent.com/kuwosaad/titan-pi-memory/main/assets/titan-pi-card.png"
   },
   "files": [
