@@ -194,6 +194,11 @@ def run_memory_pipeline_outcome(
             deduped.append(memory)
         extracted = deduped
 
+    if settings.get("synthesize_implementation_outcomes", False) and scene is not None:
+        synth = _synthesize_file_outcome_memory(scene, extracted)
+        if synth is not None:
+            extracted.append(synth)
+
     if not extracted:
         return {
             "records": [],
@@ -581,6 +586,60 @@ def _compact_text(value: Any, limit: int = 500) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
+
+
+_MUTATING_FILE_TOOL_NAMES = {
+    "edit",
+    "write",
+    "file_event",
+    "file_edit",
+    "apply_patch",
+    "patch",
+    "write_file",
+    "replace_file",
+}
+
+
+def _is_mutating_file_tool(name: str) -> bool:
+    normalized = str(name or "").strip().lower().replace("-", "_")
+    short_name = normalized.rsplit(".", 1)[-1]
+    return normalized in _MUTATING_FILE_TOOL_NAMES or short_name in _MUTATING_FILE_TOOL_NAMES
+
+
+def _synthesize_file_outcome_memory(
+    scene: Scene,
+    extracted: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    paths: List[str] = []
+    seen: set[str] = set()
+    for tc in scene.tool_calls:
+        if not _is_mutating_file_tool(tc.name):
+            continue
+        for fp in tc.file_paths:
+            if fp not in seen:
+                seen.add(fp)
+                paths.append(fp)
+
+    if not paths:
+        return None
+
+    lower_texts = [str(mem.get("text") or "").lower() for mem in extracted]
+    paths = [p for p in paths if not any(p.lower() in t for t in lower_texts)]
+    if not paths:
+        return None
+
+    paths.sort()
+    if len(paths) > 8:
+        paths = paths[:8]
+
+    return {
+        "text": "Modified files: " + ", ".join(paths),
+        "stream": "rough",
+        "source": "system",
+        "reliability": 1.0,
+        "speaker_focus": "system",
+        "memory_kind": "outcome",
+    }
 
 
 def _extract_file_paths(*values: Any) -> List[str]:

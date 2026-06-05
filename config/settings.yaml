@@ -25,6 +25,7 @@ graph_artifacts_file: graph_artifacts.json
 extraction_backend: gemini
 min_memory_length: 6
 max_fallback_sentences: 3
+synthesize_implementation_outcomes: true
 
 # Server Settings
 host: 127.0.0.1
