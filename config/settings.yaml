@@ -57,6 +57,39 @@ retrieval_dedup:
   embedding_min_token_containment: 0.75
   candidate_scan_multiplier: 3
 
+# Final retrieval selection. This public runtime currently uses its existing
+# global candidate API for both candidate lanes; no storage migration is needed.
+retrieval_selection:
+  enabled: true
+  hybrid_candidates_enabled: false
+
+  query_aspects_enabled: true
+  profile_aspect_expansion_enabled: true
+  max_query_aspects: 3
+  min_aspect_tokens: 2
+  multi_aspect_pool_k: 60
+
+  min_direct_similarity: 0.55
+  profile_min_direct_similarity: 0.50
+  strong_lexical_coverage: 0.80
+  keyword_short_query_min_coverage: 0.50
+  lexical_override_min_similarity: 0.25
+  max_lexical_override_terms: 3
+
+  entity_min_lexical_coverage: 0.40
+  entity_direct_similarity_override: 0.75
+
+  max_per_scene: 1
+  max_per_source_event: 1
+  semantic_redundancy_threshold: 0.85
+  profile_semantic_redundancy_threshold: 0.95
+
+  user_profile_metadata_tiebreak_enabled: true
+  profile_score_boost: 0.20
+  profile_pattern_anchor_boost: 0.08
+  lexical_coverage_weight: 0.05
+  lnn_selection_bonus_weight: 0.10
+
 # Memory Notes Settings
 notes_max_items: 6
 notes_max_chars: 700

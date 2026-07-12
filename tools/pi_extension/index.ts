@@ -922,7 +922,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       const memories = data.memories ?? [];
       if (memories.length === 0) {
         return {
-          content: [{ type: "text" as const, text: "No relevant memories found." }],
+          content: [{ type: "text" as const, text: "No sufficiently relevant memories found." }],
         };
       }
 
@@ -1527,7 +1527,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         const data = await apiRetrieve(query);
         const memories = data.memories ?? [];
         if (memories.length === 0) {
-          ctx.ui.notify("No relevant memories found.", "info");
+          ctx.ui.notify("No sufficiently relevant memories found.", "info");
           return;
         }
         const lines = memories.map(

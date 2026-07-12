@@ -14,6 +14,13 @@ from app.graph.similarity import cosine_similarity
 from app.storage.memories import query_memory_candidates, unpack_embedding
 from app.storage.repository import CandidateFilters
 
+
+# titan-pi-memory currently exposes one filtered candidate lane. Keep the
+# retrieval-selection contract without forcing a storage/FTS migration here.
+def query_memory_candidates_with_text(_fts_query: str, filters: CandidateFilters) -> List[Dict[str, Any]]:
+    return query_memory_candidates(filters)
+
+
 LOGGER = logging.getLogger(__name__)
 
 DUPLICATE_NEGATION_TERMS = {
@@ -38,6 +45,23 @@ DUPLICATE_OPPOSING_TERM_PAIRS = (
     ("prefer", "dislike"),
     ("use", "avoid"),
 )
+
+PROFILE_ACTOR_TERMS = ("kuwo", "saad", "mohammad")
+PROFILE_QUERY_TERMS = (
+    "behavior",
+    "collaboration",
+    "explain",
+    "frustrat",
+    "pattern",
+    "personality",
+    "prefer",
+    "preference",
+    "psycholog",
+    "working style",
+)
+PROFILE_MEMORY_KINDS = {"relationship", "user_fact", "user_preference", "workflow"}
+QUERY_ECHO_MARKERS = {"memory", "memories", "query", "queries", "result", "results", "retrieval", "search"}
+QUESTION_WORDS = {"how", "what", "when", "where", "which", "who", "why"}
 
 STOPWORDS = {
     "a",
@@ -159,7 +183,95 @@ def _tokenize(text: str) -> List[str]:
 
 
 def _content_tokens(text: str) -> set[str]:
-    return {token for token in _tokenize(text) if token not in STOPWORDS and len(token) > 2}
+    return _expand_tokens(text)
+
+
+def _expand_tokens(text: str) -> set[str]:
+    base = _tokenize(text)
+    tokens = {t for t in base if t not in STOPWORDS and len(t) > 2}
+    for i in range(len(base) - 1):
+        a, b = base[i], base[i + 1]
+        if len(a) <= 3 and a not in STOPWORDS and any(c.isdigit() for c in a) and any(c.isalpha() for c in b):
+            tokens.add(a + b)
+        if len(b) <= 3 and b not in STOPWORDS and any(c.isdigit() for c in b) and any(c.isalpha() for c in a):
+            tokens.add(a + b)
+    return tokens
+
+
+def _build_fts_query(text: str) -> str:
+    if not text or not text.strip():
+        return ""
+    tokens = _expand_tokens(text)
+    if not tokens:
+        return ""
+    return " OR ".join(f'"{t}"' for t in sorted(tokens))
+
+
+def extract_date_brackets(text: str) -> Dict[str, Optional[str]]:
+    if not text or not text.strip():
+        return {"date_from": None, "date_to": None}
+    lower = text.lower().strip()
+    now = datetime.now(timezone.utc)
+
+    m = re.search(r"(\d{4}-\d{2}-\d{2})\s*(?:to|-|through|–)\s*(\d{4}-\d{2}-\d{2})", lower)
+    if m:
+        return {"date_from": m.group(1), "date_to": m.group(2)}
+
+    m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", lower)
+    if m:
+        d = m.group(1)
+        return {"date_from": d, "date_to": d}
+
+    if "last week" in lower:
+        today = now.date()
+        last_monday = today - timedelta(days=today.weekday() + 7)
+        last_sunday = last_monday + timedelta(days=6)
+        return {"date_from": last_monday.isoformat(), "date_to": last_sunday.isoformat()}
+
+    if "yesterday" in lower:
+        d = (now - timedelta(days=1)).date()
+        return {"date_from": d.isoformat(), "date_to": d.isoformat()}
+
+    if "today" in lower:
+        d = now.date()
+        return {"date_from": d.isoformat(), "date_to": d.isoformat()}
+
+    months = r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+    month_map = {
+        "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+        "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6,
+        "jul": 7, "july": 7, "aug": 8, "august": 8, "sep": 9, "september": 9,
+        "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+    }
+
+    m = re.search(r"\b(" + months + r")\s+(\d{1,2})\s*(?:to|-|–)\s*(?:(" + months + r")\s+)?(\d{1,2})\b", lower)
+    if m:
+        mn1 = month_map.get(m.group(1))
+        d1 = int(m.group(2))
+        mn2 = month_map.get(m.group(3)) if m.group(3) else mn1
+        d2 = int(m.group(4))
+        year = now.year
+        if mn1 and mn2:
+            try:
+                return {"date_from": datetime(year, mn1, d1).date().isoformat(),
+                        "date_to": datetime(year, mn2, d2).date().isoformat()}
+            except ValueError:
+                pass
+
+    m = re.search(r"\bin\s+(" + months + r")\b(?:\s+(\d{4}))?", lower)
+    if m:
+        mn = month_map.get(m.group(1))
+        year = int(m.group(2)) if m.group(2) else now.year
+        if mn:
+            try:
+                from calendar import monthrange
+                _, last_day = monthrange(year, mn)
+                return {"date_from": datetime(year, mn, 1).date().isoformat(),
+                        "date_to": datetime(year, mn, last_day).date().isoformat()}
+            except ValueError:
+                pass
+
+    return {"date_from": None, "date_to": None}
 
 
 def _dedupe_prefer_latest(memories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -195,6 +307,20 @@ def _duplicate_hit_quality(hit: Dict[str, Any]) -> tuple[float, int, float, date
     )
 
 
+def _texts_have_opposition(left_text: str, right_text: str) -> bool:
+    left_raw_tokens = set(_tokenize(left_text))
+    right_raw_tokens = set(_tokenize(right_text))
+    left_has_negation = bool(left_raw_tokens & DUPLICATE_NEGATION_TERMS)
+    right_has_negation = bool(right_raw_tokens & DUPLICATE_NEGATION_TERMS)
+    if left_has_negation != right_has_negation:
+        return True
+    return any(
+        (positive in left_raw_tokens and negative in right_raw_tokens)
+        or (negative in left_raw_tokens and positive in right_raw_tokens)
+        for positive, negative in DUPLICATE_OPPOSING_TERM_PAIRS
+    )
+
+
 def _hits_are_near_duplicates(
     left: Dict[str, Any],
     right: Dict[str, Any],
@@ -213,17 +339,8 @@ def _hits_are_near_duplicates(
     if _canonical_text(left_text) == _canonical_text(right_text):
         return True
 
-    left_raw_tokens = set(_tokenize(left_text))
-    right_raw_tokens = set(_tokenize(right_text))
-    left_has_negation = bool(left_raw_tokens & DUPLICATE_NEGATION_TERMS)
-    right_has_negation = bool(right_raw_tokens & DUPLICATE_NEGATION_TERMS)
-    if left_has_negation != right_has_negation:
+    if _texts_have_opposition(left_text, right_text):
         return False
-    for positive, negative in DUPLICATE_OPPOSING_TERM_PAIRS:
-        if (positive in left_raw_tokens and negative in right_raw_tokens) or (
-            negative in left_raw_tokens and positive in right_raw_tokens
-        ):
-            return False
 
     left_tokens = _content_tokens(left_text)
     right_tokens = _content_tokens(right_text)
@@ -315,6 +432,386 @@ def _collapse_near_duplicate_hits(
         reverse=True,
     )
     return collapsed
+
+
+def _expand_profile_aspect(facet: str, profile_mode: Optional[str]) -> str:
+    """Add stable, general semantic cues to a personal-query facet only."""
+    if not profile_mode:
+        return facet
+    lowered = facet.lower()
+    cues: List[str] = []
+    if profile_mode == "preference":
+        if "explain" in lowered:
+            cues.extend(["clarity", "concise", "direct", "simple wording", "abstraction", "root cause"])
+        if "collaboration" in lowered or "frustrat" in lowered:
+            cues.extend(["delegation", "reliability", "speed", "slow", "unreliable"])
+    elif profile_mode == "psychology" and any(term in lowered for term in ("behavior", "pattern", "personality", "psycholog")):
+        cues.extend(["recurring behavior", "continuity", "proof", "evidence"])
+    return facet if not cues else f"{facet}. {' '.join(cues)}"
+
+
+def _query_aspects(query: str, config: Dict[str, Any]) -> List[str]:
+    """Return the full query plus a small number of unambiguous question facets."""
+    normalized = " ".join(str(query or "").split())
+    if not normalized:
+        return []
+    if not bool(config.get("query_aspects_enabled", False)):
+        return [normalized]
+
+    max_aspects = max(1, int(config.get("max_query_aspects", 3) or 3))
+    min_tokens = max(1, int(config.get("min_aspect_tokens", 2) or 2))
+    profile_mode = _profile_query_mode(normalized) if bool(config.get("profile_aspect_expansion_enabled", False)) else None
+    aspects = [normalized]
+    clause_pattern = re.compile(
+        r"(?:[,;]\s*|\s+)and\s+(?=(?:what|how|why|which|when|where|who)\b)",
+        flags=re.IGNORECASE,
+    )
+    clauses = clause_pattern.split(normalized)
+    if len(clauses) <= 1:
+        if profile_mode:
+            return [normalized, _expand_profile_aspect(normalized, profile_mode)][:max_aspects]
+        return aspects
+
+    for clause in clauses:
+        facet = clause.strip(" ,;?")
+        if len(_content_tokens(facet)) < min_tokens:
+            continue
+        if _canonical_text(facet) == _canonical_text(normalized):
+            continue
+        facet = _expand_profile_aspect(facet, profile_mode)
+        if any(_canonical_text(facet) == _canonical_text(existing) for existing in aspects):
+            continue
+        aspects.append(facet)
+        if len(aspects) >= max_aspects:
+            break
+    return aspects
+
+
+def _merge_candidate_lanes(
+    lexical_candidates: List[Dict[str, Any]],
+    semantic_candidates: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Stably merge candidate lanes without dropping candidate provenance."""
+    merged: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for candidate in [*lexical_candidates, *semantic_candidates]:
+        memory_id = str(candidate.get("id") or "").strip()
+        if memory_id and memory_id in seen_ids:
+            continue
+        if memory_id:
+            seen_ids.add(memory_id)
+        merged.append(candidate)
+    return merged
+
+
+def _lexical_terms(text: str) -> set[str]:
+    terms = set(_content_tokens(text))
+    for token in list(terms):
+        if len(token) > 4 and token.endswith("ies"):
+            terms.add(token[:-3] + "y")
+        elif len(token) > 3 and token.endswith("s"):
+            terms.add(token[:-1])
+        if len(token) > 5 and token.endswith("ing"):
+            terms.add(token[:-3])
+    return terms
+
+
+def _lexical_coverage(text: str, aspects: List[str]) -> float:
+    memory_tokens = _lexical_terms(text)
+    if not memory_tokens:
+        return 0.0
+    coverage = 0.0
+    for aspect in aspects:
+        aspect_tokens = _lexical_terms(aspect)
+        if not aspect_tokens:
+            continue
+        coverage = max(coverage, len(memory_tokens & aspect_tokens) / len(aspect_tokens))
+        # A compact alphanumeric slug such as `t3code` is an exact anchor for
+        # its spaced form `T3 Code`; do not require the generic trailing word.
+        slug_matches = [
+            token for token in aspect_tokens
+            if any(char.isdigit() for char in token) and token in memory_tokens
+        ]
+        if slug_matches:
+            coverage = 1.0
+    return coverage
+
+
+def _is_query_echo_memory(text: str, query: str) -> bool:
+    memory_terms = _lexical_terms(text)
+    query_terms = _lexical_terms(query)
+    if not memory_terms or not query_terms or not (memory_terms & QUERY_ECHO_MARKERS):
+        return False
+    raw_query_tokens = _tokenize(query)
+    normalized_text = _canonical_text(text)
+    if len(raw_query_tokens) >= 4:
+        for start in range(len(raw_query_tokens) - 3):
+            quoted_phrase = " ".join(raw_query_tokens[start:start + 4])
+            if quoted_phrase in normalized_text:
+                return True
+    overlap = len(memory_terms & query_terms) / len(query_terms)
+    return overlap >= (1.0 if len(query_terms) <= 3 else 0.60)
+
+
+def _is_multi_anchor_entity_query(query: str) -> bool:
+    tokens = re.findall(r"[A-Za-z0-9]+", str(query or ""))
+    anchors = [
+        token for token in tokens
+        if token.lower() not in QUESTION_WORDS
+        and (any(char.isdigit() for char in token) or (token[:1].isupper() and len(token) > 2))
+    ]
+    return len(anchors) >= 2
+
+
+def _profile_query_mode(query: str) -> Optional[str]:
+    lowered = str(query or "").lower()
+    if not any(actor in lowered for actor in PROFILE_ACTOR_TERMS):
+        return None
+    if any(term in lowered for term in ("behavior", "pattern", "personality", "psycholog")):
+        return "psychology"
+    if any(term in lowered for term in ("collaboration", "explain", "frustrat", "prefer", "preference", "working style")):
+        return "preference"
+    return None
+
+
+def _is_profile_query(query: str) -> bool:
+    return _profile_query_mode(query) is not None
+
+
+def _profile_memory_affinity(memory: Dict[str, Any], profile_mode: Optional[str]) -> float:
+    speaker_focus = str(memory.get("speaker_focus") or "").lower()
+    memory_kind = str(memory.get("memory_kind") or "").lower()
+    if profile_mode == "psychology":
+        text = str(memory.get("text") or "").lower()
+        if memory_kind in {"user_fact", "relationship"} and (
+            speaker_focus == "kuwo" or any(actor in text for actor in PROFILE_ACTOR_TERMS)
+        ):
+            return 1.0
+        if memory_kind in {"user_fact", "relationship"}:
+            return 0.55
+        if speaker_focus == "kuwo" and memory_kind == "user_preference":
+            return 0.30
+        if memory_kind in PROFILE_MEMORY_KINDS:
+            return 0.20
+        return 0.0
+    if speaker_focus == "kuwo" and memory_kind in PROFILE_MEMORY_KINDS:
+        return 1.0
+    if memory_kind in PROFILE_MEMORY_KINDS:
+        return 0.45
+    # A user-focused task or issue is not itself a durable personal fact.
+    # Keep it eligible through direct relevance, but do not give it a profile boost.
+    return 0.0
+
+
+def _direct_evidence(
+    memory_vector: np.ndarray,
+    query_aspect_vectors: List[np.ndarray],
+    text: str,
+    aspects: List[str],
+) -> Dict[str, Any]:
+    aspect_scores = [float(cosine_similarity(vector, memory_vector)) for vector in query_aspect_vectors]
+    if not aspect_scores:
+        return {
+            "query_similarity": 0.0,
+            "aspect_scores": [],
+            "direct_similarity": 0.0,
+            "best_aspect_index": 0,
+            "lexical_coverage": 0.0,
+        }
+    best_index = int(np.argmax(np.asarray(aspect_scores)))
+    return {
+        "query_similarity": aspect_scores[0],
+        "aspect_scores": aspect_scores,
+        "direct_similarity": aspect_scores[best_index],
+        "best_aspect_index": best_index,
+        "lexical_coverage": _lexical_coverage(text, aspects),
+    }
+
+
+def _minimum_direct_similarity(hit: Dict[str, Any], config: Dict[str, Any]) -> float:
+    min_direct_similarity = float(config.get("min_direct_similarity", 1.0))
+    if bool(hit.get("profile_query", False)) and float(hit.get("profile_affinity", 0.0)) > 0.0:
+        return float(config.get("profile_min_direct_similarity", min_direct_similarity))
+    return min_direct_similarity
+
+
+def _hit_has_sufficient_direct_evidence(hit: Dict[str, Any], config: Dict[str, Any]) -> bool:
+    if not bool(config.get("enabled", False)):
+        return True
+    if bool(hit.get("query_echo_memory", False)):
+        return False
+    direct_similarity = float(hit.get("direct_similarity", hit.get("base_score", hit.get("score", 0.0))) or 0.0)
+    lexical_coverage = float(hit.get("lexical_coverage", 0.0) or 0.0)
+    if bool(hit.get("entity_query", False)) and not bool(hit.get("profile_query", False)):
+        entity_min_lexical_coverage = float(config.get("entity_min_lexical_coverage", 0.0))
+        entity_direct_similarity_override = float(config.get("entity_direct_similarity_override", 1.0))
+        if (
+            lexical_coverage < entity_min_lexical_coverage
+            and direct_similarity < entity_direct_similarity_override
+        ):
+            return False
+    min_direct_similarity = _minimum_direct_similarity(hit, config)
+    if direct_similarity >= min_direct_similarity:
+        return True
+    strong_lexical_coverage = float(config.get("strong_lexical_coverage", 1.0))
+    lexical_override_min_similarity = float(config.get("lexical_override_min_similarity", 1.0))
+    max_lexical_override_terms = max(1, int(config.get("max_lexical_override_terms", 3) or 3))
+    return (
+        bool(hit.get("lexical_override_allowed", True))
+        and lexical_coverage >= strong_lexical_coverage
+        and direct_similarity >= lexical_override_min_similarity
+        and min(len(_content_tokens(aspect)) for aspect in hit.get("query_aspects", [""])) <= max_lexical_override_terms
+    )
+
+
+def _query_has_sufficient_evidence(hits: List[Dict[str, Any]], config: Dict[str, Any]) -> bool:
+    return any(_hit_has_sufficient_direct_evidence(hit, config) for hit in hits)
+
+
+def _selection_rank_score(hit: Dict[str, Any], config: Dict[str, Any]) -> float:
+    direct_similarity = float(hit.get("direct_similarity", hit.get("base_score", hit.get("score", 0.0))) or 0.0)
+    lexical_coverage = float(hit.get("lexical_coverage", 0.0) or 0.0)
+    profile_boost = 0.0
+    if bool(config.get("user_profile_metadata_tiebreak_enabled", False)):
+        profile_boost = float(config.get("profile_score_boost", 0.0)) * float(hit.get("profile_affinity", 0.0))
+    lnn_bonus = max(
+        0.0,
+        float(hit.get("final_score", hit.get("score", 0.0)) or 0.0)
+        - float(hit.get("base_score", 0.0) or 0.0),
+    )
+    pattern_anchor_boost = 0.0
+    if bool(hit.get("profile_pattern_anchor", False)):
+        pattern_anchor_boost = float(config.get("profile_pattern_anchor_boost", 0.0))
+    return (
+        direct_similarity
+        + float(config.get("lexical_coverage_weight", 0.0)) * lexical_coverage
+        + profile_boost
+        + pattern_anchor_boost
+        + float(config.get("lnn_selection_bonus_weight", 0.0)) * lnn_bonus
+    )
+
+
+def _source_event_ids(hit: Dict[str, Any]) -> set[str]:
+    memory = hit.get("memory") or {}
+    raw_ids = memory.get("source_event_ids") or []
+    if not isinstance(raw_ids, list):
+        return set()
+    return {str(event_id).strip() for event_id in raw_ids if str(event_id).strip()}
+
+
+def _is_display_redundant(
+    candidate: Dict[str, Any],
+    selected: List[Dict[str, Any]],
+    embedding_by_id: Dict[str, np.ndarray],
+    semantic_redundancy_threshold: float,
+) -> bool:
+    candidate_memory = candidate.get("memory") or {}
+    candidate_id = str(candidate_memory.get("id") or "")
+    candidate_vector = embedding_by_id.get(candidate_id)
+    if candidate_vector is None:
+        return False
+    candidate_text = str(candidate_memory.get("text") or "")
+    for existing in selected:
+        existing_memory = existing.get("memory") or {}
+        existing_id = str(existing_memory.get("id") or "")
+        existing_vector = embedding_by_id.get(existing_id)
+        if existing_vector is None:
+            continue
+        if _texts_have_opposition(candidate_text, str(existing_memory.get("text") or "")):
+            continue
+        if float(cosine_similarity(candidate_vector, existing_vector)) >= semantic_redundancy_threshold:
+            return True
+    return False
+
+
+def _select_diverse_hits(
+    hits: List[Dict[str, Any]],
+    embedding_by_id: Dict[str, np.ndarray],
+    top_k: int,
+    aspect_count: int,
+    config: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Allocate visible slots to distinct, directly relevant memory evidence."""
+    admitted = [hit for hit in hits if _hit_has_sufficient_direct_evidence(hit, config)]
+    if not admitted:
+        return []
+
+    profile_score_boost = float(config.get("profile_score_boost", 0.0))
+    # Step 2.1 remains a positive tie-breaker, but immutable direct evidence
+    # retains control of final order so associative activation cannot dominate.
+    admitted.sort(key=lambda hit: _selection_rank_score(hit, config), reverse=True)
+
+    max_per_scene = max(1, int(config.get("max_per_scene", 1) or 1))
+    max_per_source_event = max(1, int(config.get("max_per_source_event", 1) or 1))
+    semantic_redundancy_threshold = float(config.get("semantic_redundancy_threshold", 0.98))
+    selected: List[Dict[str, Any]] = []
+    scene_counts: Dict[str, int] = {}
+    source_event_counts: Dict[str, int] = {}
+
+    def can_select(candidate: Dict[str, Any]) -> bool:
+        memory = candidate.get("memory") or {}
+        candidate_id = str(memory.get("id") or "").strip()
+        if candidate_id and any(
+            candidate_id == str((existing.get("memory") or {}).get("id") or "").strip()
+            for existing in selected
+        ):
+            return False
+        scene_id = str(memory.get("scene_id") or "").strip()
+        if scene_id and scene_counts.get(scene_id, 0) >= max_per_scene:
+            return False
+        for event_id in _source_event_ids(candidate):
+            if source_event_counts.get(event_id, 0) >= max_per_source_event:
+                return False
+        candidate_semantic_threshold = semantic_redundancy_threshold
+        if bool(candidate.get("profile_query", False)) and float(candidate.get("profile_affinity", 0.0)) > 0.0:
+            candidate_semantic_threshold = float(
+                config.get("profile_semantic_redundancy_threshold", candidate_semantic_threshold)
+            )
+        return not _is_display_redundant(
+            candidate,
+            selected,
+            embedding_by_id,
+            candidate_semantic_threshold,
+        )
+
+    def select(candidate: Dict[str, Any]) -> None:
+        selected.append(candidate)
+        memory = candidate.get("memory") or {}
+        scene_id = str(memory.get("scene_id") or "").strip()
+        if scene_id:
+            scene_counts[scene_id] = scene_counts.get(scene_id, 0) + 1
+        for event_id in _source_event_ids(candidate):
+            source_event_counts[event_id] = source_event_counts.get(event_id, 0) + 1
+
+    # Cover independently asked facets before the global rank order can consume
+    # every slot with a single aspect of a multi-part question.
+    for aspect_index in range(1, max(1, aspect_count)):
+        facet_candidates = [
+            hit for hit in admitted
+            if len(hit.get("aspect_scores") or []) > aspect_index
+            and float(hit["aspect_scores"][aspect_index]) >= _minimum_direct_similarity(hit, config)
+        ]
+        facet_candidates.sort(
+            key=lambda hit: (
+                float((hit.get("aspect_scores") or [0.0])[aspect_index])
+                + profile_score_boost * float(hit.get("profile_affinity", 0.0)),
+                _selection_rank_score(hit, config),
+            ),
+            reverse=True,
+        )
+        for candidate in facet_candidates:
+            if can_select(candidate):
+                select(candidate)
+                break
+        if len(selected) >= top_k:
+            return selected[:top_k]
+
+    for candidate in admitted:
+        if len(selected) >= top_k:
+            break
+        if can_select(candidate):
+            select(candidate)
+    return selected[:top_k]
 
 
 def _resolve_rerank_config(settings: Dict[str, Any], final_top_k: int) -> Dict[str, Any]:
@@ -1542,17 +2039,29 @@ def _keyword_fallback_hits(
     memories: List[Dict[str, Any]],
     query: str,
     top_k: int,
+    selection_config: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     query_terms = set(_tokenize(query))
+    query_content_terms = _content_tokens(query)
     if not query_terms:
         return []
 
+    strong_lexical_coverage = float((selection_config or {}).get("strong_lexical_coverage", 0.0))
+    if len(query_content_terms) <= 2:
+        strong_lexical_coverage = float(
+            (selection_config or {}).get("keyword_short_query_min_coverage", 0.50)
+        )
+    enforce_selection = bool((selection_config or {}).get("enabled", False))
     hits = []
     for mem in memories:
         text = str(mem.get("text") or "")
         text_terms = set(_tokenize(text))
         overlap = query_terms & text_terms
         if not overlap:
+            continue
+        content_overlap = query_content_terms & _content_tokens(text)
+        lexical_coverage = len(content_overlap) / max(len(query_content_terms), 1)
+        if enforce_selection and lexical_coverage < strong_lexical_coverage:
             continue
         score = len(overlap) / max(len(query_terms), 1)
         hits.append(
@@ -1563,6 +2072,7 @@ def _keyword_fallback_hits(
                 "final_score": score,
                 "step2_bonus": 0.0,
                 "support_score": 0.0,
+                "lexical_coverage": lexical_coverage,
                 "retrieval_method": "keyword_fallback",
             }
         )
@@ -1606,6 +2116,8 @@ def retrieve_memories(
     settings = load_settings()
     lnn_config = settings.get("lnn") or {}
     step1_config = settings.get("step1", {}) or {}
+    selection_config = settings.get("retrieval_selection", {}) or {}
+    selection_enabled = bool(selection_config.get("enabled", False))
     top_k = top_k or settings.get("retrieval_top_k", 8)
     rerank = _resolve_rerank_config(settings, int(top_k))
     min_similarity = min_similarity if min_similarity is not None else settings.get("retrieval_min_similarity", 0.25)
@@ -1615,6 +2127,10 @@ def retrieve_memories(
 
     recency_days = settings.get("retrieval_recency_days")
     session_bias = settings.get("retrieval_session_bias", True)
+
+    extracted = extract_date_brackets(query)
+    date_from = date_from or extracted["date_from"]
+    date_to = date_to or extracted["date_to"]
 
     filters = CandidateFilters(
         recency_days=recency_days,
@@ -1626,7 +2142,17 @@ def retrieve_memories(
         date_from=date_from,
         date_to=date_to,
     )
-    filtered = query_memory_candidates(filters)
+
+    fts_query = _build_fts_query(query)
+    if fts_query:
+        lexical_candidates = query_memory_candidates_with_text(fts_query, filters)
+        if selection_enabled and bool(selection_config.get("hybrid_candidates_enabled", True)):
+            semantic_candidates = query_memory_candidates(filters)
+            filtered = _merge_candidate_lanes(lexical_candidates, semantic_candidates)
+        else:
+            filtered = lexical_candidates
+    else:
+        filtered = query_memory_candidates(filters)
     filtered = apply_hidden_metadata_filter(filtered)
     filtered = _dedupe_prefer_latest(filtered)
 
@@ -1645,13 +2171,33 @@ def retrieve_memories(
 
     from .router import route_intent
     resolved_intent = intent if intent else route_intent(query.lower().strip())
-    conditioned_query = _condition_query(query.strip(), resolved_intent, step1_config)
+    raw_query = query.strip()
+    conditioned_query = _condition_query(raw_query, resolved_intent, step1_config)
+    query_aspects = _query_aspects(raw_query, selection_config) if selection_enabled else [raw_query]
+    profile_mode = _profile_query_mode(raw_query) if selection_enabled else None
+    profile_query = profile_mode is not None
+    entity_query = selection_enabled and _is_multi_anchor_entity_query(raw_query)
+    query_embedding_inputs = [conditioned_query]
+    aspect_embedding_offset = 0
+    if selection_enabled and _canonical_text(conditioned_query) != _canonical_text(raw_query):
+        query_embedding_inputs.append(raw_query)
+        aspect_embedding_offset = 1
+    query_embedding_inputs.extend(query_aspects[1:])
 
     try:
-        query_vector = embed([conditioned_query])[0]
+        query_embeddings = embed(query_embedding_inputs)
+        query_vector = query_embeddings[0]
+        direct_aspect_vectors = query_embeddings[
+            aspect_embedding_offset:aspect_embedding_offset + len(query_aspects)
+        ]
     except Exception as exc:
         LOGGER.warning("Embedding backend unavailable for query embedding; falling back to keyword retrieval: %s", exc)
-        return _keyword_fallback_hits(filtered, query, int(top_k))
+        return _keyword_fallback_hits(
+            filtered,
+            query,
+            int(top_k),
+            selection_config if selection_enabled else None,
+        )
 
     vectors: List[Optional[np.ndarray]] = [None for _ in filtered]
     missing_texts: List[str] = []
@@ -1743,6 +2289,12 @@ def retrieve_memories(
             "value_info": value_info,
             "temporal_info": temporal_info,
             "mh": mh if _step1_enabled(step1_config, "multi_head_enabled") else None,
+            "direct_evidence": _direct_evidence(
+                vector,
+                direct_aspect_vectors,
+                str(mem.get("text") or ""),
+                query_aspects,
+            ),
         })
 
     neighborhood_densities: List[float] = []
@@ -1781,6 +2333,22 @@ def retrieve_memories(
             "support_score": 0.0,
             "value_score": value_info["value_score"],
             "value_components": value_info.get("components", {}),
+            "query_aspects": query_aspects,
+            "profile_query": profile_query,
+            "profile_mode": profile_mode,
+            "profile_pattern_anchor": (
+                profile_mode == "psychology" and "pattern" in _lexical_terms(str(mem.get("text") or ""))
+            ),
+            "entity_query": entity_query,
+            "query_echo_memory": selection_enabled and _is_query_echo_memory(
+                str(mem.get("text") or ""), raw_query
+            ),
+            "profile_affinity": (
+                _profile_memory_affinity(mem, profile_mode)
+                if profile_query and bool(selection_config.get("user_profile_metadata_tiebreak_enabled", False))
+                else 0.0
+            ),
+            **cand["direct_evidence"],
         }
         if mh is not None:
             hit["multi_head_score"] = mh["multi_head_score"]
@@ -1808,14 +2376,23 @@ def retrieve_memories(
                     hit["final_score"] = hit["score"]
                     hit["sequence_score"] = seq_boost
 
-    def _main_sort_key(item: Dict[str, Any]) -> tuple[float, datetime]:
+    def _main_sort_key(item: Dict[str, Any]) -> tuple[float, float, datetime]:
         mem = item.get("memory", {})
         ts_val = mem.get("ts") if isinstance(mem, dict) else getattr(mem, "ts", None)
-        return (item["score"], parse_timestamp(ts_val) or datetime.min.replace(tzinfo=timezone.utc))
+        direct = float(item.get("direct_similarity", item["score"]) or 0.0)
+        # Multi-part recall must retain the strongest candidate for either facet
+        # long enough for final facet coverage selection to see it.
+        primary_score = direct if selection_enabled else float(item["score"])
+        return (primary_score, float(item["score"]), parse_timestamp(ts_val) or datetime.min.replace(tzinfo=timezone.utc))
 
     hits.sort(key=_main_sort_key, reverse=True)
 
     configured_pool_k = int(rerank["pool_k"] if rerank["enabled"] else top_k)
+    if selection_enabled and len(query_aspects) > 1:
+        configured_pool_k = max(
+            configured_pool_k,
+            int(selection_config.get("multi_aspect_pool_k", configured_pool_k) or configured_pool_k),
+        )
     pool_k = configured_pool_k
     if _step1_enabled(step1_config, "adaptive_pool_k_enabled") and rerank["enabled"]:
         base_k = int(step1_config.get("adaptive_pool_k_base", configured_pool_k))
@@ -1838,18 +2415,46 @@ def retrieve_memories(
         hits[:dedup_scan_k],
         embedding_by_id,
         dedup_config,
-    )[:pool_k]
+    )
+    if selection_enabled:
+        candidate_hits.sort(
+            key=lambda hit: (
+                float(hit.get("direct_similarity", hit.get("score", 0.0)) or 0.0),
+                float(hit.get("score", 0.0) or 0.0),
+            ),
+            reverse=True,
+        )
+    candidate_hits = candidate_hits[:pool_k]
+
+    # Candidate recall is deliberately permissive. Before the LNN can amplify
+    # a coherent but irrelevant cluster, require immutable query-to-memory evidence.
+    if selection_enabled and not _query_has_sufficient_evidence(candidate_hits, selection_config):
+        return []
 
     if rerank["enabled"]:
         if rerank.get("use_step2_1"):
             candidate_hits = _step2_1_rerank(candidate_hits, query, embedding_by_id, rerank["alpha"],
                                              rerank["step2_config"], lnn_config=lnn_config, filters=filters,
-                                             query_vector=query_vector)
+                                             query_vector=direct_aspect_vectors[0])
         else:
             candidate_hits = _cross_memory_rerank(candidate_hits, query, embedding_by_id, rerank["alpha"])
 
-    if not candidate_hits and any(vector is None for vector in vectors):
-        fallback_hits = _keyword_fallback_hits(filtered, query, int(top_k))
+    if selection_enabled:
+        candidate_hits = _select_diverse_hits(
+            candidate_hits,
+            embedding_by_id,
+            int(top_k),
+            len(query_aspects),
+            selection_config,
+        )
+
+    if not candidate_hits and not selection_enabled and any(vector is None for vector in vectors):
+        fallback_hits = _keyword_fallback_hits(
+            filtered,
+            query,
+            int(top_k),
+            selection_config if selection_enabled else None,
+        )
         if min_reliability and min_reliability > 0:
             fallback_hits = [h for h in fallback_hits if float(h.get("memory", {}).get("source_reliability", 0)) >= min_reliability]
         return fallback_hits
