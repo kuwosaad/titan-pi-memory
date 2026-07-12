@@ -123,6 +123,7 @@ def retrieve(
     max_chars: Optional[int] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    include_scenes: bool = True,
 ) -> dict:
     return retrieve_memory_brief(
         query=query or "",
@@ -133,6 +134,7 @@ def retrieve(
         max_chars=max_chars,
         date_from=from_date,
         date_to=to_date,
+        include_scenes=include_scenes,
     )
 
 

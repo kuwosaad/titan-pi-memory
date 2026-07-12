@@ -107,24 +107,6 @@ def _is_dedup_active(settings: Optional[Dict[str, Any]] = None) -> bool:
     return bool(load_settings().get("dedup", {}).get("enabled", False))
 
 
-def _merge_buffer_memories(memories: List[Dict[str, Any]], session_id: Optional[str] = None) -> None:
-    try:
-        from app.save_pipeline.dedup_buffer import peek_dedup_buffer
-        buffer_entries = peek_dedup_buffer(limit=20, session_id=session_id)
-        seen_ids = {mem.get("id") for mem in memories}
-        for buf in buffer_entries:
-            entry = dict(buf)
-            entry.pop("_buffer_ts", None)
-            entry.pop("_embedding_blob", None)
-            entry.pop("_embedding_dim", None)
-            entry.pop("_embedding_dtype", None)
-            if entry.get("id") not in seen_ids:
-                memories.append(entry)
-                seen_ids.add(entry.get("id"))
-    except Exception:
-        pass
-
-
 def run_memory_pipeline(
     session_id: str,
     turn: int,
@@ -1151,6 +1133,7 @@ def retrieve_memory_brief(
     max_chars: Optional[int] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    include_scenes: bool = True,
 ) -> Dict[str, Any]:
     from app.retrieval_pipeline.retriever import retrieve_memories
     from app.retrieval_pipeline.config import load_settings
@@ -1196,8 +1179,6 @@ def retrieve_memory_brief(
         memory.pop("_embedding_dtype", None)
         memories.append(memory)
 
-    if _is_dedup_active(settings):
-        _merge_buffer_memories(memories, session_id)
     response: Dict[str, Any] = {
         "query": safe_query,
         "mode": selected_mode,
@@ -1209,18 +1190,19 @@ def retrieve_memory_brief(
         "route": route,
     }
 
-    ordered_scene_ids: List[str] = []
-    seen_scene_ids: set[str] = set()
-    for memory in memories:
-        scene_id = str(memory.get("scene_id") or "").strip()
-        if not scene_id or scene_id in seen_scene_ids:
-            continue
-        seen_scene_ids.add(scene_id)
-        ordered_scene_ids.append(scene_id)
-    if ordered_scene_ids:
-        scenes = [scene.model_dump() for scene in get_scenes(ordered_scene_ids)]
-        response["scenes"] = scenes
-        response["scene_brief"] = build_scene_notes(scenes, max_items=max_items, max_chars=max_chars)
+    if include_scenes:
+        ordered_scene_ids: List[str] = []
+        seen_scene_ids: set[str] = set()
+        for memory in memories:
+            scene_id = str(memory.get("scene_id") or "").strip()
+            if not scene_id or scene_id in seen_scene_ids:
+                continue
+            seen_scene_ids.add(scene_id)
+            ordered_scene_ids.append(scene_id)
+        if ordered_scene_ids:
+            scenes = [scene.model_dump() for scene in get_scenes(ordered_scene_ids)]
+            response["scenes"] = scenes
+            response["scene_brief"] = build_scene_notes(scenes, max_items=max_items, max_chars=max_chars)
 
     if route.get("summary_mode") == "timeline":
         response.update(build_timeline(memories, max_items=max_items, max_chars=max_chars))

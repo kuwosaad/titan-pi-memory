@@ -16,6 +16,29 @@ from app.storage.repository import CandidateFilters
 
 LOGGER = logging.getLogger(__name__)
 
+DUPLICATE_NEGATION_TERMS = {
+    "avoid",
+    "disable",
+    "disallow",
+    "dont",
+    "never",
+    "no",
+    "not",
+    "reject",
+    "remove",
+    "without",
+}
+
+DUPLICATE_OPPOSING_TERM_PAIRS = (
+    ("accept", "reject"),
+    ("add", "drop"),
+    ("allow", "disallow"),
+    ("enable", "disable"),
+    ("keep", "remove"),
+    ("prefer", "dislike"),
+    ("use", "avoid"),
+)
+
 STOPWORDS = {
     "a",
     "an",
@@ -159,6 +182,139 @@ def _dedupe_prefer_latest(memories: List[Dict[str, Any]]) -> List[Dict[str, Any]
     deduped = list(latest_by_hash.values())
     deduped.sort(key=lambda item: (parse_timestamp(item.get("ts")) or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
     return deduped
+
+
+def _duplicate_hit_quality(hit: Dict[str, Any]) -> tuple[float, int, float, datetime]:
+    memory = hit.get("memory") or {}
+    verification_status = str(memory.get("verification_status") or "").lower()
+    return (
+        float(hit.get("base_score") or hit.get("score") or 0.0),
+        1 if verification_status == "verified" else 0,
+        float(memory.get("source_reliability") or 0.0),
+        parse_timestamp(memory.get("ts")) or datetime.min.replace(tzinfo=timezone.utc),
+    )
+
+
+def _hits_are_near_duplicates(
+    left: Dict[str, Any],
+    right: Dict[str, Any],
+    embedding_by_id: Dict[str, np.ndarray],
+    *,
+    token_jaccard_threshold: float,
+    embedding_similarity_threshold: float,
+    embedding_min_token_containment: float,
+) -> bool:
+    left_memory = left.get("memory") or {}
+    right_memory = right.get("memory") or {}
+    left_text = str(left_memory.get("text") or "").strip()
+    right_text = str(right_memory.get("text") or "").strip()
+    if not left_text or not right_text:
+        return False
+    if _canonical_text(left_text) == _canonical_text(right_text):
+        return True
+
+    left_raw_tokens = set(_tokenize(left_text))
+    right_raw_tokens = set(_tokenize(right_text))
+    left_has_negation = bool(left_raw_tokens & DUPLICATE_NEGATION_TERMS)
+    right_has_negation = bool(right_raw_tokens & DUPLICATE_NEGATION_TERMS)
+    if left_has_negation != right_has_negation:
+        return False
+    for positive, negative in DUPLICATE_OPPOSING_TERM_PAIRS:
+        if (positive in left_raw_tokens and negative in right_raw_tokens) or (
+            negative in left_raw_tokens and positive in right_raw_tokens
+        ):
+            return False
+
+    left_tokens = _content_tokens(left_text)
+    right_tokens = _content_tokens(right_text)
+    if not left_tokens or not right_tokens:
+        return False
+
+    intersection_size = len(left_tokens & right_tokens)
+    union_size = len(left_tokens | right_tokens)
+    jaccard = intersection_size / max(union_size, 1)
+    if jaccard >= token_jaccard_threshold:
+        return True
+
+    containment = intersection_size / max(min(len(left_tokens), len(right_tokens)), 1)
+    if containment < embedding_min_token_containment:
+        return False
+
+    left_vector = embedding_by_id.get(str(left_memory.get("id") or ""))
+    right_vector = embedding_by_id.get(str(right_memory.get("id") or ""))
+    if left_vector is None or right_vector is None:
+        return False
+    return float(cosine_similarity(left_vector, right_vector)) >= embedding_similarity_threshold
+
+
+def _collapse_near_duplicate_hits(
+    hits: List[Dict[str, Any]],
+    embedding_by_id: Dict[str, np.ndarray],
+    config: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Collapse visible query duplicates without deleting stored memories or scene lineage."""
+    if not hits or not bool(config.get("enabled", False)):
+        return hits
+
+    token_jaccard_threshold = float(config.get("token_jaccard_threshold", 0.82))
+    embedding_similarity_threshold = float(config.get("embedding_similarity_threshold", 0.93))
+    embedding_min_token_containment = float(config.get("embedding_min_token_containment", 0.75))
+
+    groups: List[List[Dict[str, Any]]] = []
+    for hit in hits:
+        matching_group: Optional[List[Dict[str, Any]]] = None
+        for group in groups:
+            representative = max(group, key=_duplicate_hit_quality)
+            if _hits_are_near_duplicates(
+                hit,
+                representative,
+                embedding_by_id,
+                token_jaccard_threshold=token_jaccard_threshold,
+                embedding_similarity_threshold=embedding_similarity_threshold,
+                embedding_min_token_containment=embedding_min_token_containment,
+            ):
+                matching_group = group
+                break
+        if matching_group is None:
+            groups.append([hit])
+        else:
+            matching_group.append(hit)
+
+    collapsed: List[Dict[str, Any]] = []
+    for group in groups:
+        representative = max(group, key=_duplicate_hit_quality)
+        if len(group) == 1:
+            collapsed.append(representative)
+            continue
+
+        memory_ids: List[str] = []
+        scene_ids: List[str] = []
+        for member in group:
+            memory = member.get("memory") or {}
+            memory_id = str(memory.get("id") or "").strip()
+            scene_id = str(memory.get("scene_id") or "").strip()
+            if memory_id and memory_id not in memory_ids:
+                memory_ids.append(memory_id)
+            if scene_id and scene_id not in scene_ids:
+                scene_ids.append(scene_id)
+
+        collapsed.append(
+            {
+                **representative,
+                "duplicate_memory_ids": memory_ids,
+                "duplicate_scene_ids": scene_ids,
+                "duplicate_count": len(group),
+            }
+        )
+
+    collapsed.sort(
+        key=lambda item: (
+            float(item.get("score") or 0.0),
+            parse_timestamp((item.get("memory") or {}).get("ts")) or datetime.min.replace(tzinfo=timezone.utc),
+        ),
+        reverse=True,
+    )
+    return collapsed
 
 
 def _resolve_rerank_config(settings: Dict[str, Any], final_top_k: int) -> Dict[str, Any]:
@@ -1659,10 +1815,11 @@ def retrieve_memories(
 
     hits.sort(key=_main_sort_key, reverse=True)
 
-    candidate_hits = hits
+    configured_pool_k = int(rerank["pool_k"] if rerank["enabled"] else top_k)
+    pool_k = configured_pool_k
     if _step1_enabled(step1_config, "adaptive_pool_k_enabled") and rerank["enabled"]:
-        base_k = int(step1_config.get("adaptive_pool_k_base", 34))
-        max_k = int(step1_config.get("adaptive_pool_k_max", 96))
+        base_k = int(step1_config.get("adaptive_pool_k_base", configured_pool_k))
+        max_k = int(step1_config.get("adaptive_pool_k_max", max(base_k, configured_pool_k)))
         inspect_k = min(base_k * 2, len(hits))
         if inspect_k >= 2:
             top_scores = np.array([h["score"] for h in hits[:inspect_k]], dtype=np.float32)
@@ -1673,7 +1830,15 @@ def retrieve_memories(
                 pool_k = base_k if cv > 0.25 else min(max_k, inspect_k)
             else:
                 pool_k = base_k
-            candidate_hits = hits[:pool_k]
+
+    dedup_config = settings.get("retrieval_dedup", {}) or {}
+    scan_multiplier = max(1, int(dedup_config.get("candidate_scan_multiplier", 3) or 3))
+    dedup_scan_k = min(len(hits), max(int(top_k), pool_k) * scan_multiplier)
+    candidate_hits = _collapse_near_duplicate_hits(
+        hits[:dedup_scan_k],
+        embedding_by_id,
+        dedup_config,
+    )[:pool_k]
 
     if rerank["enabled"]:
         if rerank.get("use_step2_1"):

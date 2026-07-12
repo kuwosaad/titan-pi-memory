@@ -48,6 +48,15 @@ retrieval_rerank_enabled: true
 retrieval_rerank_alpha: 1.0
 retrieval_rerank_pool_k: 34
 
+# Conservative query-time duplicate collapse. This only changes visible retrieval
+# results; stored memories and their scene provenance remain intact.
+retrieval_dedup:
+  enabled: true
+  token_jaccard_threshold: 0.82
+  embedding_similarity_threshold: 0.93
+  embedding_min_token_containment: 0.75
+  candidate_scan_multiplier: 3
+
 # Memory Notes Settings
 notes_max_items: 6
 notes_max_chars: 700

@@ -486,6 +486,7 @@ async function apiRetrieve(
   const params = new URLSearchParams();
   params.set("query", query);
   params.set("limit", String(limit));
+  params.set("include_scenes", "false");
   if (date_from) params.set("from_date", date_from);
   if (date_to) params.set("to_date", date_to);
   const url = `${TITAN_API_BASE}/api/retrieve?${params.toString()}`;
@@ -810,7 +811,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
     writeSpoolEvent("user_message", {
       raw_type: "message_end.user",
       session_id: sessionId,
-      content: compactText(text, 2000),
+      content: text,
     });
   });
 
@@ -823,7 +824,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
     writeSpoolEvent("assistant_message", {
       raw_type: "message_end.assistant",
       session_id: sessionId,
-      content: compactText(text, 2000),
+      content: text,
     });
   });
 
@@ -930,19 +931,9 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         return `${i + 1}. ${m.text}${sceneRef}`;
       });
 
-      // Include full scene context so the LLM can read details without a
-      // separate titan_get_scene_context round-trip.
-      const scenes = data.scenes ?? [];
-      const sceneLines = scenes.length > 0
-        ? ["", "--- Scene context ---", ...scenes.map((s) => {
-            const msgs = (s.messages ?? []).map((m: { role: string; content: string }) => `[${m.role}] ${m.content}`).join("\n");
-            return `Scene ${s.scene_id}:\n${msgs}`;
-          })]
-        : [];
-
       return {
-        content: [{ type: "text" as const, text: [...lines, ...sceneLines].join("\n") }],
-        details: { count: data.count, query: params.query, scene_count: scenes.length },
+        content: [{ type: "text" as const, text: lines.join("\n") }],
+        details: { count: data.count, query: params.query, scene_count: 0 },
       };
     },
   });
