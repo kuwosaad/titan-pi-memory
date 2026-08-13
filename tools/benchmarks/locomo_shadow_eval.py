@@ -135,7 +135,7 @@ def import_titan_api(settings_path: Path, run_dir: Path) -> Dict[str, Any]:
     os.environ["TITAN_SETTINGS_PATH"] = str(settings_path)
     os.environ["TITAN_BASE_DIR"] = str((run_dir / "shadow-home").resolve())
 
-    from app.save_pipeline.pipeline import retrieve_memory_brief, run_memory_pipeline_outcome
+    from app.save_pipeline.pipeline import get_scene_context, retrieve_memory_brief, run_memory_pipeline_outcome
     from app.embedding.embedder import embed
     from app.save_pipeline.extraction.adapters import get_extraction_adapter
     from app.save_pipeline.extraction.extractor import build_safe_fallback_memories
@@ -148,6 +148,7 @@ def import_titan_api(settings_path: Path, run_dir: Path) -> Dict[str, Any]:
     ensure_dirs()
     return {
         "retrieve_memory_brief": retrieve_memory_brief,
+        "get_scene_context": get_scene_context,
         "run_memory_pipeline_outcome": run_memory_pipeline_outcome,
         "embed": embed,
         "get_extraction_adapter": get_extraction_adapter,
@@ -338,15 +339,26 @@ def evaluate_dialogue(
             mode="both",
             limit=top_k,
         )
+        expanded_scenes: List[Dict[str, Any]] = []
+        for reference in response.get("scene_refs") or []:
+            scene_id = str(reference.get("scene_id") or "").strip()
+            if not scene_id:
+                continue
+            context = titan_api["get_scene_context"](scene_id)
+            scene = context.get("scene") if isinstance(context, dict) else None
+            if isinstance(scene, dict):
+                expanded_scenes.append(scene)
+        evidence_response = dict(response)
+        evidence_response["scenes"] = expanded_scenes
         results.append(
             {
                 "question": question,
                 "answer": qa.get("answer"),
                 "category": qa.get("category"),
-                "matched": answer_matches(qa.get("answer"), response),
+                "matched": answer_matches(qa.get("answer"), evidence_response),
                 "memory_ids": [str(memory.get("id") or "") for memory in response.get("memories") or []],
                 "memory_texts": [str(memory.get("text") or "") for memory in response.get("memories") or []],
-                "scene_ids": [str(scene.get("scene_id") or "") for scene in response.get("scenes") or []],
+                "scene_ids": [str(scene.get("scene_id") or "") for scene in response.get("scene_refs") or []],
                 "brief": response.get("brief") or "",
                 "scene_brief": response.get("scene_brief") or "",
             }

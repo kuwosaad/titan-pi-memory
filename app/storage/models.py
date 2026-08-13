@@ -1,5 +1,5 @@
-from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Literal, Mapping, Optional
+from pydantic import BaseModel, Field, model_validator
 
 
 class Message(BaseModel):
@@ -60,6 +60,21 @@ class SceneToolCall(BaseModel):
     event_id: Optional[str] = Field(None, description="Optional source event identifier")
 
 
+EvidenceStatus = Literal["complete", "partial"]
+
+
+class SceneReference(BaseModel):
+    """The lightweight address returned by memory search for a scene."""
+
+    scene_id: str = Field(..., description="Scene identifier used to fetch full evidence")
+    evidence_status: EvidenceStatus = Field("partial", description="Whether scene evidence is complete or partial")
+    evidence_version: int = Field(0, description="Version of the scene evidence contract")
+    missing_source_event_ids: List[str] = Field(
+        default_factory=list,
+        description="Source event IDs that could not be recovered for this scene",
+    )
+
+
 class Scene(BaseModel):
     scene_id: str = Field(..., description="Unique scene ID")
     session_id: str = Field(..., description="Session the scene belongs to")
@@ -71,12 +86,106 @@ class Scene(BaseModel):
     anchor_event_id: Optional[str] = Field(None, description="Primary event that anchored scene creation")
     source_event_ids: List[str] = Field(default_factory=list, description="All known source events for this scene")
     raw_events: List[Dict[str, Any]] = Field(default_factory=list, description="Lossless raw events included in this scene chunk")
+    evidence_version: int = Field(0, description="Version of the durable scene evidence contract")
+    evidence_status: EvidenceStatus = Field("partial", description="Whether durable scene evidence is complete or partial")
+    missing_source_event_ids: List[str] = Field(
+        default_factory=list,
+        description="Source event IDs that were expected but could not be recovered",
+    )
     messages: List[SceneMessage] = Field(default_factory=list, description="Ordered messages that make up the scene")
     tool_calls: List[SceneToolCall] = Field(default_factory=list, description="Compact tool calls that happened inside the scene")
     extraction_user_text: str = Field(..., description="User-side text passed into the extractor")
     extraction_assistant_text: str = Field(..., description="Assistant-side text passed into the extractor")
     used_context_fallback: bool = Field(False, description="Whether approximate user context fallback was used")
     ts: str = Field(..., description="Scene timestamp")
+
+
+    @model_validator(mode="after")
+    def validate_evidence_contract(self) -> "Scene":
+        validate_scene_evidence_payload(self.model_dump(mode="python"))
+        return self
+
+
+def validate_scene_evidence_payload(scene: Mapping[str, Any]) -> None:
+    """Validate the invariants required before a scene can claim complete v1 evidence."""
+
+    try:
+        evidence_version = int(scene.get("evidence_version", 0) or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("evidence_version must be an integer") from exc
+    evidence_status = str(scene.get("evidence_status") or "partial")
+    if evidence_version < 0:
+        raise ValueError("evidence_version cannot be negative")
+    if evidence_status not in {"complete", "partial"}:
+        raise ValueError("evidence_status must be 'complete' or 'partial'")
+    if evidence_version == 0:
+        if evidence_status != "partial":
+            raise ValueError("legacy v0 scenes must remain partial")
+        return
+    if evidence_status != "complete":
+        return
+    if evidence_version != 1:
+        raise ValueError("only evidence version 1 can be marked complete")
+
+    scene_id = str(scene.get("scene_id") or "").strip()
+    session_id = str(scene.get("session_id") or "").strip()
+    source_event_ids = [str(value).strip() for value in scene.get("source_event_ids") or []]
+    missing_event_ids = [str(value).strip() for value in scene.get("missing_source_event_ids") or []]
+    raw_events = scene.get("raw_events") or []
+    if not scene_id or not session_id:
+        raise ValueError("complete v1 scenes require scene_id and session_id")
+    if missing_event_ids:
+        raise ValueError("complete v1 scenes cannot contain missing source event IDs")
+    if not source_event_ids:
+        raise ValueError("complete v1 scenes require source_event_ids")
+    if not isinstance(raw_events, list) or len(raw_events) != len(source_event_ids):
+        raise ValueError("complete v1 scenes require one raw event for every source event ID")
+
+    raw_event_ids: List[str] = []
+    raw_event_seqs: List[int] = []
+    for raw_event in raw_events:
+        if not isinstance(raw_event, Mapping):
+            raise ValueError("complete v1 raw events must be objects")
+        event_id = str(raw_event.get("event_id") or "").strip()
+        if not event_id:
+            raise ValueError("complete v1 raw events require event_id")
+        if event_id in raw_event_ids:
+            raise ValueError("complete v1 raw events cannot contain duplicate event IDs")
+        try:
+            event_seq = int(raw_event.get("seq"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("complete v1 raw events require integer seq values") from exc
+        if event_seq <= 0:
+            raise ValueError("complete v1 raw event seq values must be positive")
+        raw_session_id = str(raw_event.get("session_id") or "").strip()
+        if raw_session_id != session_id:
+            raise ValueError("complete v1 raw events must belong to the scene session")
+        raw_event_ids.append(event_id)
+        raw_event_seqs.append(event_seq)
+
+    if source_event_ids != raw_event_ids:
+        raise ValueError("source_event_ids must exactly match ordered raw event IDs")
+    if raw_event_seqs != sorted(raw_event_seqs) or len(set(raw_event_seqs)) != len(raw_event_seqs):
+        raise ValueError("complete v1 raw events must be strictly ordered by seq")
+    if str(scene.get("anchor_event_id") or "").strip() not in raw_event_ids:
+        raise ValueError("complete v1 anchor_event_id must identify a raw event")
+    if int(scene.get("start_event_seq") or 0) != raw_event_seqs[0]:
+        raise ValueError("start_event_seq must match the first complete v1 raw event")
+    if int(scene.get("end_event_seq") or 0) != raw_event_seqs[-1]:
+        raise ValueError("end_event_seq must match the last complete v1 raw event")
+
+    for message in scene.get("messages") or []:
+        if not isinstance(message, Mapping):
+            raise ValueError("complete v1 messages must be objects")
+        message_event_id = str(message.get("event_id") or "").strip()
+        if not message_event_id or message_event_id not in raw_event_ids:
+            raise ValueError("complete v1 messages require source event provenance")
+    for tool_call in scene.get("tool_calls") or []:
+        if not isinstance(tool_call, Mapping):
+            raise ValueError("complete v1 tool calls must be objects")
+        tool_event_id = str(tool_call.get("event_id") or "").strip()
+        if not tool_event_id or tool_event_id not in raw_event_ids:
+            raise ValueError("complete v1 tool calls require source event provenance")
 
 
 class TraceToolCall(BaseModel):

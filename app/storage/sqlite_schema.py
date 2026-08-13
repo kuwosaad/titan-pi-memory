@@ -17,7 +17,7 @@ def ensure_memory_store_metadata(conn: sqlite3.Connection) -> None:
     )
     rows = {
         "schema_name": "titan_memory_store",
-        "schema_version": "2",
+        "schema_version": "3",
         "storage_model": "scene_first",
         "portable_unit": "memory_store.db",
         "description": "Ordered lossless scenes are the source of truth; memories are extracted from scenes.",
@@ -163,6 +163,9 @@ def ensure_scene_readable_views(conn: sqlite3.Connection) -> None:
             kind,
             ts AS created_at,
             anchor_event_id,
+            evidence_version,
+            evidence_status,
+            missing_source_event_ids_json,
             substr(extraction_user_text, 1, 500) AS user_text,
             substr(extraction_assistant_text, 1, 500) AS assistant_text,
             tool_calls_json,
@@ -182,6 +185,8 @@ def ensure_scene_readable_views(conn: sqlite3.Connection) -> None:
             scene_id,
             kind,
             ts AS created_at,
+            evidence_version,
+            evidence_status,
             CASE
                 WHEN extraction_user_text != '' AND extraction_assistant_text != '' THEN 'message_exchange'
                 WHEN extraction_user_text != '' THEN 'user_text'

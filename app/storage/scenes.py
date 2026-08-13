@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
-from .models import Scene
+from .models import Scene, validate_scene_evidence_payload
 from .sessions import BASE_DIR, MEMORIES_DIR, read_json, write_json
 from . import sessions as _sessions
 from .sqlite import connect_sqlite
@@ -67,12 +67,30 @@ def _normalize_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
     normalized.setdefault("anchor_event_id", None)
     normalized.setdefault("source_event_ids", [])
     normalized.setdefault("raw_events", [])
+    normalized.setdefault("evidence_version", 0)
+    normalized.setdefault("evidence_status", "partial")
+    normalized.setdefault("missing_source_event_ids", [])
     normalized.setdefault("messages", [])
     normalized.setdefault("tool_calls", [])
     normalized.setdefault("extraction_user_text", "")
     normalized.setdefault("extraction_assistant_text", "")
     normalized.setdefault("used_context_fallback", False)
     normalized.setdefault("ts", now_iso())
+
+    claims_versioned_evidence = int(normalized.get("evidence_version") or 0) >= 1
+    if claims_versioned_evidence:
+        for field in ("messages", "tool_calls", "raw_events"):
+            values = normalized.get(field)
+            if not isinstance(values, list) or any(not isinstance(item, dict) for item in values):
+                raise ValueError(f"versioned {field} must be a list of objects")
+        for message in normalized.get("messages") or []:
+            if str(message.get("role") or "") not in {"user", "assistant", "system"}:
+                raise ValueError("versioned messages require a valid role")
+            if not str(message.get("content") or "").strip():
+                raise ValueError("versioned messages cannot be empty")
+        for tool_call in normalized.get("tool_calls") or []:
+            if not str(tool_call.get("name") or "").strip():
+                raise ValueError("versioned tool calls require a name")
 
     messages: List[Dict[str, Any]] = []
     for item in normalized.get("messages") or []:
@@ -110,6 +128,21 @@ def _normalize_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
         )
     normalized["tool_calls"] = tool_calls
     normalized["source_event_ids"] = [str(item) for item in normalized.get("source_event_ids") or [] if str(item).strip()]
+    try:
+        normalized["evidence_version"] = int(normalized.get("evidence_version") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("evidence_version must be an integer") from exc
+    normalized["evidence_status"] = str(normalized.get("evidence_status") or "partial")
+    if normalized["evidence_status"] not in {"complete", "partial"}:
+        raise ValueError("evidence_status must be 'complete' or 'partial'")
+    if normalized["evidence_version"] == 0:
+        normalized["evidence_status"] = "partial"
+    missing_source_event_ids: List[str] = []
+    for item in normalized.get("missing_source_event_ids") or []:
+        value = str(item).strip()
+        if value and value not in missing_source_event_ids:
+            missing_source_event_ids.append(value)
+    normalized["missing_source_event_ids"] = missing_source_event_ids
     raw_events: List[Dict[str, Any]] = []
     for item in normalized.get("raw_events") or []:
         if isinstance(item, dict):
@@ -122,7 +155,12 @@ def _normalize_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
         value = normalized.get(key)
         normalized[key] = int(value) if value not in (None, "") else None
     normalized["used_context_fallback"] = bool(normalized.get("used_context_fallback", False))
+    validate_scene_evidence_payload(normalized)
     return normalized
+
+
+def _is_complete_scene(scene: Dict[str, Any]) -> bool:
+    return str(scene.get("evidence_status") or "partial") == "complete" and int(scene.get("evidence_version") or 0) == 1
 
 
 class SceneRepository(Protocol):
@@ -133,6 +171,9 @@ class SceneRepository(Protocol):
         ...
 
     def get_scenes(self, scene_ids: List[str]) -> List[Dict[str, Any]]:
+        ...
+
+    def get_scene_references(self, scene_ids: List[str]) -> List[Dict[str, Any]]:
         ...
 
     def get_recent_scenes(self, limit: int = 8, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -150,10 +191,17 @@ class JsonSceneRepository:
     def append_scenes(self, scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not scenes:
             return []
+        normalized_scenes = [_normalize_scene(scene) for scene in scenes]
         with _SCENES_LOCK:
-            existing = {str(item.get("scene_id") or ""): item for item in read_json(SCENES_FILE, []) if isinstance(item, dict)}
-            for scene in scenes:
-                normalized = _normalize_scene(scene)
+            existing = {
+                str(item.get("scene_id") or ""): _normalize_scene(item)
+                for item in read_json(SCENES_FILE, [])
+                if isinstance(item, dict)
+            }
+            for normalized in normalized_scenes:
+                current = existing.get(normalized["scene_id"])
+                if current is not None and _is_complete_scene(current) and not _is_complete_scene(normalized):
+                    continue
                 existing[normalized["scene_id"]] = normalized
             ordered = sorted(existing.values(), key=lambda item: str(item.get("ts") or ""))
             write_json(SCENES_FILE, ordered)
@@ -174,6 +222,13 @@ class JsonSceneRepository:
             return []
         by_id = {scene.get("scene_id"): scene for scene in self.load_all_scenes()}
         return [by_id[scene_id] for scene_id in scene_ids if scene_id in by_id]
+
+    def get_scene_references(self, scene_ids: List[str]) -> List[Dict[str, Any]]:
+        wanted = [str(scene_id).strip() for scene_id in scene_ids if str(scene_id).strip()]
+        if not wanted:
+            return []
+        by_id = {scene.get("scene_id"): scene for scene in self.load_all_scenes()}
+        return [_scene_reference_payload(by_id[scene_id]) for scene_id in wanted if scene_id in by_id]
 
     def get_recent_scenes(self, limit: int = 8, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
         scenes = self.load_all_scenes()
@@ -214,6 +269,9 @@ class SqliteSceneRepository:
             ts TEXT NOT NULL,
             source_event_ids_json TEXT NOT NULL,
             raw_events_json TEXT NOT NULL DEFAULT '[]',
+            evidence_version INTEGER NOT NULL DEFAULT 0,
+            evidence_status TEXT NOT NULL DEFAULT 'partial',
+            missing_source_event_ids_json TEXT NOT NULL DEFAULT '[]',
             messages_json TEXT NOT NULL,
             tool_calls_json TEXT NOT NULL DEFAULT '[]',
             extraction_user_text TEXT NOT NULL,
@@ -236,6 +294,12 @@ class SqliteSceneRepository:
                 conn.execute("ALTER TABLE scenes ADD COLUMN raw_events_json TEXT NOT NULL DEFAULT '[]'")
             if "tool_calls_json" not in existing_columns:
                 conn.execute("ALTER TABLE scenes ADD COLUMN tool_calls_json TEXT NOT NULL DEFAULT '[]'")
+            if "evidence_version" not in existing_columns:
+                conn.execute("ALTER TABLE scenes ADD COLUMN evidence_version INTEGER NOT NULL DEFAULT 0")
+            if "evidence_status" not in existing_columns:
+                conn.execute("ALTER TABLE scenes ADD COLUMN evidence_status TEXT NOT NULL DEFAULT 'partial'")
+            if "missing_source_event_ids_json" not in existing_columns:
+                conn.execute("ALTER TABLE scenes ADD COLUMN missing_source_event_ids_json TEXT NOT NULL DEFAULT '[]'")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_scenes_session_seq ON scenes(session_id, scene_seq)")
             ensure_memory_store_metadata(conn)
             ensure_scene_readable_views(conn)
@@ -255,6 +319,9 @@ class SqliteSceneRepository:
             "ts": str(normalized.get("ts") or now_iso()),
             "source_event_ids_json": json.dumps(normalized.get("source_event_ids") or []),
             "raw_events_json": json.dumps(normalized.get("raw_events") or [], default=str),
+            "evidence_version": normalized["evidence_version"],
+            "evidence_status": normalized["evidence_status"],
+            "missing_source_event_ids_json": json.dumps(normalized.get("missing_source_event_ids") or []),
             "messages_json": json.dumps(normalized.get("messages") or []),
             "tool_calls_json": json.dumps(normalized.get("tool_calls") or [], default=str),
             "extraction_user_text": str(normalized.get("extraction_user_text") or ""),
@@ -276,6 +343,11 @@ class SqliteSceneRepository:
                 "ts": row["ts"],
                 "source_event_ids": json.loads(row["source_event_ids_json"] or "[]"),
                 "raw_events": json.loads(row["raw_events_json"] or "[]") if "raw_events_json" in row.keys() else [],
+                "evidence_version": row["evidence_version"] if "evidence_version" in row.keys() else 0,
+                "evidence_status": row["evidence_status"] if "evidence_status" in row.keys() else "partial",
+                "missing_source_event_ids": json.loads(row["missing_source_event_ids_json"] or "[]")
+                if "missing_source_event_ids_json" in row.keys()
+                else [],
                 "messages": json.loads(row["messages_json"] or "[]"),
                 "tool_calls": json.loads(row["tool_calls_json"] or "[]") if "tool_calls_json" in row.keys() else [],
                 "extraction_user_text": row["extraction_user_text"],
@@ -290,12 +362,14 @@ class SqliteSceneRepository:
         sql = """
         INSERT INTO scenes (
             scene_id, session_id, turn, kind, scene_seq, start_event_seq, end_event_seq,
-            anchor_event_id, ts, source_event_ids_json, raw_events_json, messages_json, tool_calls_json, extraction_user_text,
+            anchor_event_id, ts, source_event_ids_json, raw_events_json, evidence_version, evidence_status,
+            missing_source_event_ids_json, messages_json, tool_calls_json, extraction_user_text,
             extraction_assistant_text, used_context_fallback
         )
         VALUES (
             :scene_id, :session_id, :turn, :kind, :scene_seq, :start_event_seq, :end_event_seq,
-            :anchor_event_id, :ts, :source_event_ids_json, :raw_events_json, :messages_json, :tool_calls_json, :extraction_user_text,
+            :anchor_event_id, :ts, :source_event_ids_json, :raw_events_json, :evidence_version, :evidence_status,
+            :missing_source_event_ids_json, :messages_json, :tool_calls_json, :extraction_user_text,
             :extraction_assistant_text, :used_context_fallback
         )
         ON CONFLICT(scene_id) DO UPDATE SET
@@ -309,11 +383,15 @@ class SqliteSceneRepository:
             ts=excluded.ts,
             source_event_ids_json=excluded.source_event_ids_json,
             raw_events_json=excluded.raw_events_json,
+            evidence_version=excluded.evidence_version,
+            evidence_status=excluded.evidence_status,
+            missing_source_event_ids_json=excluded.missing_source_event_ids_json,
             messages_json=excluded.messages_json,
             tool_calls_json=excluded.tool_calls_json,
             extraction_user_text=excluded.extraction_user_text,
             extraction_assistant_text=excluded.extraction_assistant_text,
             used_context_fallback=excluded.used_context_fallback
+        WHERE scenes.evidence_status <> 'complete' OR excluded.evidence_status = 'complete'
         """
         rows = [self._scene_to_row(scene) for scene in scenes]
         with self._lock, self._connect() as conn:
@@ -334,6 +412,28 @@ class SqliteSceneRepository:
         with self._lock, self._connect() as conn:
             rows = conn.execute(query, normalized_ids).fetchall()
         by_id = {row["scene_id"]: self._row_to_scene(row) for row in rows}
+        return [by_id[scene_id] for scene_id in normalized_ids if scene_id in by_id]
+
+    def get_scene_references(self, scene_ids: List[str]) -> List[Dict[str, Any]]:
+        normalized_ids = [str(scene_id).strip() for scene_id in scene_ids if str(scene_id).strip()]
+        if not normalized_ids:
+            return []
+        placeholders = ",".join("?" for _ in normalized_ids)
+        query = f"""
+        SELECT scene_id, evidence_version, evidence_status, missing_source_event_ids_json
+        FROM scenes WHERE scene_id IN ({placeholders})
+        """
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(query, normalized_ids).fetchall()
+        by_id = {
+            row["scene_id"]: {
+                "scene_id": row["scene_id"],
+                "evidence_version": int(row["evidence_version"] or 0),
+                "evidence_status": str(row["evidence_status"] or "partial"),
+                "missing_source_event_ids": json.loads(row["missing_source_event_ids_json"] or "[]"),
+            }
+            for row in rows
+        }
         return [by_id[scene_id] for scene_id in normalized_ids if scene_id in by_id]
 
     def get_recent_scenes(self, limit: int = 8, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -390,15 +490,56 @@ def get_scene_repository() -> SceneRepository:
     return _REPO_CACHE
 
 
+def get_scene_write_repository() -> SceneRepository:
+    """Return the configured scene store without applying read fallbacks."""
+
+    global _REPO_CACHE, _REPO_CACHE_KEY
+    _refresh_json_paths()
+    backend = _resolve_backend()
+    sqlite_path = _resolve_sqlite_path()
+    cache_key = (backend, str(sqlite_path))
+    if backend == "json":
+        if not isinstance(_REPO_CACHE, JsonSceneRepository) or _REPO_CACHE_KEY != cache_key:
+            _REPO_CACHE = JsonSceneRepository()
+            _REPO_CACHE_KEY = cache_key
+        return _REPO_CACHE
+    if isinstance(_REPO_CACHE, SqliteSceneRepository) and _REPO_CACHE_KEY == cache_key:
+        return _REPO_CACHE
+    _REPO_CACHE = SqliteSceneRepository(sqlite_path)
+    _REPO_CACHE_KEY = cache_key
+    return _REPO_CACHE
+
+
 def append_scene(scene: Dict[str, Any] | Scene) -> Dict[str, Any]:
     payload = scene.model_dump() if isinstance(scene, Scene) else dict(scene)
-    get_scene_repository().append_scenes([payload])
-    return payload
+    repository = get_scene_write_repository()
+    repository.append_scenes([payload])
+    return repository.get_scene(str(payload.get("scene_id") or "")) or payload
+
+
+def _scene_reference_payload(scene: Dict[str, Any]) -> Dict[str, Any]:
+    status = str(scene.get("evidence_status") or "partial")
+    if status not in {"complete", "partial"}:
+        status = "partial"
+    try:
+        version = int(scene.get("evidence_version") or 0)
+    except (TypeError, ValueError):
+        version = 0
+    return {
+        "scene_id": str(scene.get("scene_id") or ""),
+        "evidence_status": status,
+        "evidence_version": version,
+        "missing_source_event_ids": [
+            str(event_id)
+            for event_id in scene.get("missing_source_event_ids") or []
+            if str(event_id).strip()
+        ],
+    }
 
 
 def append_scenes(scenes: List[Dict[str, Any] | Scene]) -> List[Dict[str, Any]]:
     payload = [scene.model_dump() if isinstance(scene, Scene) else dict(scene) for scene in scenes]
-    return get_scene_repository().append_scenes(payload)
+    return get_scene_write_repository().append_scenes(payload)
 
 
 def get_scene(scene_id: str) -> Optional[Scene]:
@@ -408,6 +549,10 @@ def get_scene(scene_id: str) -> Optional[Scene]:
 
 def get_scenes(scene_ids: List[str]) -> List[Scene]:
     return [Scene(**scene) for scene in get_scene_repository().get_scenes(scene_ids)]
+
+
+def get_scene_references(scene_ids: List[str]) -> List[Dict[str, Any]]:
+    return get_scene_repository().get_scene_references(scene_ids)
 
 
 def get_recent_scenes(limit: int = 8, session_id: Optional[str] = None) -> List[Scene]:

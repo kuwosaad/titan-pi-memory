@@ -25,15 +25,22 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                     "verification_status": "unverified",
                     "ts": "2026-07-12T00:00:00+00:00",
                     "source_event_ids": ["e-1"],
+                    "provenance": {"user": "private source text"},
+                    "raw_events": [{"event_id": "private"}],
+                    "embedding": [0.1, 0.2],
                 }
             ],
             "scenes": [],
+            "scene_refs": [],
         }
         with patch.object(mcp_server, "retrieve_memory_brief", return_value=expected) as mock_retrieve:
             payload = await mcp_server.query_memories(query="bounded scene", limit=4)
 
         self.assertEqual(payload["scenes"], [])
         self.assertEqual(payload["memories"][0]["scene_id"], "s1:scene:e-1")
+        self.assertNotIn("provenance", payload["memories"][0])
+        self.assertNotIn("raw_events", payload["memories"][0])
+        self.assertNotIn("embedding", payload["memories"][0])
         mock_retrieve.assert_called_once_with(
             query="bounded scene",
             session_id=None,

@@ -42,6 +42,7 @@ class RetrieveRouteTests(unittest.TestCase):
             "mode": "both",
             "count": 0,
             "memories": [],
+            "scene_refs": [],
             "brief": "",
             "route": {
                 "schema_version": "v2",
@@ -68,7 +69,7 @@ class RetrieveRouteTests(unittest.TestCase):
             max_chars=None,
             date_from=None,
             date_to=None,
-            include_scenes=True,
+            include_scenes=False,
         )
 
     def test_retrieve_endpoint_can_return_scene_pointers_without_scene_bodies(self):

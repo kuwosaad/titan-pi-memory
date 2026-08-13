@@ -151,11 +151,11 @@ class RetrievalBriefTests(unittest.TestCase):
         self.assertGreater(hits[0]["step2_bonus"], 0.0)
         self.assertGreater(hits[0]["final_score"], hits[0]["base_score"])
 
-    @patch("app.save_pipeline.pipeline.get_scenes")
+    @patch("app.save_pipeline.pipeline.get_scene_references")
     @patch("app.retrieval_pipeline.retriever.retrieve_memories")
     @patch("app.save_pipeline.pipeline.route_query")
     @patch("app.retrieval_pipeline.config.load_settings")
-    def test_retrieve_memory_brief_returns_scene_context(self, mock_load_settings, mock_route_query, mock_retrieve_memories, mock_get_scenes):
+    def test_retrieve_memory_brief_returns_lightweight_scene_reference(self, mock_load_settings, mock_route_query, mock_retrieve_memories, mock_get_scene_references):
         mock_load_settings.return_value = {
             "dedup": {"enabled": False},
             "step2": {"cluster_compression_enabled": False},
@@ -180,30 +180,23 @@ class RetrievalBriefTests(unittest.TestCase):
                 },
             }
         ]
-        mock_get_scenes.return_value = [
-            type(
-                "SceneStub",
-                (),
-                {
-                    "model_dump": lambda self: {
-                        "scene_id": "s1:scene:e-2",
-                        "kind": "message_exchange",
-                        "messages": [
-                            {"role": "user", "content": "Why did we change dedupe?"},
-                            {"role": "assistant", "content": "Use session_id and event_id together."},
-                        ],
-                    }
-                },
-            )()
+        mock_get_scene_references.return_value = [
+            {
+                "scene_id": "s1:scene:e-2",
+                "evidence_status": "complete",
+                "evidence_version": 1,
+                "missing_source_event_ids": [],
+            }
         ]
 
         result = retrieve_memory_brief(query="what rule should we use for dedupe", session_id="s1")
 
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["memories"][0]["scene_id"], "s1:scene:e-2")
-        self.assertEqual(result["scenes"][0]["scene_id"], "s1:scene:e-2")
-        self.assertIn("SCENE BRIEF:", result["scene_brief"])
-        self.assertIn("Why did we change dedupe", result["scene_brief"])
+        self.assertEqual(result["scenes"], [])
+        self.assertEqual(result["scene_refs"][0]["scene_id"], "s1:scene:e-2")
+        self.assertEqual(result["scene_refs"][0]["evidence_status"], "complete")
+        self.assertEqual(result["scene_brief"], "")
 
 
 DEFAULT_STEP2_CONFIG = {

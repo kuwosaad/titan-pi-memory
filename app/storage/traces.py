@@ -20,18 +20,37 @@ TRACE_FILE = TRACES_DIR / "trace_packets.json"
 EVENT_LEDGER_FILE = TRACES_DIR / "events.jsonl"
 EVENT_INDEX_FILE = TRACES_DIR / "event_index.json"
 CHECKPOINT_FILE = TRACES_DIR / "checkpoints.json"
+SCENE_CHECKPOINT_FILE = TRACES_DIR / "scene_checkpoints.json"
+# Compatibility alias for callers that describe the second checkpoint as the
+# committed checkpoint.  ``SCENE_CHECKPOINT_FILE`` remains the canonical
+# patch point and filename.
+COMMITTED_CHECKPOINT_FILE = SCENE_CHECKPOINT_FILE
 RETRY_QUEUE_FILE = TRACES_DIR / "retry_queue.jsonl"
 SPOOL_CURSOR_FILE = TRACES_DIR / "spool_cursors.json"
 PENDING_USER_MESSAGES_FILE = TRACES_DIR / "pending_user_messages.json"
 _TRACE_ROOT = TRACES_DIR
 
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
 _SECRET_KEY_MARKERS = ("token", "secret", "password", "api_key", "apikey", "auth", "authorization", "cookie")
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"\bsk[-_][A-Za-z0-9_-]{8,}\b"),
     re.compile(r"\bntn_[A-Za-z0-9]{12,}\b"),
     re.compile(r"\bsecret_[A-Za-z0-9]{12,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bnpm_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
     re.compile(r"\bBearer\s+[A-Za-z0-9._-]{8,}\b", re.IGNORECASE),
+    re.compile(
+        r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+        re.DOTALL,
+    ),
+    re.compile(
+        r"\b[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|ACCESS_KEY)[A-Z0-9_]*\s*=\s*(?:[^\s'\"]+|'[^']*'|\"[^\"]*\")",
+        re.IGNORECASE,
+    ),
 )
 
 
@@ -43,7 +62,8 @@ def refresh_trace_paths() -> None:
     """
 
     global _TRACE_ROOT, TRACE_FILE, EVENT_LEDGER_FILE, EVENT_INDEX_FILE
-    global CHECKPOINT_FILE, RETRY_QUEUE_FILE, SPOOL_CURSOR_FILE, PENDING_USER_MESSAGES_FILE
+    global CHECKPOINT_FILE, SCENE_CHECKPOINT_FILE, COMMITTED_CHECKPOINT_FILE
+    global RETRY_QUEUE_FILE, SPOOL_CURSOR_FILE, PENDING_USER_MESSAGES_FILE
     from . import sessions
 
     sessions.refresh_runtime_paths()
@@ -57,6 +77,8 @@ def refresh_trace_paths() -> None:
         ("EVENT_LEDGER_FILE", "events.jsonl"),
         ("EVENT_INDEX_FILE", "event_index.json"),
         ("CHECKPOINT_FILE", "checkpoints.json"),
+        ("SCENE_CHECKPOINT_FILE", "scene_checkpoints.json"),
+        ("COMMITTED_CHECKPOINT_FILE", "scene_checkpoints.json"),
         ("RETRY_QUEUE_FILE", "retry_queue.jsonl"),
         ("SPOOL_CURSOR_FILE", "spool_cursors.json"),
         ("PENDING_USER_MESSAGES_FILE", "pending_user_messages.json"),
@@ -148,9 +170,211 @@ def get_session_checkpoint(session_id: str) -> int:
 
 
 def update_session_checkpoint(session_id: str, seq: int) -> None:
-    checkpoints = load_checkpoints()
-    checkpoints[session_id] = max(int(checkpoints.get(session_id, 0)), int(seq))
-    save_checkpoints(checkpoints)
+    with _LOCK:
+        checkpoints = load_checkpoints()
+        checkpoints[session_id] = max(int(checkpoints.get(session_id, 0)), int(seq))
+        save_checkpoints(checkpoints)
+
+
+def _scene_checkpoint_path() -> Path:
+    """Return the active path while supporting either public patch point.
+
+    ``SCENE_CHECKPOINT_FILE`` is the canonical name.  The alias is accepted so
+    integrations that called this the committed checkpoint can patch that
+    constant without silently writing to the real runtime directory.
+    """
+
+    default_path = _TRACE_ROOT / "scene_checkpoints.json"
+    if SCENE_CHECKPOINT_FILE != default_path:
+        return SCENE_CHECKPOINT_FILE
+    if COMMITTED_CHECKPOINT_FILE != default_path:
+        return COMMITTED_CHECKPOINT_FILE
+    return SCENE_CHECKPOINT_FILE
+
+
+def _load_scene_checkpoint_state() -> Tuple[Dict[str, int], Dict[str, Set[int]]]:
+    """Load committed checkpoints and optional finalized sequence metadata.
+
+    The public checkpoint view stays a simple ``session_id -> seq`` mapping.
+    Finalized sequences are kept under a reserved key so callers can persist
+    events that are ready to commit before a contiguous checkpoint is raised.
+    Older flat files remain valid and need no migration.
+    """
+
+    refresh_trace_paths()
+    ensure_dirs()
+    raw = read_json(_scene_checkpoint_path(), {})
+    if not isinstance(raw, dict):
+        return {}, {}
+
+    checkpoints: Dict[str, int] = {}
+    for session_id, value in raw.items():
+        if str(session_id).startswith("_"):
+            continue
+        try:
+            checkpoints[str(session_id)] = int(value)
+        except (TypeError, ValueError):
+            continue
+
+    finalized_payload = raw.get("_finalized")
+    finalized: Dict[str, Set[int]] = {}
+    if isinstance(finalized_payload, dict):
+        for session_id, values in finalized_payload.items():
+            if not isinstance(values, list):
+                continue
+            parsed: Set[int] = set()
+            for value in values:
+                try:
+                    seq = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if seq > 0:
+                    parsed.add(seq)
+            if parsed:
+                finalized[str(session_id)] = parsed
+    return checkpoints, finalized
+
+
+def _save_scene_checkpoint_state(
+    checkpoints: Dict[str, int],
+    finalized: Optional[Dict[str, Set[int]]] = None,
+) -> None:
+    payload: Dict[str, Any] = {
+        str(session_id): int(seq)
+        for session_id, seq in checkpoints.items()
+        if int(seq) > 0
+    }
+    finalized_payload = {
+        str(session_id): sorted(int(seq) for seq in values if int(seq) > 0)
+        for session_id, values in (finalized or {}).items()
+        if values
+    }
+    if finalized_payload:
+        payload["_finalized"] = finalized_payload
+    write_json(_scene_checkpoint_path(), payload)
+
+
+def load_scene_checkpoints() -> Dict[str, int]:
+    """Load durable scene/committed checkpoints by session."""
+
+    checkpoints, _ = _load_scene_checkpoint_state()
+    return checkpoints
+
+
+def save_scene_checkpoints(checkpoints: Dict[str, int]) -> None:
+    """Persist scene/committed checkpoints while preserving finalization state."""
+
+    with _LOCK:
+        _, finalized = _load_scene_checkpoint_state()
+        _save_scene_checkpoint_state(checkpoints, finalized)
+
+
+def load_committed_checkpoints() -> Dict[str, int]:
+    """Compatibility alias for ``load_scene_checkpoints``."""
+
+    return load_scene_checkpoints()
+
+
+def save_committed_checkpoints(checkpoints: Dict[str, int]) -> None:
+    """Compatibility alias for ``save_scene_checkpoints``."""
+
+    save_scene_checkpoints(checkpoints)
+
+
+def get_scene_checkpoint(session_id: str) -> int:
+    checkpoints = load_scene_checkpoints()
+    return int(checkpoints.get(session_id, 0))
+
+
+def get_committed_checkpoint(session_id: str) -> int:
+    """Alias for the scene checkpoint used by pruning and future pipeline code."""
+
+    return get_scene_checkpoint(session_id)
+
+
+def update_scene_checkpoint(session_id: str, seq: int) -> None:
+    """Monotonically update the committed checkpoint.
+
+    This compatibility accessor is intentionally explicit: callers should use
+    ``mark_scene_events_finalized`` when they need contiguous advancement.
+    """
+
+    mark_scene_events_finalized(session_id, [seq])
+
+
+def update_committed_checkpoint(session_id: str, seq: int) -> None:
+    """Compatibility alias for ``update_scene_checkpoint``."""
+
+    update_scene_checkpoint(session_id, seq)
+
+
+def _session_event_sequences(session_id: str) -> Set[int]:
+    prefix = f"{session_id}:"
+    sequences: Set[int] = set()
+    for key, value in load_event_index().items():
+        if not str(key).startswith(prefix):
+            continue
+        try:
+            seq = int(value)
+        except (TypeError, ValueError):
+            continue
+        if seq > 0:
+            sequences.add(seq)
+    return sequences
+
+
+def mark_scene_events_finalized(session_id: str, seqs: List[int]) -> int:
+    """Record finalized events and advance the committed checkpoint contiguously.
+
+    Contiguity is evaluated over the session's admitted event sequences, not
+    every global sequence number, because the ledger sequence is shared by
+    multiple sessions.  This lets future pipeline code commit a scene spanning
+    several events without skipping an earlier unresolved event in that same
+    session.
+    """
+
+    with _LOCK:
+        checkpoints, finalized = _load_scene_checkpoint_state()
+        current = int(checkpoints.get(session_id, 0))
+        ready = finalized.setdefault(session_id, set())
+        for seq in seqs:
+            try:
+                parsed_seq = int(seq)
+            except (TypeError, ValueError):
+                continue
+            if parsed_seq > current:
+                ready.add(parsed_seq)
+
+        known = _session_event_sequences(session_id)
+        known.update(ready)
+        candidate_sequences = sorted(seq for seq in known if seq > current)
+        for seq in candidate_sequences:
+            if seq not in ready:
+                break
+            current = seq
+            ready.discard(seq)
+
+        checkpoints[session_id] = current
+        if not ready:
+            finalized.pop(session_id, None)
+        _save_scene_checkpoint_state(checkpoints, finalized)
+        return current
+
+
+def mark_events_committed(session_id: str, seqs: List[int]) -> int:
+    """Compatibility alias for ``mark_scene_events_finalized``."""
+
+    return mark_scene_events_finalized(session_id, seqs)
+
+
+def advance_scene_checkpoint(session_id: str, seqs: Any) -> int:
+    """Advance the committed checkpoint over a finalized sequence or batch."""
+
+    if isinstance(seqs, (str, bytes)):
+        seqs = [seqs]
+    elif isinstance(seqs, int):
+        seqs = [seqs]
+    return mark_scene_events_finalized(session_id, list(seqs or []))
 
 
 def load_pending_user_messages() -> Dict[str, Dict[str, Any]]:
@@ -188,22 +412,49 @@ def set_pending_user_message(session_id: str, content: str, *, seq: int = 0, eve
     content = str(content or "").strip()
     if not content:
         return
-    pending = load_pending_user_messages()
-    pending[session_id] = {
-        "content": sanitize_trace_value(content),
-        "seq": int(seq or 0),
-        "event_id": event_id,
-        "ts": now_iso(),
-    }
-    write_json(PENDING_USER_MESSAGES_FILE, pending)
+    with _LOCK:
+        pending = load_pending_user_messages()
+        record = pending.get(session_id)
+        if not isinstance(record, dict):
+            record = {}
+        record.update(
+            {
+                "content": sanitize_trace_value(content),
+                "seq": int(seq or 0),
+                "event_id": event_id,
+                "ts": now_iso(),
+            }
+        )
+        pending[session_id] = record
+        write_json(PENDING_USER_MESSAGES_FILE, pending)
+
+
+def set_pending_scene_events(session_id: str, events: List[Dict[str, Any]]) -> None:
+    """Atomically replace one session's durable evidence assembly."""
+
+    with _LOCK:
+        pending = load_pending_user_messages()
+        record = pending.get(session_id)
+        if not isinstance(record, dict):
+            record = {}
+        if events:
+            record["scene_evidence"] = {"events": events, "updated_at": now_iso()}
+        else:
+            record.pop("scene_evidence", None)
+        if record:
+            pending[session_id] = record
+        else:
+            pending.pop(session_id, None)
+        write_json(PENDING_USER_MESSAGES_FILE, pending)
 
 
 def clear_pending_user_message(session_id: str) -> None:
-    pending = load_pending_user_messages()
-    if session_id not in pending:
-        return
-    pending.pop(session_id, None)
-    write_json(PENDING_USER_MESSAGES_FILE, pending)
+    with _LOCK:
+        pending = load_pending_user_messages()
+        if session_id not in pending:
+            return
+        pending.pop(session_id, None)
+        write_json(PENDING_USER_MESSAGES_FILE, pending)
 
 
 def _read_events() -> List[Dict[str, Any]]:
@@ -246,6 +497,61 @@ def _normalize_event_record(event: Dict[str, Any], seq: int) -> Dict[str, Any]:
     }
 
 
+def _repair_jsonl_tail_for_append(path: Path) -> None:
+    """Make an interrupted JSONL tail safe before appending another record."""
+
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    with path.open("r+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        end = handle.tell()
+        handle.seek(end - 1)
+        if handle.read(1) == b"\n":
+            return
+
+        start = 0
+        cursor = end - 1
+        while cursor >= 0:
+            handle.seek(cursor)
+            if handle.read(1) == b"\n":
+                start = cursor + 1
+                break
+            cursor -= 1
+        handle.seek(start)
+        fragment = handle.read(end - start)
+        try:
+            json.loads(fragment.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            handle.truncate(start)
+        else:
+            handle.seek(0, os.SEEK_END)
+            handle.write(b"\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _append_jsonl_records(path: Path, records: List[Dict[str, Any]]) -> None:
+    if not records:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _repair_jsonl_tail_for_append(path)
+    payload = b"".join(
+        (json.dumps(record, default=str) + "\n").encode("utf-8")
+        for record in records
+    )
+    with path.open("ab+") as handle:
+        handle.seek(0, os.SEEK_END)
+        start = handle.tell()
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+        handle.seek(start)
+        persisted = handle.read(len(payload))
+    parsed = [json.loads(line) for line in persisted.decode("utf-8").splitlines() if line.strip()]
+    if len(parsed) != len(records):
+        raise OSError(f"JSONL append verification failed for {path}")
+
+
 def append_events_batch(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Batch idempotent append for event-first ingest.
@@ -263,6 +569,20 @@ def append_events_batch(events: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     with _LOCK:
         index = load_event_index()
+        index_changed = False
+        # The ledger is fsynced before the permanent dedupe index. If a process
+        # dies in that narrow window, recover only missing entries from retained
+        # payloads. Never rebuild or delete existing registry entries.
+        for admitted in _read_events():
+            admitted_session = str(admitted.get("session_id") or "")
+            admitted_event = str(admitted.get("event_id") or "")
+            admitted_seq = int(admitted.get("seq") or 0)
+            if not admitted_session or not admitted_event or admitted_seq <= 0:
+                continue
+            admitted_key = _canonical_event_key(admitted_session, admitted_event)
+            if admitted_key not in index:
+                index[admitted_key] = admitted_seq
+                index_changed = True
         checkpoints = load_checkpoints()
         # Checkpoints may refer to event seq values that were later pruned from
         # the temporary ledger/index. New records must still advance past those
@@ -298,12 +618,8 @@ def append_events_batch(events: List[Dict[str, Any]]) -> Dict[str, Any]:
                 item_results.append({"status": "invalid", "seq": None, "session_id": "", "event_id": ""})
 
         if records_to_write:
-            EVENT_LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with EVENT_LEDGER_FILE.open("a", encoding="utf-8") as handle:
-                for record in records_to_write:
-                    handle.write(json.dumps(record, default=str) + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
+            _append_jsonl_records(EVENT_LEDGER_FILE, records_to_write)
+        if records_to_write or index_changed:
             save_event_index(index)
 
     return {
@@ -350,17 +666,19 @@ def load_unprocessed_events(session_id: str, limit: Optional[int] = None) -> Lis
     return events
 
 
-def prune_processed_events(session_ids: List[str]) -> Dict[str, int]:
-    """Remove ledger rows that have already become scenes/memories.
+def prune_committed_events(session_ids: List[str]) -> Dict[str, int]:
+    """Remove ledger rows whose scenes have been durably committed.
 
-    The event ledger is temporary ingest scaffolding. Checkpoints and retry rows
-    decide what must stay; processed rows can be dropped to prevent trace bloat.
+    The processed checkpoint only says that an event has been classified. The
+    committed scene checkpoint is the safety boundary for deleting its payload.
+    ``event_index.json`` is deliberately left untouched so admitted event IDs
+    remain duplicates even after their ledger rows are pruned.
     """
     wanted_sessions = {str(session_id) for session_id in session_ids if str(session_id).strip()}
     if not wanted_sessions or not EVENT_LEDGER_FILE.exists():
         return {"before": 0, "after": 0, "removed": 0}
 
-    checkpoints = load_checkpoints()
+    checkpoints = load_scene_checkpoints()
     retry_keys = {f"{item.get('session_id')}:{item.get('event_id')}" for item in load_retry_queue()}
 
     with _LOCK:
@@ -387,9 +705,14 @@ def prune_processed_events(session_ids: List[str]) -> Dict[str, int]:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp_path, EVENT_LEDGER_FILE)
-            save_event_index({_canonical_event_key(str(event.get("session_id") or ""), str(event.get("event_id") or "")): int(event.get("seq") or 0) for event in kept})
 
     return {"before": len(events), "after": len(kept), "removed": removed}
+
+
+def prune_processed_events(session_ids: List[str]) -> Dict[str, int]:
+    """Compatibility wrapper using the durable scene checkpoint."""
+
+    return prune_committed_events(session_ids)
 
 
 def _extract_message_updated_text(body: Dict[str, Any]) -> Optional[str]:
@@ -555,11 +878,7 @@ def append_retry_entry(entry: Dict[str, Any]) -> None:
         key = f"{record['session_id']}:{record['event_id']}"
         if key in existing_keys:
             return
-        RETRY_QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with RETRY_QUEUE_FILE.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, default=str) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+        _append_jsonl_records(RETRY_QUEUE_FILE, [record])
 
 
 def remove_retry_entries(session_id: str, event_ids: Set[str]) -> int:

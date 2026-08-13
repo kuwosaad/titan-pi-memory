@@ -19,6 +19,68 @@ def _event(event_id: str, ts: str = "2026-02-25T20:00:00+00:00") -> dict:
 
 
 class IncrementalIngestTests(unittest.TestCase):
+    def test_processed_and_committed_checkpoints_are_separate_and_contiguous(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            ledger = tmp_path / "events.jsonl"
+            index = tmp_path / "event_index.json"
+            checkpoints = tmp_path / "checkpoints.json"
+            scene_checkpoints = tmp_path / "scene_checkpoints.json"
+            retry_queue = tmp_path / "retry_queue.jsonl"
+            events = [
+                {"session_id": "s1", **_event("evt-1")},
+                {"session_id": "s1", **_event("evt-2")},
+            ]
+
+            with (
+                patch.object(traces, "EVENT_LEDGER_FILE", ledger),
+                patch.object(traces, "EVENT_INDEX_FILE", index),
+                patch.object(traces, "CHECKPOINT_FILE", checkpoints),
+                patch.object(traces, "SCENE_CHECKPOINT_FILE", scene_checkpoints),
+                patch.object(traces, "COMMITTED_CHECKPOINT_FILE", scene_checkpoints),
+                patch.object(traces, "RETRY_QUEUE_FILE", retry_queue),
+            ):
+                batch = traces.append_events_batch(events)
+                first_seq = int(batch["item_results"][0]["seq"])
+                second_seq = int(batch["item_results"][1]["seq"])
+
+                traces.update_session_checkpoint("s1", second_seq)
+                self.assertEqual(traces.get_session_checkpoint("s1"), second_seq)
+                self.assertEqual(traces.get_scene_checkpoint("s1"), 0)
+                self.assertEqual(traces.prune_committed_events(["s1"])["removed"], 0)
+
+                # The later event cannot commit while the earlier event is
+                # unresolved, even though it is already processed.
+                self.assertEqual(traces.mark_scene_events_finalized("s1", [second_seq]), 0)
+                self.assertEqual(traces.mark_scene_events_finalized("s1", [first_seq]), second_seq)
+                self.assertEqual(traces.prune_committed_events(["s1"])["removed"], 2)
+
+    def test_pruning_preserves_committed_event_while_retry_is_unresolved(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            ledger = tmp_path / "events.jsonl"
+            index = tmp_path / "event_index.json"
+            checkpoints = tmp_path / "checkpoints.json"
+            scene_checkpoints = tmp_path / "scene_checkpoints.json"
+            retry_queue = tmp_path / "retry_queue.jsonl"
+            event = {"session_id": "s1", **_event("evt-retry")}
+
+            with (
+                patch.object(traces, "EVENT_LEDGER_FILE", ledger),
+                patch.object(traces, "EVENT_INDEX_FILE", index),
+                patch.object(traces, "CHECKPOINT_FILE", checkpoints),
+                patch.object(traces, "SCENE_CHECKPOINT_FILE", scene_checkpoints),
+                patch.object(traces, "COMMITTED_CHECKPOINT_FILE", scene_checkpoints),
+                patch.object(traces, "RETRY_QUEUE_FILE", retry_queue),
+            ):
+                _status, seq = traces.append_event(event)
+                traces.mark_scene_events_finalized("s1", [seq])
+                traces.append_retry_entry({"session_id": "s1", "event_id": "evt-retry", "seq": seq})
+
+                self.assertEqual(traces.prune_committed_events(["s1"])["removed"], 0)
+                traces.remove_retry_entries("s1", {"evt-retry"})
+                self.assertEqual(traces.prune_committed_events(["s1"])["removed"], 1)
+
     def test_append_event_and_batch_share_behavior(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

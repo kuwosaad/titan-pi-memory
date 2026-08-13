@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import sys
@@ -47,7 +48,14 @@ from app.graph.cortex_analysis import analyze_memory_clusters
 from app.patterns import api as patterns_api
 from app.patterns.errors import PatternError
 from app.patterns.bundle import export_pattern_bundle, import_pattern_bundle
-from app.save_pipeline.pipeline import get_scene_context as build_scene_context, handle_trace_packet, ingest_trace_event, retrieve_memory_brief
+from app.save_pipeline.pipeline import (
+    get_scene_context as build_scene_context,
+    handle_trace_packet,
+    ingest_trace_event,
+    retrieve_memory_brief,
+    scene_references_from_memories,
+    serialize_public_memory,
+)
 from app.storage.memories import get_memory_count, get_recent_memories as load_recent_memories, get_memory_repository, get_lnn_state_repository
 from app.storage.models import TraceEvent, TracePacketRequest, TraceToolCall
 from app.save_pipeline.auto_ingest import _auto_ingest_loop
@@ -163,35 +171,7 @@ async def store_trace_event(
 
 
 def _serialize_memory(mem: Any) -> dict:
-    if hasattr(mem, "id"):
-        return {
-            "id": mem.id,
-            "text": mem.text,
-            "type": mem.type,
-            "stream": mem.stream,
-            "session_id": mem.session_id,
-            "turn": mem.turn,
-            "scene_id": mem.scene_id,
-            "source_type": mem.source_type,
-            "source_reliability": mem.source_reliability,
-            "verification_status": mem.verification_status,
-            "ts": mem.ts,
-            "source_event_ids": mem.source_event_ids,
-        }
-    return {
-        "id": mem.get("id"),
-        "text": mem.get("text"),
-        "type": mem.get("type"),
-        "stream": mem.get("stream"),
-        "session_id": mem.get("session_id"),
-        "turn": mem.get("turn"),
-        "scene_id": mem.get("scene_id"),
-        "source_type": mem.get("source_type"),
-        "source_reliability": mem.get("source_reliability"),
-        "verification_status": mem.get("verification_status"),
-        "ts": mem.get("ts"),
-        "source_event_ids": mem.get("source_event_ids") or [],
-    }
+    return serialize_public_memory(mem)
 
 
 @server.tool()
@@ -202,7 +182,8 @@ async def query_memories(
     mode: Optional[str] = None,
 ) -> dict:
     if query:
-        payload = retrieve_memory_brief(
+        payload = await asyncio.to_thread(
+            retrieve_memory_brief,
             query=query,
             session_id=session_id,
             mode=mode,
@@ -212,9 +193,13 @@ async def query_memories(
         payload["memories"] = [_serialize_memory(mem) for mem in payload.get("memories", [])]
         return payload
 
-    records = load_recent_memories(limit=limit, session_id=session_id)
+    records = await asyncio.to_thread(load_recent_memories, limit=limit, session_id=session_id)
     memories = [_serialize_memory(mem) for mem in records]
-    return {"count": len(memories), "memories": memories}
+    return {
+        "count": len(memories),
+        "memories": memories,
+        "scene_refs": await asyncio.to_thread(scene_references_from_memories, memories),
+    }
 
 
 @server.tool()

@@ -2155,6 +2155,31 @@ def run_import_bundle(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_scene_backfill_evidence(*, agent: str = DEFAULT_AGENT_NAME, apply: bool = False) -> int:
+    """Inspect or apply the legacy scene evidence migration.
+
+    Keep this command's runtime selection side-effect free during a dry run:
+    unlike setup/onboarding commands, a migration preview must not create an
+    agent home merely to inspect it.
+    """
+
+    agent_home = resolve_agent_titan_home(agent)
+    os.environ["TITAN_HOME"] = str(agent_home)
+    os.environ["TITAN_BASE_DIR"] = str(agent_home)
+    os.environ["TITAN_AGENT_NAME"] = _normalize_agent_name(agent)
+
+    from app.storage.scene_migration import backfill_scene_evidence
+
+    try:
+        report = backfill_scene_evidence(apply=apply)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        print(json.dumps({"apply": apply, "dry_run": not apply, "error": str(exc)}, indent=2, sort_keys=True))
+        return 1
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="titan", description="Titan CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -2215,6 +2240,15 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser.add_argument("--agent", default=DEFAULT_AGENT_NAME, help="Agent name whose Titan pattern store should be used.")
     import_parser.add_argument("--overwrite", action="store_true", help="Replace existing patterns with matching ids.")
     import_parser.add_argument("--no-progress", action="store_true", help="Do not import pattern processing progress records.")
+
+    scenes_parser = subparsers.add_parser("scenes", help="Inspect and migrate Titan scenes")
+    scenes_subparsers = scenes_parser.add_subparsers(dest="scenes_command", required=True)
+    backfill_evidence_parser = scenes_subparsers.add_parser(
+        "backfill-evidence",
+        help="Recover surviving ledger evidence for legacy scenes (dry-run by default)",
+    )
+    backfill_evidence_parser.add_argument("--apply", action="store_true", help="Persist recovered evidence and missing IDs.")
+    backfill_evidence_parser.add_argument("--agent", default=DEFAULT_AGENT_NAME, help="Agent scene store to inspect.")
 
     key_parser = subparsers.add_parser("key", help="Manage Titan API keys")
     key_subparsers = key_parser.add_subparsers(dest="key_command", required=True)
@@ -2347,6 +2381,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_share(args)
     if args.command == "import":
         return run_import_bundle(args)
+    if args.command == "scenes":
+        if args.scenes_command == "backfill-evidence":
+            return run_scene_backfill_evidence(agent=args.agent, apply=args.apply)
+        parser.error(f"Unsupported scenes command: {args.scenes_command}")
+        return 2
     if args.command == "key":
         if args.key_command == "set":
             return run_set_key(key_name=args.key_name, value=args.value, agent=args.agent)
