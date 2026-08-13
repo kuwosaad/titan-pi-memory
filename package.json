@@ -1,6 +1,6 @@
 {
   "name": "titan-pi-memory",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Persistent evolutionary memory for the Pi coding agent",
   "keywords": [
     "pi-package",

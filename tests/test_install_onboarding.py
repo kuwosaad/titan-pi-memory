@@ -13,7 +13,7 @@ def test_pi_package_points_at_the_current_npm_install_contract():
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
 
     assert package["name"] == "titan-pi-memory"
-    assert package["version"] == "0.2.5"
+    assert package["version"] == "0.2.6"
     assert package["pi"]["extensions"] == ["./tools/pi_extension"]
     assert any(
         "tools/pi_extension/install.sh" == entry
