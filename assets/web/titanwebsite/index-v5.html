@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Titan Memory — Local-first memory for AI agents</title>
+    <meta name="description" content="Titan gives your coding agent local, persistent memory. Save decisions, recall context, and keep your agent aligned across every session."/>
+    <link rel="preconnect" href="https://fonts.googleapis.com"/>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous"/>
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+    <style>
+        :root {
+            --bg: #050c14;
+            --bg-deep: #020810;
+            --surface: rgba(8, 16, 28, 0.7);
+            --surface-strong: rgba(14, 26, 44, 0.88);
+            --border: rgba(1, 164, 255, 0.12);
+            --border-strong: rgba(1, 164, 255, 0.24);
+            --ink: #e8f4ff;
+            --ink-dim: #7aa8cc;
+            --ink-muted: #4a7090;
+            --ink-faint: #2a4460;
+            --cyan: #01a4ff;
+            --cyan-soft: #60c0ff;
+            --cyan-pale: #b0e0ff;
+            --teal: #00d4aa;
+            --teal-soft: #60eacc;
+            --orange: #ff6b35;
+            --orange-soft: #ff9a70;
+            --glow-cyan: rgba(1, 164, 255, 0.22);
+            --glow-teal: rgba(0, 212, 170, 0.18);
+            --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+            --font-mono: 'Geist Mono', 'DM Mono', monospace;
+            --ease: cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        html {
+            scroll-behavior: smooth;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            overflow-x: hidden;
+            color: var(--ink);
+            font-family: var(--font-sans);
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(rgba(1, 164, 255, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(1, 164, 255, 0.04) 1px, transparent 1px),
+                radial-gradient(ellipse 80% 50% at 50% -10%, rgba(1, 164, 255, 0.12), transparent 60%),
+                radial-gradient(ellipse 60% 40% at 80% 60%, rgba(0, 212, 170, 0.06), transparent 50%),
+                linear-gradient(180deg, var(--bg) 0%, var(--bg-deep) 100%);
+            background-size: 48px 48px, 48px 48px, auto, auto, auto;
+            text-wrap: pretty;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            background:
+                radial-gradient(circle at 12% 18%, rgba(1,164,255,0.18) 0 1px, transparent 1.5px),
+                radial-gradient(circle at 88% 12%, rgba(0,212,170,0.14) 0 1px, transparent 1.5px),
+                radial-gradient(circle at 50% 80%, rgba(255,107,53,0.08) 0 1px, transparent 1.5px),
+                radial-gradient(circle at 72% 72%, rgba(1,164,255,0.12) 0 1px, transparent 1.5px);
+            background-size: 380px 380px, 520px 520px, 460px 460px, 640px 640px;
+        }
+
+        a, button { -webkit-tap-highlight-color: transparent; }
+        a:focus-visible, button:focus-visible {
+            outline: 1px solid var(--cyan-soft);
+            outline-offset: 4px;
+        }
+
+        ::selection { background: var(--cyan); color: var(--bg); }
+
+        h1, h2, h3, p { margin: 0; }
+
+        .nav {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 20;
+            display: flex;
+            justify-content: center;
+            height: 58px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(5, 12, 20, 0.82);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        .nav-inner {
+            width: min(1160px, calc(100vw - 32px));
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--ink);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            text-decoration: none;
+        }
+
+        .brand-logo {
+            width: 30px;
+            height: 30px;
+            color: var(--cyan-soft);
+            filter: drop-shadow(0 0 12px rgba(1, 164, 255, 0.5));
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .nav-links a {
+            color: var(--ink-muted);
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: color 150ms ease;
+        }
+
+        .nav-links a:hover { color: var(--ink); }
+
+        .nav-cta {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            height: 34px;
+            border: 1px solid var(--border-strong);
+            border-radius: 8px;
+            padding: 0 14px;
+            background: rgba(1, 164, 255, 0.08);
+            color: var(--cyan-soft) !important;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: background 150ms ease, border-color 150ms ease;
+        }
+
+        .nav-cta:hover {
+            background: rgba(1, 164, 255, 0.14);
+            border-color: rgba(1, 164, 255, 0.4);
+        }
+
+        .hero {
+            min-height: 100svh;
+            display: grid;
+            place-items: center;
+            padding: 104px 20px 80px;
+            text-align: center;
+        }
+
+        .hero-inner {
+            width: min(960px, 100%);
+            margin: 0 auto;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 28px;
+            color: var(--ink-dim);
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .eyebrow-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--teal);
+            box-shadow: 0 0 14px var(--teal);
+            animation: pulse 2.4s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.4; transform: scale(0.8); }
+            50% { opacity: 1; transform: scale(1); }
+        }
+
+        h1 {
+            margin: 0 auto;
+            max-width: 900px;
+            font-size: clamp(56px, 10vw, 128px);
+            line-height: 0.92;
+            letter-spacing: -0.04em;
+            font-weight: 700;
+        }
+
+        h1 em {
+            color: var(--cyan);
+            font-style: normal;
+            font-weight: 700;
+        }
+
+        .hero-copy {
+            max-width: 620px;
+            margin: 32px auto 0;
+            color: var(--ink-dim);
+            font-size: clamp(18px, 2vw, 22px);
+            line-height: 1.5;
+        }
+
+        .hero-actions {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 44px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 48px;
+            border-radius: 10px;
+            padding: 0 22px;
+            font-family: var(--font-sans);
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+        }
+
+        .btn-primary {
+            border: 1px solid rgba(1, 164, 255, 0.4);
+            background: linear-gradient(135deg, rgba(1, 164, 255, 0.18), rgba(0, 212, 170, 0.08));
+            box-shadow: 0 8px 32px rgba(1, 164, 255, 0.15), inset 0 1px 0 rgba(255,255,255,0.06);
+            color: var(--ink);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            border-color: rgba(1, 164, 255, 0.6);
+            background: linear-gradient(135deg, rgba(1, 164, 255, 0.24), rgba(0, 212, 170, 0.12));
+            box-shadow: 0 12px 40px rgba(1, 164, 255, 0.22), inset 0 1px 0 rgba(255,255,255,0.08);
+        }
+
+        .btn-secondary {
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--ink-dim);
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            border-color: var(--border-strong);
+            background: var(--surface-strong);
+            color: var(--ink);
+        }
+
+        .btn:active { transform: translateY(0) scale(0.98); }
+
+        .section {
+            width: min(1160px, calc(100vw - 32px));
+            margin: 0 auto;
+            padding: 100px 0;
+        }
+
+        .section-head {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(260px, 0.5fr);
+            gap: 48px;
+            align-items: end;
+            margin-bottom: 44px;
+        }
+
+        .section-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+            color: var(--teal);
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .section-label::before {
+            content: '';
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--teal);
+            box-shadow: 0 0 8px var(--teal);
+        }
+
+        h2 {
+            font-size: clamp(38px, 5vw, 68px);
+            line-height: 0.96;
+            letter-spacing: -0.04em;
+            font-weight: 700;
+        }
+
+        .section-copy {
+            color: var(--ink-dim);
+            font-size: clamp(16px, 1.8vw, 20px);
+            line-height: 1.5;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            overflow: hidden;
+            background: var(--surface);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        .feature-card {
+            position: relative;
+            padding: 30px 26px;
+            border-right: 1px solid var(--border);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.03), transparent 60%),
+                var(--surface);
+        }
+
+        .feature-card:last-child { border-right: 0; }
+
+        .feature-icon {
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+
+        .feature-card:nth-child(1) .feature-icon {
+            background: rgba(1, 164, 255, 0.1);
+            border: 1px solid rgba(1, 164, 255, 0.2);
+            color: var(--cyan-soft);
+        }
+
+        .feature-card:nth-child(2) .feature-icon {
+            background: rgba(0, 212, 170, 0.1);
+            border: 1px solid rgba(0, 212, 170, 0.2);
+            color: var(--teal-soft);
+        }
+
+        .feature-card:nth-child(3) .feature-icon {
+            background: rgba(255, 107, 53, 0.1);
+            border: 1px solid rgba(255, 107, 53, 0.2);
+            color: var(--orange-soft);
+        }
+
+        .feature-num {
+            color: var(--ink-faint);
+            font-size: 11px;
+            font-family: var(--font-mono);
+            margin-bottom: 12px;
+        }
+
+        .feature-card h3 {
+            font-size: 22px;
+            letter-spacing: -0.02em;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .feature-card p {
+            color: var(--ink-dim);
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        .graph-section {
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+            background: var(--surface-strong);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            box-shadow: 0 32px 80px rgba(0,0,0,0.4), 0 0 0 1px var(--border);
+        }
+
+        .graph-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .graph-dots {
+            display: flex;
+            gap: 7px;
+        }
+
+        .graph-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--border-strong);
+        }
+
+        .graph-dot:nth-child(1) { background: rgba(255, 107, 53, 0.5); }
+        .graph-dot:nth-child(2) { background: rgba(255, 210, 60, 0.5); }
+        .graph-dot:nth-child(3) { background: rgba(0, 212, 170, 0.5); }
+
+        .graph-title {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--ink-muted);
+        }
+
+        .graph-body {
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            min-height: 520px;
+        }
+
+        .graph-sidebar {
+            border-right: 1px solid var(--border);
+            padding: 18px;
+        }
+
+        .sidebar-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        .sidebar-title span:last-child {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--ink-muted);
+            font-weight: 400;
+        }
+
+        .search-box {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 9px 12px;
+            margin-bottom: 12px;
+            background: rgba(0,0,0,0.2);
+            color: var(--ink-faint);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            outline: none;
+            transition: border-color 150ms ease;
+            width: 100%;
+        }
+
+        .search-box:focus { border-color: var(--border-strong); }
+        .search-box::placeholder { color: var(--ink-faint); }
+
+        .memory-list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .memory-item {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px;
+            background: rgba(0,0,0,0.15);
+            transition: border-color 150ms ease, transform 150ms ease;
+            cursor: default;
+        }
+
+        .memory-item:hover {
+            border-color: var(--border-strong);
+            transform: translateY(-1px);
+        }
+
+        .memory-item .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 10px;
+            font-family: var(--font-mono);
+            color: var(--ink-muted);
+            margin-bottom: 6px;
+        }
+
+        .memory-item .tag::before {
+            content: '';
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--dot, var(--cyan));
+        }
+
+        .memory-item:nth-child(1) .tag::before { background: var(--cyan); }
+        .memory-item:nth-child(2) .tag::before { background: var(--teal); }
+        .memory-item:nth-child(3) .tag::before { background: var(--orange); }
+        .memory-item:nth-child(4) .tag::before { background: var(--cyan-soft); }
+
+        .memory-item p {
+            font-size: 13px;
+            color: var(--ink);
+            line-height: 1.4;
+        }
+
+        .graph-canvas {
+            position: relative;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at 50% 50%, rgba(1, 164, 255, 0.06), transparent 60%),
+                linear-gradient(rgba(1, 164, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(1, 164, 255, 0.03) 1px, transparent 1px);
+            background-size: auto, 40px 40px, 40px 40px;
+        }
+
+        .graph-canvas svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .edge {
+            fill: none;
+            stroke: rgba(1, 164, 255, 0.18);
+            stroke-width: 1;
+        }
+
+        .edge.active {
+            stroke: rgba(1, 164, 255, 0.5);
+            stroke-width: 1.5;
+            filter: drop-shadow(0 0 4px rgba(1, 164, 255, 0.4));
+        }
+
+        .node {
+            position: absolute;
+            left: var(--x);
+            top: var(--y);
+            width: var(--s);
+            height: var(--s);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            background: radial-gradient(circle at 35% 35%, #fff, var(--c) 50%, rgba(var(--c-rgb), 0.15) 80%);
+            box-shadow: 0 0 20px var(--glow);
+            animation: breathe 4s ease-in-out infinite alternate;
+        }
+
+        .node.big { animation-duration: 5.2s; }
+
+        @keyframes breathe {
+            to { transform: translate(-50%, -50%) scale(1.1); }
+        }
+
+        .node-label {
+            position: absolute;
+            left: calc(var(--x) + 14px);
+            top: calc(var(--y) - 4px);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--ink-dim);
+            white-space: nowrap;
+        }
+
+        .float-card {
+            position: absolute;
+            border: 1px solid var(--border-strong);
+            border-radius: 14px;
+            background: rgba(8, 16, 28, 0.9);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+        }
+
+        .query-card {
+            left: 22px;
+            top: 22px;
+            width: min(280px, calc(100% - 44px));
+            padding: 14px 16px;
+        }
+
+        .result-card {
+            right: 22px;
+            bottom: 22px;
+            width: min(300px, calc(100% - 44px));
+            padding: 15px;
+        }
+
+        .card-kicker {
+            font-size: 10px;
+            font-family: var(--font-mono);
+            color: var(--teal);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 6px;
+        }
+
+        .float-card p {
+            color: var(--ink);
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .float-card strong { color: var(--cyan-soft); }
+
+        .meta-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 12px;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 4px 9px;
+            font-size: 10px;
+            font-family: var(--font-mono);
+            color: var(--ink-dim);
+        }
+
+        .pill::before {
+            content: '';
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--dot, var(--cyan));
+        }
+
+        .start-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(340px, 0.7fr);
+            gap: 48px;
+            align-items: center;
+        }
+
+        .terminal {
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.5);
+            box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+        }
+
+        .terminal-top {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(0,0,0,0.3);
+        }
+
+        .terminal-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.12);
+        }
+
+        .terminal-dot:nth-child(1) { background: rgba(255, 107, 53, 0.5); }
+        .terminal-dot:nth-child(2) { background: rgba(255, 210, 60, 0.5); }
+        .terminal-dot:nth-child(3) { background: rgba(0, 212, 170, 0.5); }
+
+        .terminal-label {
+            margin-left: 6px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--ink-muted);
+        }
+
+        .terminal pre {
+            margin: 0;
+            padding: 22px 20px;
+            overflow-x: auto;
+            font: 14px/2 var(--font-mono);
+            color: var(--ink-dim);
+        }
+
+        .cmd { color: var(--cyan-soft); }
+        .comment { color: var(--ink-muted); }
+        .prompt { color: var(--teal); }
+
+        .final {
+            width: min(860px, calc(100vw - 32px));
+            margin: 0 auto;
+            padding: 120px 0 140px;
+            text-align: center;
+        }
+
+        .final h2 { font-size: clamp(46px, 7vw, 96px); }
+
+        .final p {
+            max-width: 520px;
+            margin: 24px auto 0;
+            color: var(--ink-dim);
+            font-size: 20px;
+            line-height: 1.45;
+        }
+
+        .footer {
+            border-top: 1px solid var(--border);
+            background: rgba(2, 8, 16, 0.8);
+        }
+
+        .footer-inner {
+            width: min(1160px, calc(100vw - 32px));
+            margin: 0 auto;
+            padding: 28px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            color: var(--ink-muted);
+            font-size: 12px;
+        }
+
+        .footer a {
+            color: var(--ink-dim);
+            text-decoration: none;
+            transition: color 150ms ease;
+        }
+
+        .footer a:hover { color: var(--ink); }
+
+        .reveal {
+            opacity: 0;
+            transform: translateY(24px);
+            transition: opacity 700ms var(--ease), transform 700ms var(--ease);
+        }
+
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        @media (max-width: 980px) {
+            .section-head,
+            .graph-body,
+            .start-grid { grid-template-columns: 1fr; }
+            .features-grid { grid-template-columns: 1fr; }
+            .feature-card { border-right: 0; border-bottom: 1px solid var(--border); }
+            .feature-card:last-child { border-bottom: 0; }
+            .graph-sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
+        }
+
+        @media (max-width: 680px) {
+            .nav-links a:not(.nav-cta) { display: none; }
+            .nav-inner { width: calc(100vw - 24px); }
+            .hero { padding-inline: 12px; }
+            h1 { font-size: clamp(48px, 16vw, 80px); }
+            .hero-copy { font-size: 17px; }
+            .section { width: calc(100vw - 24px); padding: 80px 0; }
+            .graph-canvas { min-height: 460px; }
+            .query-card, .result-card { display: none; }
+            .footer-inner { flex-direction: column; align-items: flex-start; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="nav" aria-label="Primary navigation">
+        <div class="nav-inner">
+            <a class="brand" href="#top" aria-label="Titan Memory home">
+                <svg class="brand-logo" viewBox="0 0 824 828" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <g fill="currentColor">
+                        <path d="M140 270 L334 471 L334 523 L390 485 L390 459 L418 441 L448 458 L450 486 L505 523 L505 470 L699 270 L440 422 L438 382 L463 354 L419 170 L375 356 L400 381 L399 422 Z"/>
+                        <path d="M35 293 L225 521 L306 544 L306 493 L290 466 Z"/>
+                        <path d="M803 293 L548 466 L533 493 L533 544 L611 522 Z"/>
+                        <path d="M437 500 L420 511 L400 501 L306 566 L418 698 L533 567 Z"/>
+                    </g>
+                </svg>
+                Titan Memory
+            </a>
+            <div class="nav-links">
+                <a href="#how">How it works</a>
+                <a href="#graph">Graph</a>
+                <a href="#start">Quick start</a>
+                <a class="nav-cta" href="https://github.com/kuwosaad/Titan-Mem" target="_blank" rel="noopener">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+                    GitHub
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <main id="top">
+        <section class="hero">
+            <div class="hero-inner">
+                <div class="eyebrow">
+                    <span class="eyebrow-dot"></span>
+                    Local-first agent memory
+                </div>
+                <h1>Your coding agent<br/>should <em>remember</em>.</h1>
+                <p class="hero-copy">Titan turns past sessions into persistent local memory. Decisions, preferences, project context — available when your agent needs them.</p>
+                <div class="hero-actions">
+                    <a class="btn btn-primary" href="#start">Install Titan</a>
+                    <a class="btn btn-secondary" href="https://github.com/kuwosaad/Titan-Mem" target="_blank" rel="noopener">View on GitHub</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="section reveal" id="how">
+            <div class="section-head">
+                <div>
+                    <div class="section-label">How Titan works</div>
+                    <h2>Capture. Store.<br/>Recall.</h2>
+                </div>
+                <p class="section-copy">Titan watches your workflow, extracts what matters, and keeps it local — so your agent's memory stays private and fast.</p>
+            </div>
+
+            <div class="features-grid">
+                <article class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    </div>
+                    <div class="feature-num">01</div>
+                    <h3>Capture</h3>
+                    <p>Context emerges as you code. Titan extracts the signals worth keeping — decisions, outcomes, and preferences.</p>
+                </article>
+                <article class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                    </div>
+                    <div class="feature-num">02</div>
+                    <h3>Store</h3>
+                    <p>Everything lives on your machine. No cloud sync, no external services — just a local graph of your project's history.</p>
+                </article>
+                <article class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    </div>
+                    <div class="feature-num">03</div>
+                    <h3>Recall</h3>
+                    <p>When your agent asks, Titan returns the right memory — relevant, connected, and ready to use.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section reveal" id="graph">
+            <div class="section-head">
+                <div>
+                    <div class="section-label">Memory Graph</div>
+                    <h2>A living map<br/>of your work.</h2>
+                </div>
+                <p class="section-copy">The graph makes memories inspectable. See how decisions connect, trace the evolution of a project, and understand what your agent knows.</p>
+            </div>
+
+            <div class="graph-section">
+                <div class="graph-header">
+                    <div class="graph-dots">
+                        <span class="graph-dot"></span>
+                        <span class="graph-dot"></span>
+                        <span class="graph-dot"></span>
+                    </div>
+                    <span class="graph-title">titan graph — session: opencode</span>
+                    <span></span>
+                </div>
+                <div class="graph-body">
+                    <aside class="graph-sidebar" aria-label="Memory list">
+                        <div class="sidebar-title">
+                            <span>Saved memories</span>
+                            <span>local</span>
+                        </div>
+                        <input class="search-box" type="text" placeholder="search memories..." aria-label="Search memories"/>
+                        <div class="memory-list">
+                            <article class="memory-item" style="--dot: var(--cyan);">
+                                <div class="tag">decision</div>
+                                <p>Use the packaged CLI for MCP setup.</p>
+                            </article>
+                            <article class="memory-item" style="--dot: var(--teal);">
+                                <div class="tag">preference</div>
+                                <p>Keep agent memory local unless configured.</p>
+                            </article>
+                            <article class="memory-item" style="--dot: var(--orange);">
+                                <div class="tag">session</div>
+                                <p>Graph view starts on CLI graph port.</p>
+                            </article>
+                            <article class="memory-item" style="--dot: var(--cyan);">
+                                <div class="tag">project</div>
+                                <p>OpenCode capture writes to agent home.</p>
+                            </article>
+                        </div>
+                    </aside>
+                    <div class="graph-canvas" aria-label="Knowledge graph visualization">
+                        <svg viewBox="0 0 760 520" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                            <path class="edge active" d="M112 100 C200 150, 270 160, 360 210"/>
+                            <path class="edge active" d="M360 210 C450 240, 520 300, 600 380"/>
+                            <path class="edge" d="M200 400 C270 350, 310 280, 360 210"/>
+                            <path class="edge" d="M360 210 C420 130, 500 100, 640 110"/>
+                            <path class="edge" d="M200 400 C320 450, 450 460, 640 500"/>
+                            <path class="edge" d="M600 380 C630 310, 650 240, 640 110"/>
+                            <path class="edge" d="M430 510 C470 455, 520 400, 600 380"/>
+                            <path class="edge" d="M120 280 C195 275, 265 248, 360 210"/>
+                            <path class="edge" d="M120 280 C155 335, 180 370, 200 400"/>
+                            <path class="edge" d="M640 500 C620 445, 605 400, 600 380"/>
+                        </svg>
+
+                        <div class="float-card query-card">
+                            <div class="card-kicker">agent asks</div>
+                            <p>"How do I start Titan for OpenCode?"</p>
+                        </div>
+
+                        <span class="node" style="--x: 14%; --y: 19%; --s: 12px; --c: #60c0ff; --glow: rgba(1,164,255,0.4);"></span>
+                        <span class="node-label" style="--x: 14%; --y: 19%;">query</span>
+
+                        <span class="node big" style="--x: 47%; --y: 40%; --s: 28px; --c: #b0e0ff; --glow: rgba(1,164,255,0.5);"></span>
+                        <span class="node-label" style="--x: 47%; --y: 40%;">mcp setup</span>
+
+                        <span class="node" style="--x: 79%; --y: 73%; --s: 16px; --c: #60eacc; --glow: rgba(0,212,170,0.4);"></span>
+                        <span class="node-label" style="--x: 79%; --y: 73%;">packaged cli</span>
+
+                        <span class="node" style="--x: 26%; --y: 77%; --s: 14px; --c: #ff9a70; --glow: rgba(255,107,53,0.4);"></span>
+                        <span class="node-label" style="--x: 26%; --y: 77%;">agent home</span>
+
+                        <span class="node" style="--x: 84%; --y: 21%; --s: 11px; --c: #ffcc80; --glow: rgba(255,200,100,0.3);"></span>
+                        <span class="node-label" style="--x: 84%; --y: 21%;">graph port</span>
+
+                        <span class="node" style="--x: 16%; --y: 54%; --s: 10px; --c: #b0e0ff; --glow: rgba(1,164,255,0.35);"></span>
+                        <span class="node-label" style="--x: 16%; --y: 54%;">traces</span>
+
+                        <span class="node" style="--x: 57%; --y: 85%; --s: 9px; --c: #60c0ff; --glow: rgba(1,164,255,0.3);"></span>
+                        <span class="node-label" style="--x: 57%; --y: 85%;">session</span>
+
+                        <span class="node" style="--x: 84%; --y: 83%; --s: 12px; --c: #60eacc; --glow: rgba(0,212,170,0.35);"></span>
+                        <span class="node-label" style="--x: 84%; --y: 83%;">recall</span>
+
+                        <div class="float-card result-card">
+                            <div class="card-kicker">returned memory</div>
+                            <p>Use <strong>titan mcp --agent opencode</strong>. It sets the right agent home and runs the MCP server.</p>
+                            <div class="meta-row">
+                                <span class="pill" style="--dot: var(--teal);">relevant</span>
+                                <span class="pill" style="--dot: var(--cyan);">local</span>
+                                <span class="pill" style="--dot: var(--orange);">connected</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section start-grid reveal" id="start">
+            <div>
+                <div class="section-label">Quick start</div>
+                <h2>Two commands.<br/>You're running.</h2>
+                <p class="section-copy" style="margin-top: 20px;">Titan installs locally and runs beside your agent. No cloud account, no external dependencies.</p>
+                <div class="hero-actions" style="justify-content: flex-start; margin-top: 32px;">
+                    <a class="btn btn-primary" href="https://github.com/kuwosaad/Titan-Mem" target="_blank" rel="noopener">View on GitHub</a>
+                </div>
+            </div>
+            <div class="terminal" aria-label="Installation commands">
+                <div class="terminal-top">
+                    <span class="terminal-dot"></span>
+                    <span class="terminal-dot"></span>
+                    <span class="terminal-dot"></span>
+                    <span class="terminal-label">terminal</span>
+                </div>
+                <pre><span class="prompt">$</span> <span class="cmd">pipx install</span> 'git+https://github.com/kuwosaad/Titan-Mem.git'
+<span class="comment"># Output: Titan installed. Run `titan init` to set up.</span>
+
+<span class="prompt">$</span> <span class="cmd">titan init</span>
+
+<span class="prompt">$</span> <span class="cmd">titan doctor</span> --agent opencode</pre>
+            </div>
+        </section>
+
+        <section class="final reveal">
+            <div class="section-label">The point</div>
+            <h2>Less repeating.<br/>More remembering.</h2>
+            <p>Your coding agent forgets. Titan doesn't. Give it local memory and stop explaining the same context twice.</p>
+            <div class="hero-actions">
+                <a class="btn btn-primary" href="#start">Install Titan</a>
+                <a class="btn btn-secondary" href="https://github.com/kuwosaad/Titan-Mem" target="_blank" rel="noopener">View source</a>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="footer-inner">
+            <span>Titan Memory</span>
+            <span>Local-first agent memory</span>
+            <a href="https://github.com/kuwosaad/Titan-Mem" target="_blank" rel="noopener">GitHub</a>
+        </div>
+    </footer>
+
+    <script>
+        const revealObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    revealObserver.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+        document.querySelectorAll('.reveal').forEach((el) => revealObserver.observe(el));
+
+        document.querySelectorAll('a[href^="#"]').forEach((link) => {
+            link.addEventListener('click', (event) => {
+                const href = link.getAttribute('href');
+                if (!href || href === '#') return;
+                const target = document.querySelector(href);
+                if (!target) return;
+                event.preventDefault();
+                window.scrollTo({
+                    top: target.getBoundingClientRect().top + window.pageYOffset - 72,
+                    behavior: 'smooth'
+                });
+            });
+        });
+    </script>
+</body>
+</html>

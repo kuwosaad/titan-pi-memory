@@ -10,11 +10,17 @@ import numpy as np
 from networkx.algorithms.community import greedy_modularity_communities
 
 from app.graph.builder import DEFAULT_GRAPH_MEMORY_LIMIT, load_memories, load_visual_config
+from app.graph.corpus_analysis import CorpusAnalysis, snapshot_for_memories
 from app.storage.memories import get_memory_count
 
 
 MIN_SIMILARITY = 0.35
 DEFAULT_DETAIL_LIMIT = 12
+# The browser graph intentionally stays capped elsewhere for UI performance, but
+# cluster inspection/dashboard should be able to analyze the full memory store.
+# Keep a high safety cap so accidental huge requests do not allocate an
+# unbounded pairwise similarity matrix.
+MAX_CLUSTER_MEMORY_LIMIT = 10000
 _MAX_TOPIC_TERMS = 4
 _CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
 
@@ -62,33 +68,12 @@ def _document_frequencies(memories: Sequence[Dict[str, Any]]) -> Counter[str]:
 
 
 def _build_similarity_edges(vectors: Sequence[np.ndarray], top_k: int, min_sim: float) -> List[Tuple[int, int, float]]:
-    if len(vectors) < 2:
-        return []
-
-    matrix = np.vstack([np.asarray(vec, dtype=np.float32).reshape(1, -1) for vec in vectors])
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    norms[norms == 0] = 1.0
-    normalized = matrix / norms
-    sims = normalized @ normalized.T
-    np.fill_diagonal(sims, -np.inf)
-
-    top_k = max(1, min(int(top_k), len(vectors) - 1))
-    best: dict[tuple[int, int], float] = {}
-    for i in range(len(vectors)):
-        row = sims[i]
-        if top_k >= len(row):
-            candidates = np.argsort(row)[::-1]
-        else:
-            candidates = np.argpartition(row, -top_k)[-top_k:]
-            candidates = candidates[np.argsort(row[candidates])[::-1]]
-        for j in candidates:
-            weight = float(row[j])
-            if weight < min_sim or not math.isfinite(weight):
-                continue
-            a, b = sorted((int(i), int(j)))
-            best[(a, b)] = max(best.get((a, b), 0.0), weight)
-
-    return [(a, b, w) for (a, b), w in best.items()]
+    # Keep this helper as a compatibility patch point. The actual calculation
+    # is delegated to the shared bounded snapshot so callers never allocate an
+    # n x n similarity matrix.
+    return snapshot_for_memories(
+        [{"embedding": np.asarray(vector, dtype=np.float32).tolist()} for vector in vectors]
+    ).top_k_edges(top_k=top_k, min_sim=min_sim)
 
 
 def _cluster_keywords(
@@ -127,9 +112,22 @@ def _shorten(text: str, limit: int = 220) -> str:
 
 
 def _cache_key(session_id: Optional[str], limit: int, memories: Sequence[Dict[str, Any]]) -> tuple[Any, ...]:
-    latest_ts = max((str(mem.get("ts") or "") for mem in memories), default="")
-    latest_id = memories[0].get("id") if memories else ""
-    return (session_id or "", int(limit), len(memories), latest_ts, latest_id)
+    # The revision is content/embedding based; LNN activation-only updates do
+    # not invalidate graph structure, while edits to text or embeddings do.
+    snapshot = snapshot_for_memories(memories)
+    return (session_id or "", int(limit), snapshot.revision)
+
+
+def resolve_cluster_memory_limit(limit: Optional[int], total_memory_count: int) -> int:
+    """Resolve the cluster analysis memory window.
+
+    A limit of 0 or less means "analyze all memories". Positive limits still
+    mean "analyze the N most recent memories". This lets dashboards use the full
+    corpus while the browser graph can remain independently capped.
+    """
+    if limit is None or int(limit) <= 0:
+        return min(max(0, int(total_memory_count)), MAX_CLUSTER_MEMORY_LIMIT)
+    return max(1, min(int(limit), MAX_CLUSTER_MEMORY_LIMIT))
 
 
 def inspect_memory_clusters(
@@ -137,31 +135,29 @@ def inspect_memory_clusters(
     limit: int = DEFAULT_GRAPH_MEMORY_LIMIT,
     cluster_id: Optional[int] = None,
     detail_limit: int = DEFAULT_DETAIL_LIMIT,
+    corpus: Optional[CorpusAnalysis] = None,
 ) -> Dict[str, Any]:
     """Return fast, deterministic topic summaries for the graph communities."""
-    safe_limit = max(1, min(int(limit or DEFAULT_GRAPH_MEMORY_LIMIT), 1000))
+    total_memory_count = get_memory_count(session_id=session_id)
+    safe_limit = resolve_cluster_memory_limit(limit, total_memory_count)
     detail_limit = max(1, min(int(detail_limit or DEFAULT_DETAIL_LIMIT), 50))
     raw_memories = [_memory_dict(mem) for mem in load_memories(session_id=session_id, limit=safe_limit)]
-    total_memory_count = get_memory_count(session_id=session_id)
 
     key = _cache_key(session_id, safe_limit, raw_memories)
     if key in _CACHE:
         payload = _CACHE[key]
     else:
-        indexed_memories: List[Dict[str, Any]] = []
-        vectors: List[np.ndarray] = []
-        skipped_missing_embeddings = 0
-        for mem in raw_memories:
-            embedding = mem.get("embedding")
-            if isinstance(embedding, list) and embedding:
-                indexed_memories.append(mem)
-                vectors.append(np.asarray(embedding, dtype=np.float32))
-            else:
-                skipped_missing_embeddings += 1
+        corpus = corpus or snapshot_for_memories(raw_memories)
+        indexed_memories = list(corpus.memories)
+        vectors: List[np.ndarray] = [row for row in corpus.vectors]
+        skipped_missing_embeddings = max(0, len(raw_memories) - len(indexed_memories))
 
         config = load_visual_config()
         top_k = int(config.get("physics", {}).get("forces", {}).get("link", {}).get("iterations", 2) or 2)
-        edges = _build_similarity_edges(vectors, top_k=top_k, min_sim=MIN_SIMILARITY)
+        # The snapshot owns normalization and sparse blockwise cosine edges.
+        # Keep ``_build_similarity_edges`` above as a compatibility forwarding
+        # helper for external callers and tests.
+        edges = corpus.top_k_edges(top_k=top_k, min_sim=MIN_SIMILARITY)
 
         graph = nx.Graph()
         graph.add_nodes_from(range(len(indexed_memories)))
@@ -231,6 +227,9 @@ def inspect_memory_clusters(
             "connection_count": len(edges),
             "cluster_count": len(cluster_records),
             "clusters": cluster_records,
+            "limit": safe_limit,
+            "limited": safe_limit < total_memory_count,
+            "max_cluster_memory_limit": MAX_CLUSTER_MEMORY_LIMIT,
         }
         _CACHE.clear()
         _CACHE[key] = payload

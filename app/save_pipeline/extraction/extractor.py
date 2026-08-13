@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple
 
 from .prompts import build_extract_prompt
 from app.save_pipeline.extraction.adapters import ExtractionAdapter
+from .policy import classify_memory, is_hidden_metadata_memory
 
 
 ROUGH_HINTS = [
@@ -166,62 +167,6 @@ def _extract_trace_field(text: str, field_name: str) -> str:
     if not match:
         return ""
     return match.group(1).strip()
-
-
-def classify_memory(memory_text: str, mem_type: str | None = None) -> Tuple[str, str]:
-    lowered = memory_text.lower()
-    type_lower = (mem_type or "").lower()
-
-    if "kuwo and karu" in lowered or "they discussed" in lowered:
-        speaker_focus = "shared"
-    elif "kuwo" in lowered or "the user" in lowered:
-        speaker_focus = "kuwo"
-    elif "karu" in lowered or "assistant" in lowered:
-        speaker_focus = "karu"
-    else:
-        speaker_focus = "system"
-
-    if type_lower in {"preference", "profile"}:
-        memory_kind = "user_preference" if speaker_focus == "kuwo" else "relationship"
-    elif type_lower in {"decision", "plan", "constraint"}:
-        memory_kind = "decision"
-    elif type_lower in {"bug", "risk", "question"}:
-        memory_kind = "issue"
-    elif type_lower in {"fix", "workflow", "integration", "schema"}:
-        memory_kind = "workflow"
-    else:
-        if any(token in lowered for token in ("prefers", "likes", "wants karu to", "asked karu to")):
-            memory_kind = "user_preference"
-        elif any(token in lowered for token in ("promised", "will remember", "should remember", "committed")):
-            memory_kind = "commitment"
-        elif any(token in lowered for token in ("discussed", "friends", "family", "relationship")):
-            memory_kind = "relationship"
-        elif any(token in lowered for token in ("implemented", "configured", "completed", "finished", "did")):
-            memory_kind = "outcome"
-        elif any(token in lowered for token in ("task", "todo", "investigate", "research", "build")):
-            memory_kind = "task"
-        elif any(token in lowered for token in ("bug", "issue", "problem", "failed", "frustration")):
-            memory_kind = "issue"
-        else:
-            memory_kind = "user_fact" if speaker_focus == "kuwo" else "workflow"
-
-    return speaker_focus, memory_kind
-
-
-def is_hidden_metadata_memory(memory: Dict[str, Any] | str) -> bool:
-    text = memory if isinstance(memory, str) else str(memory.get("text") or "")
-    lowered = text.lower().strip()
-    if not lowered:
-        return True
-    if _is_low_signal_transport_text(lowered):
-        return True
-    if any(re.search(pattern, lowered, re.IGNORECASE) for pattern in TELEGRAM_METADATA_PATTERNS):
-        if not _contains_durable_relational_signal(lowered) and not any(
-            token in lowered
-            for token in ("asked", "requested", "wants", "prefers", "decided", "promised", "problem", "issue", "fix")
-        ):
-            return True
-    return False
 
 
 def assess_memory_worthiness(user_text: str, assistant_text: str) -> Dict[str, Any]:

@@ -12,7 +12,8 @@ from networkx.algorithms.community import greedy_modularity_communities
 
 from app.embedding.embedder import embed
 from app.graph.builder import DEFAULT_GRAPH_MEMORY_LIMIT, load_memories
-from app.graph.clusters import inspect_memory_clusters
+from app.graph.clusters import inspect_memory_clusters, resolve_cluster_memory_limit
+from app.graph.corpus_analysis import CorpusAnalysis, snapshot_for_memories
 from app.graph.similarity import cosine_similarity
 from app.retrieval_pipeline.config import load_settings
 
@@ -83,6 +84,23 @@ def _safe_cosine(a: np.ndarray, b: np.ndarray) -> float:
     except Exception:
         return 0.0
     return value if math.isfinite(value) else 0.0
+
+
+def _centrality_scores(graph: nx.Graph, node_count: int, query_scores: Sequence[float]) -> Dict[int, float]:
+    if graph.number_of_edges() == 0:
+        total = float(sum(query_scores)) or 1.0
+        return {idx: query_scores[idx] / total for idx in range(node_count)}
+
+    scores = {idx: max(0.0, float(query_scores[idx])) * 0.25 for idx in range(node_count)}
+    for left, right, data in graph.edges(data=True):
+        weight = float(data.get("weight") or 0.0)
+        if not math.isfinite(weight) or weight <= 0.0:
+            continue
+        scores[int(left)] += weight
+        scores[int(right)] += weight
+
+    total = float(sum(scores.values())) or 1.0
+    return {idx: score / total for idx, score in scores.items()}
 
 
 def _serialize_memory(memory: Dict[str, Any], cluster_id: Optional[int] = None, score: Optional[float] = None) -> Dict[str, Any]:
@@ -163,6 +181,7 @@ def analyze_memory_clusters(
     limit: int = DEFAULT_GRAPH_MEMORY_LIMIT,
     question: Optional[str] = None,
     detail_limit: int = 8,
+    corpus: Optional[CorpusAnalysis] = None,
 ) -> Dict[str, Any]:
     """Apply a Cortex/step-2.1-style structural pass over one or more Titan clusters.
 
@@ -174,10 +193,15 @@ def analyze_memory_clusters(
     if not requested_cluster_ids:
         return {"error": "at least one cluster id is required"}
 
-    safe_limit = max(1, min(int(limit or DEFAULT_GRAPH_MEMORY_LIMIT), 1000))
     detail_limit = max(1, min(int(detail_limit or 8), 25))
 
-    cluster_payload = inspect_memory_clusters(session_id=session_id, limit=safe_limit, detail_limit=50)
+    if corpus is None:
+        raw_memories = [_memory_dict(mem) for mem in load_memories(session_id=session_id, limit=10000 if int(limit or 0) <= 0 else int(limit))]
+        corpus = snapshot_for_memories(raw_memories)
+    else:
+        raw_memories = list(corpus.memories)
+    cluster_payload = inspect_memory_clusters(session_id=session_id, limit=limit, detail_limit=50, corpus=corpus)
+    safe_limit = resolve_cluster_memory_limit(limit, int(cluster_payload.get("total_memory_count") or 0))
     clusters = cluster_payload.get("clusters") or []
     by_cluster_id = {int(cluster.get("cluster_id")): cluster for cluster in clusters if cluster.get("cluster_id") is not None}
     missing = [cid for cid in requested_cluster_ids if cid not in by_cluster_id]
@@ -187,8 +211,8 @@ def analyze_memory_clusters(
             "available_cluster_ids": sorted(by_cluster_id.keys()),
         }
 
-    raw_memories = [_memory_dict(mem) for mem in load_memories(session_id=session_id, limit=safe_limit)]
-    memory_by_id = {str(mem.get("id")): mem for mem in raw_memories if mem.get("id")}
+    memory_by_id = {str(mem.get("id")): mem for mem in corpus.memories if mem.get("id")}
+    index_by_id = {str(mem.get("id")): index for index, mem in enumerate(corpus.memories) if mem.get("id")}
 
     selected_memories: List[Dict[str, Any]] = []
     selected_vectors: List[np.ndarray] = []
@@ -201,14 +225,14 @@ def analyze_memory_clusters(
             memory = memory_by_id.get(str(memory_id))
             if not memory or str(memory_id) in seen_ids:
                 continue
-            vec = _vector(memory)
-            if vec is None:
+            source_index = index_by_id.get(str(memory_id))
+            if source_index is None:
                 skipped_missing_embeddings += 1
                 continue
             seen_ids.add(str(memory_id))
             origin_by_id[str(memory_id)] = cluster_id
             selected_memories.append(memory)
-            selected_vectors.append(vec)
+            selected_vectors.append(corpus.vectors[source_index])
 
     if not selected_memories:
         return {
@@ -232,9 +256,11 @@ def analyze_memory_clusters(
     contradiction_threshold = float(step2_config.get("contradiction_sim_threshold", 0.7) or 0.7)
     antonym_pairs = step2_config.get("contradiction_antonyms", []) or []
 
-    normalized = _normalize_vectors(selected_vectors)
-    similarity = normalized @ normalized.T
-    np.fill_diagonal(similarity, 0.0)
+    # Share the immutable corpus snapshot with cluster inspection. Pairwise
+    # cosine values are calculated on demand from normalized rows, avoiding a
+    # dense n x n allocation while preserving exact scores.
+    selected_indices = [index_by_id[str(memory.get("id"))] for memory in selected_memories]
+    corpus = corpus.subset(selected_indices)
     query_scores, query_warning = _query_scores(question, selected_vectors)
 
     graph = nx.Graph()
@@ -242,47 +268,46 @@ def analyze_memory_clusters(
         memory_id = str(memory.get("id"))
         graph.add_node(idx, memory_id=memory_id, cluster_id=origin_by_id.get(memory_id))
 
-    for i in range(len(selected_memories)):
-        for j in range(i + 1, len(selected_memories)):
-            sim = float(similarity[i][j])
-            if sim < sim_floor or not math.isfinite(sim):
-                continue
-            relevance = (query_scores[i] + query_scores[j]) / 2.0
-            weight = sim * (0.35 + 0.65 * relevance)
-            graph.add_edge(i, j, weight=weight, similarity=sim)
+    # Preserve the exact all-pairs behavior for the small fixtures used by the
+    # existing characterization suite. Larger corpora use a bounded sparse
+    # top-k edge set; otherwise a highly similar 10k-memory corpus would still
+    # materialize millions of NetworkX edges after avoiding the NumPy matrix.
+    pair_limit = len(selected_memories) - 1
+    if len(selected_memories) > 512:
+        pair_limit = max(16, min(pair_limit, int(step2_config.get("analysis_top_k", 16) or 16)))
+    edge_floor = min(sim_floor, bridge_floor, contradiction_threshold)
+    candidate_pairs = corpus.top_k_edges(top_k=pair_limit, min_sim=edge_floor)
+    for i, j, sim in candidate_pairs:
+        if sim < sim_floor or not math.isfinite(sim):
+            continue
+        relevance = (query_scores[i] + query_scores[j]) / 2.0
+        weight = sim * (0.35 + 0.65 * relevance)
+        graph.add_edge(i, j, weight=weight, similarity=sim)
 
-    if graph.number_of_edges() > 0:
-        centrality = nx.pagerank(graph, weight="weight")
-    else:
-        total = float(sum(query_scores)) or 1.0
-        centrality = {idx: query_scores[idx] / total for idx in range(len(selected_memories))}
+    centrality = _centrality_scores(graph, len(selected_memories), query_scores)
 
     bridge_pairs: List[Dict[str, Any]] = []
     bridge_score_by_idx: Dict[int, float] = defaultdict(float)
-    for i in range(len(selected_memories)):
+    for i, j, sim in candidate_pairs:
         cluster_i = origin_by_id.get(str(selected_memories[i].get("id")))
-        for j in range(i + 1, len(selected_memories)):
-            cluster_j = origin_by_id.get(str(selected_memories[j].get("id")))
-            if cluster_i == cluster_j:
-                continue
-            sim = float(similarity[i][j])
-            if sim < bridge_floor or not math.isfinite(sim):
-                continue
-            bridge_score = sim * (centrality.get(i, 0.0) + centrality.get(j, 0.0)) / 2.0
-            shared_terms = sorted(_tokens(str(selected_memories[i].get("text") or "")) & _tokens(str(selected_memories[j].get("text") or "")))[:8]
-            bridge_score_by_idx[i] += bridge_score
-            bridge_score_by_idx[j] += bridge_score
-            bridge_pairs.append(
-                {
-                    "source_cluster_id": cluster_i,
-                    "target_cluster_id": cluster_j,
-                    "similarity": round(sim, 4),
-                    "bridge_score": round(bridge_score, 6),
-                    "shared_terms": shared_terms,
-                    "source_memory": _serialize_memory(selected_memories[i], cluster_i),
-                    "target_memory": _serialize_memory(selected_memories[j], cluster_j),
-                }
-            )
+        cluster_j = origin_by_id.get(str(selected_memories[j].get("id")))
+        if cluster_i == cluster_j or sim < bridge_floor or not math.isfinite(sim):
+            continue
+        bridge_score = sim * (centrality.get(i, 0.0) + centrality.get(j, 0.0)) / 2.0
+        shared_terms = sorted(_tokens(str(selected_memories[i].get("text") or "")) & _tokens(str(selected_memories[j].get("text") or "")))[:8]
+        bridge_score_by_idx[i] += bridge_score
+        bridge_score_by_idx[j] += bridge_score
+        bridge_pairs.append(
+            {
+                "source_cluster_id": cluster_i,
+                "target_cluster_id": cluster_j,
+                "similarity": round(sim, 4),
+                "bridge_score": round(bridge_score, 6),
+                "shared_terms": shared_terms,
+                "source_memory": _serialize_memory(selected_memories[i], cluster_i),
+                "target_memory": _serialize_memory(selected_memories[j], cluster_j),
+            }
+        )
     bridge_pairs.sort(key=lambda item: (float(item["bridge_score"]), float(item["similarity"])), reverse=True)
     bridge_pairs = bridge_pairs[:detail_limit]
 
@@ -299,42 +324,40 @@ def analyze_memory_clusters(
     tensions: List[Dict[str, Any]] = []
     raw_tokens = [_tokens(str(mem.get("text") or "")) for mem in selected_memories]
     timestamps = [_parse_ts(mem.get("ts")) for mem in selected_memories]
-    for i in range(len(selected_memories)):
-        for j in range(i + 1, len(selected_memories)):
-            sim = float(similarity[i][j])
-            if sim < contradiction_threshold or not math.isfinite(sim):
-                continue
-            found_pair: Optional[Tuple[str, str]] = None
-            for a, b in antonym_pairs:
-                a = str(a).lower()
-                b = str(b).lower()
-                if (a in raw_tokens[i] and b in raw_tokens[j]) or (b in raw_tokens[i] and a in raw_tokens[j]):
-                    found_pair = (a, b)
-                    break
-            if not found_pair:
-                continue
-            shared = sorted((raw_tokens[i] & raw_tokens[j]) - set(found_pair))[:8]
-            if not shared:
-                continue
-            ts_i = timestamps[i]
-            ts_j = timestamps[j]
-            if ts_i and ts_j and ts_i != ts_j:
-                older_idx, newer_idx = (i, j) if ts_i < ts_j else (j, i)
-            else:
-                older_idx, newer_idx = i, j
-            tensions.append(
-                {
-                    "similarity": round(sim, 4),
-                    "signal": f"possible shift around '{found_pair[0]}' vs '{found_pair[1]}'",
-                    "shared_terms": shared,
-                    "older_memory": _serialize_memory(
-                        selected_memories[older_idx], origin_by_id.get(str(selected_memories[older_idx].get("id")))
-                    ),
-                    "newer_memory": _serialize_memory(
-                        selected_memories[newer_idx], origin_by_id.get(str(selected_memories[newer_idx].get("id")))
-                    ),
-                }
-            )
+    for i, j, sim in candidate_pairs:
+        if sim < contradiction_threshold or not math.isfinite(sim):
+            continue
+        found_pair: Optional[Tuple[str, str]] = None
+        for a, b in antonym_pairs:
+            a = str(a).lower()
+            b = str(b).lower()
+            if (a in raw_tokens[i] and b in raw_tokens[j]) or (b in raw_tokens[i] and a in raw_tokens[j]):
+                found_pair = (a, b)
+                break
+        if not found_pair:
+            continue
+        shared = sorted((raw_tokens[i] & raw_tokens[j]) - set(found_pair))[:8]
+        if not shared:
+            continue
+        ts_i = timestamps[i]
+        ts_j = timestamps[j]
+        if ts_i and ts_j and ts_i != ts_j:
+            older_idx, newer_idx = (i, j) if ts_i < ts_j else (j, i)
+        else:
+            older_idx, newer_idx = i, j
+        tensions.append(
+            {
+                "similarity": round(sim, 4),
+                "signal": f"possible shift around '{found_pair[0]}' vs '{found_pair[1]}'",
+                "shared_terms": shared,
+                "older_memory": _serialize_memory(
+                    selected_memories[older_idx], origin_by_id.get(str(selected_memories[older_idx].get("id")))
+                ),
+                "newer_memory": _serialize_memory(
+                    selected_memories[newer_idx], origin_by_id.get(str(selected_memories[newer_idx].get("id")))
+                ),
+            }
+        )
     tensions.sort(key=lambda item: float(item["similarity"]), reverse=True)
     tensions = tensions[:detail_limit]
 

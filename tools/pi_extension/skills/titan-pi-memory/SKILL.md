@@ -14,6 +14,11 @@ description: >
 
 Titan gives this coding agent persistent memory across sessions. It works in two layers:
 
+Pi is only the adapter. The installed package carries the Titan engine that owns trace
+processing, storage, retrieval, patterns, and graph analysis. Pi uses its own namespace
+(`~/.titan/agents/pi` by default), so its state remains separate from Codex, Claude, and
+other agents. Existing trace files and memory IDs remain readable across upgrades.
+
 ## 1. Passive capture (automatic)
 
 Every conversation turn is automatically recorded as a "trace event" and stored in Titan's
@@ -102,6 +107,10 @@ User: "What happened with the ODE solver on May 17?"
 - The date filter runs **before** semantic scoring — narrows the candidate pool first, then searches within that scope
 - Empty query + date range skips embedding/scoring entirely and returns raw memories sorted by recency
 - A `"temporal"` intent is automatically detected for queries containing "when did", "what date", "first time", "which day"
+
+The doctor output also reports the active storage backend. SQLite provides the full
+feature set, including LNN state. JSON remains a compatibility backend for basic memory
+storage and explicitly reports that LNN is unavailable.
 
 ### Pattern 5: Vague temporal navigation — "When did we first talk about X?"
 

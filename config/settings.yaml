@@ -42,7 +42,8 @@ ingest_debug_metrics_enabled: true
 retrieval_enabled: true
 retrieval_top_k: 8
 retrieval_min_similarity: 0.25
-retrieval_recency_days: 60
+retrieval_recency_days: null
+retrieval_default_window_days: null
 retrieval_session_bias: true
 retrieval_rerank_enabled: true
 retrieval_rerank_alpha: 1.0
@@ -57,11 +58,11 @@ retrieval_dedup:
   embedding_min_token_containment: 0.75
   candidate_scan_multiplier: 3
 
-# Final retrieval selection. This public runtime currently uses its existing
-# global candidate API for both candidate lanes; no storage migration is needed.
+# Final retrieval selection. Candidate recall remains permissive; only memories
+# with direct evidence of the query may become visible results.
 retrieval_selection:
   enabled: true
-  hybrid_candidates_enabled: false
+  hybrid_candidates_enabled: true
 
   query_aspects_enabled: true
   profile_aspect_expansion_enabled: true
@@ -93,6 +94,30 @@ retrieval_selection:
 # Memory Notes Settings
 notes_max_items: 6
 notes_max_chars: 700
+
+# Pattern Generation Settings
+patterns:
+  enabled: true
+  processor_version: "pattern-miner-v2"
+  packet_mode: adaptive
+  auto_mine_enabled: false
+  auto_mine_every_memories: 50
+  batch_size: 100
+  context_limit: 300
+  min_evidence_count: 3
+  min_scene_count: 2
+  min_confidence_to_show: 0.45
+  min_confidence_to_retrieve: 0.60
+  retrieve_limit: 3
+  coactivation_enabled: false
+  high_signal_enabled: true
+  semantic_cluster_enabled: true
+  scene_episode_enabled: true
+  entity_packets_enabled: true
+  bridge_packets_enabled: true
+  contradiction_packets_enabled: true
+  cluster_min_memories: 3
+  cluster_min_scenes: 2
 
 # Router Settings
 router_schema_version: v2

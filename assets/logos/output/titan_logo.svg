@@ -1,0 +1,50 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <g fill="currentColor">
+    <circle cx="50" cy="50" r="3.5"/>
+
+    <circle cx="50" cy="36" r="3"/>
+    <circle cx="62.12" cy="43" r="3"/>
+    <circle cx="62.12" cy="57" r="3"/>
+    <circle cx="50" cy="64" r="3"/>
+    <circle cx="37.88" cy="57" r="3"/>
+    <circle cx="37.88" cy="43" r="3"/>
+
+    <circle cx="50" cy="24" r="2.5"/>
+    <circle cx="72.52" cy="37" r="2.5"/>
+    <circle cx="72.52" cy="63" r="2.5"/>
+    <circle cx="50" cy="76" r="2.5"/>
+    <circle cx="27.48" cy="63" r="2.5"/>
+    <circle cx="27.48" cy="37" r="2.5"/>
+
+    <circle cx="61.26" cy="30.63" r="1.8" opacity="0.6"/>
+    <circle cx="61.26" cy="69.37" r="1.8" opacity="0.6"/>
+    <circle cx="38.74" cy="69.37" r="1.8" opacity="0.6"/>
+    <circle cx="38.74" cy="30.63" r="1.8" opacity="0.6"/>
+    <circle cx="72.52" cy="50" r="1.8" opacity="0.6"/>
+    <circle cx="27.48" cy="50" r="1.8" opacity="0.6"/>
+    <circle cx="50" cy="24" r="1.8" opacity="0"/>
+    <circle cx="50" cy="76" r="1.8" opacity="0"/>
+
+    <circle cx="50" cy="12" r="2"/>
+    <circle cx="60.62" cy="14.42" r="2"/>
+    <circle cx="80.31" cy="32.5" r="2"/>
+    <circle cx="85" cy="50" r="2"/>
+    <circle cx="80.31" cy="67.5" r="2"/>
+    <circle cx="60.62" cy="85.58" r="2"/>
+    <circle cx="50" cy="88" r="2"/>
+    <circle cx="39.38" cy="85.58" r="2"/>
+    <circle cx="19.69" cy="67.5" r="2"/>
+    <circle cx="15" cy="50" r="2"/>
+    <circle cx="19.69" cy="32.5" r="2"/>
+    <circle cx="39.38" cy="14.42" r="2"/>
+
+    <circle cx="67.5" cy="19.69" r="1.5" opacity="0.4"/>
+    <circle cx="82.5" cy="41" r="1.5" opacity="0.4"/>
+    <circle cx="82.5" cy="59" r="1.5" opacity="0.4"/>
+    <circle cx="67.5" cy="80.31" r="1.5" opacity="0.4"/>
+    <circle cx="32.5" cy="80.31" r="1.5" opacity="0.4"/>
+    <circle cx="17.5" cy="59" r="1.5" opacity="0.4"/>
+    <circle cx="17.5" cy="41" r="1.5" opacity="0.4"/>
+    <circle cx="32.5" cy="19.69" r="1.5" opacity="0.4"/>
+  </g>
+</svg>

@@ -1,0 +1,22 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <polygon id="hex" points="5,0 2.5,4.33 -2.5,4.33 -5,0 -2.5,-4.33 2.5,-4.33" fill="currentColor"/>
+  </defs>
+  <g>
+    <!-- Center hex -->
+    <use href="#hex" x="45" y="45" transform="scale(2.2)"/>
+    <!-- Inner ring hexes -->
+    <use href="#hex" x="33" y="39"/>
+    <use href="#hex" x="45" y="39"/>
+    <use href="#hex" x="57" y="39"/>
+    <use href="#hex" x="27" y="50"/>
+    <use href="#hex" x="39" y="50"/>
+    <use href="#hex" x="51" y="50"/>
+    <use href="#hex" x="63" y="50"/>
+    <use href="#hex" x="33" y="61"/>
+    <use href="#hex" x="45" y="61"/>
+    <use href="#hex" x="57" y="61"/>
+    <!-- Outer accent dots at hex centers -->
+    <circle cx="45" cy="45" r="3" fill="currentColor"/>
+  </g>
+</svg>

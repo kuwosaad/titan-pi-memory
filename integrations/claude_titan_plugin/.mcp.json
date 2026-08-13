@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "titan-memory": {
+      "command": "titan",
+      "args": ["mcp", "--agent", "${user_config.agent_name}"],
+      "env": {
+        "TITAN_AGENT_NAME": "${user_config.agent_name}"
+      }
+    }
+  }
+}

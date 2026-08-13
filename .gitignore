@@ -2,29 +2,85 @@
 .venv/
 venv/
 
+# Generated artifacts
+out/
+.bench/
+artifacts/generated/bench/
+
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
 .Python
 *.egg-info/
 dist/
 build/
 
+# Logs
+*.log
+server.log
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Backup files (optional - keeping locally but not on GitHub)
+# *_old.py
+
+# Titan Memory tracking
+.titan-last-run
+.opencode/titan/
 
 # Local env files
 .env
 .env.*
 .env.local
-!env.example
+.env.*.local
+!.env.example
 
-# Node
-node_modules/
+# Internal notes
+notes/
+Anthropic_Cheat_Sheet.md
 
-# Generated output
-out/
-*.log
+# OpenCode (kept locally, not tracked)
+tools/opencode/
+.opencode/
+opencode.json
+
+# Experiment run artifacts
+experiments/dgm-runs/exp-step2-research-*/
+experiments/**/results/
+experiments/**/shadow_db
+experiments/**/.opencode/
+experiments/**/.env
+
+# Install scripts (Pi is the path)
+install.sh
+
+# Agent guides at root (moved to docs/)
+/AGENTS.md
+/TODO-pi-extension.md
+
+# Lab artifacts (kept locally, not pushed)
+.pi-subagents/
+loop/
+traces/
+docs/artifacts/
+docs/*.excalidraw
+docs/adaptive-evidence-packet-pattern-mining-plan.html
+docs/titan_technical_product_review_deck.html
+docs/titan_technical_product_review_deck_plan.md
+docs/titan_step_2_1_explained.html
+docs/claude_code_titan_integration_plan.md
+docs/claude_codex_titan_plugin_research.md
+docs/codex_titan_integration_plan.md
+docs/codex_titan_pi_parity_plan.md
+docs/titan-codex-plugin-marketplace-plan.md
+
+# Personal docs (kept locally, not pushed)
+saad_persona.md
+titan-one-pager.md
+titan-one-pager.pdf
+
 .gstack/

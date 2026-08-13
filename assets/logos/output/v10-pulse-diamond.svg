@@ -1,0 +1,39 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <g fill="currentColor">
+    <circle cx="50" cy="50" r="3.5"/>
+
+    <circle cx="50" cy="36" r="3"/>
+    <circle cx="62" cy="50" r="3"/>
+    <circle cx="50" cy="64" r="3"/>
+    <circle cx="38" cy="50" r="3"/>
+
+    <circle cx="56.5" cy="43.5" r="2" opacity="0.5"/>
+    <circle cx="56.5" cy="56.5" r="2" opacity="0.5"/>
+    <circle cx="43.5" cy="56.5" r="2" opacity="0.5"/>
+    <circle cx="43.5" cy="43.5" r="2" opacity="0.5"/>
+
+    <circle cx="50" cy="24" r="2.5"/>
+    <circle cx="68" cy="50" r="2.5"/>
+    <circle cx="50" cy="76" r="2.5"/>
+    <circle cx="32" cy="50" r="2.5"/>
+
+    <circle cx="62.4" cy="34.6" r="2.5"/>
+    <circle cx="65.4" cy="62.4" r="2.5"/>
+    <circle cx="37.6" cy="65.4" r="2.5"/>
+    <circle cx="34.6" cy="37.6" r="2.5"/>
+
+    <circle cx="50" cy="14" r="1.8"/>
+    <circle cx="74" cy="50" r="1.8"/>
+    <circle cx="50" cy="86" r="1.8"/>
+    <circle cx="26" cy="50" r="1.8"/>
+
+    <circle cx="66" cy="22" r="1.8"/>
+    <circle cx="78" cy="34" r="1.8"/>
+    <circle cx="78" cy="66" r="1.8"/>
+    <circle cx="66" cy="78" r="1.8"/>
+    <circle cx="34" cy="78" r="1.8"/>
+    <circle cx="22" cy="66" r="1.8"/>
+    <circle cx="22" cy="34" r="1.8"/>
+    <circle cx="34" cy="22" r="1.8"/>
+  </g>
+</svg>

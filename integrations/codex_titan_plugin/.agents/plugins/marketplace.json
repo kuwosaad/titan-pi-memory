@@ -1,0 +1,20 @@
+{
+  "name": "titan-memory-codex",
+  "interface": {
+    "displayName": "Titan Memory for Codex"
+  },
+  "plugins": [
+    {
+      "name": "titan-memory",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

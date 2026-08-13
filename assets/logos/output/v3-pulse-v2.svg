@@ -1,0 +1,57 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="pulse-v2-bound">
+      <circle cx="50" cy="50" r="40"/>
+    </clipPath>
+  </defs>
+
+  <!-- Outer boundary ring -->
+  <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.2"/>
+
+  <!-- Orbital ring 3 (outer) -->
+  <circle cx="50" cy="50" r="36" fill="none" stroke="currentColor" stroke-width="0.6" opacity="0.12"/>
+  <!-- Orbital ring 2 (middle) -->
+  <circle cx="50" cy="50" r="25" fill="none" stroke="currentColor" stroke-width="0.6" opacity="0.15"/>
+  <!-- Orbital ring 1 (inner) -->
+  <circle cx="50" cy="50" r="14" fill="none" stroke="currentColor" stroke-width="0.6" opacity="0.2"/>
+
+  <!-- Center core: double circle -->
+  <circle cx="50" cy="50" r="7" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3"/>
+  <circle cx="50" cy="50" r="4" fill="currentColor"/>
+
+  <!-- Ring 1: 4 dots at r=14, cardinal directions -->
+  <circle cx="50" cy="36" r="3.2" fill="currentColor" opacity="0.9"/>
+  <circle cx="64" cy="50" r="3.2" fill="currentColor" opacity="0.9"/>
+  <circle cx="50" cy="64" r="3.2" fill="currentColor" opacity="0.9"/>
+  <circle cx="36" cy="50" r="3.2" fill="currentColor" opacity="0.9"/>
+
+  <!-- Ring 2: 8 dots at r=25 -->
+  <circle cx="50" cy="25" r="2.5" fill="currentColor" opacity="0.75"/>
+  <circle cx="67.68" cy="32.32" r="2.5" fill="currentColor" opacity="0.75"/>
+  <circle cx="75" cy="50" r="2.5" fill="currentColor" opacity="0.75"/>
+  <circle cx="67.68" cy="67.68" r="2.5" fill="currentColor" opacity="0.75"/>
+  <circle cx="50" cy="75" r="2.5" fill="currentColor" opacity="0.75"/>
+  <circle cx="32.32" cy="67.68" r="2.5" fill="currentColor" opacity="0.75"/>
+  <circle cx="25" cy="50" r="2.5" fill="currentColor" opacity="0.75"/>
+  <circle cx="32.32" cy="32.32" r="2.5" fill="currentColor" opacity="0.75"/>
+
+  <!-- Accent dots: 4 diagonal micro-dots at r=19 (between ring 1 and 2) -->
+  <circle cx="63.44" cy="36.56" r="1.5" fill="currentColor" opacity="0.35"/>
+  <circle cx="63.44" cy="63.44" r="1.5" fill="currentColor" opacity="0.35"/>
+  <circle cx="36.56" cy="63.44" r="1.5" fill="currentColor" opacity="0.35"/>
+  <circle cx="36.56" cy="36.56" r="1.5" fill="currentColor" opacity="0.35"/>
+
+  <!-- Ring 3: 12 dots at r=36 -->
+  <circle cx="50" cy="14" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="68" cy="20" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="81.18" cy="32" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="86" cy="50" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="81.18" cy="68" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="68" cy="80" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="50" cy="86" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="32" cy="80" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="18.82" cy="68" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="14" cy="50" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="18.82" cy="32" r="2" fill="currentColor" opacity="0.55"/>
+  <circle cx="32" cy="20" r="2" fill="currentColor" opacity="0.55"/>
+</svg>

@@ -225,6 +225,7 @@ function ensurePiWorkspace(): { copiedConfigs: string[]; envCreated: boolean } {
       [
         "# Titan Pi workspace secrets",
         "# Add the key for your configured extraction model, for example:",
+        "# OPENCODE_GO_API_KEY=your_key_here",
         "# GEMINI_API_KEY=your_key_here",
         "# OPENAI_API_KEY=your_key_here",
         "",
@@ -235,6 +236,58 @@ function ensurePiWorkspace(): { copiedConfigs: string[]; envCreated: boolean } {
   }
 
   return { copiedConfigs, envCreated };
+}
+
+function setExtractionProvider(provider: "opencode_go" | "gemini"): string {
+  ensurePiWorkspace();
+  const configPath = resolve(TITAN_HOME, "config", "extraction_models.yaml");
+  if (!existsSync(configPath)) return configPath;
+
+  let text = readFileSync(configPath, "utf-8");
+  text = text.replace(/^current:\s*\S+\s*$/m, `current: ${provider}`);
+
+  if (!/^opencode_go:\s*$/m.test(text)) {
+    const opencodeBlock = [
+      "opencode_go:",
+      "  enabled: true",
+      "  api_key_env: OPENCODE_GO_API_KEY",
+      "  base_url: https://opencode.ai/zen/go/v1",
+      "  model: deepseek-v4-flash",
+      "  temperature: 0.1",
+      "",
+    ].join("\n");
+    text = text.replace(/gemini:\n/, `${opencodeBlock}gemini:\n`);
+  }
+
+  const dedupBlock = provider === "opencode_go"
+    ? [
+        "dedup:",
+        "  enabled: true",
+        "  backend: opencode_go",
+        "  api_key_env: OPENCODE_GO_API_KEY",
+        "  base_url: https://opencode.ai/zen/go/v1",
+        "  model: deepseek-v4-flash",
+        "  temperature: 0.1",
+        "",
+      ].join("\n")
+    : [
+        "dedup:",
+        "  enabled: true",
+        "  backend: gemini",
+        "  api_key_env: GEMINI_API_KEY",
+        "  base_url: https://generativelanguage.googleapis.com/v1beta",
+        "  model: gemini-2.5-flash",
+        "  temperature: 0.1",
+        "  request_timeout: 120",
+        "  max_retries: 2",
+        "  retry_backoff_seconds: 1.0",
+        "",
+      ].join("\n");
+
+  text = text.replace(/dedup:\n(?:  .*\n?)*/, dedupBlock);
+
+  writeFileSync(configPath, text, "utf-8");
+  return configPath;
 }
 
 /** Add or replace one KEY=value in the Pi workspace .env file. */
@@ -315,8 +368,9 @@ async function ensureServerRunning(): Promise<boolean> {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
-        TITAN_HOME,
-        TITAN_BASE_DIR: TITAN_HOME,
+        TITAN_PI_ADAPTER: "1",
+        TITAN_PI_DEFAULT_AGENT: process.env.TITAN_AGENT_NAME || "pi",
+        TITAN_PI_DEFAULT_HOME: TITAN_HOME,
         TITAN_PI_PORT: "8002",
         PYTHONPATH: REPO_ROOT,
       },
@@ -400,6 +454,22 @@ interface TitanRetrieveResponse {
   [key: string]: unknown;
 }
 
+interface TitanRuntimeResponse {
+  agent_name?: string;
+  titan_home?: string;
+  base_dir?: string;
+  trace_dir?: string;
+  memory_backend?: string;
+  memory_capabilities?: {
+    memory_store?: boolean;
+    lnn_state_store?: boolean;
+    lnn_status?: string;
+    adapter?: string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
 interface TitanCluster {
   cluster_id: number;
   topic: string;
@@ -464,6 +534,82 @@ interface TitanCortexAnalysisResponse {
   [key: string]: unknown;
 }
 
+interface TitanPatternStatus {
+  memories_total?: number;
+  processed_current?: number;
+  unprocessed?: number;
+  candidate_patterns?: number;
+  accepted_patterns?: number;
+  processor_version?: string;
+  processor_config_hash?: string;
+  last_run?: Record<string, unknown> | null;
+  error?: string;
+  [key: string]: unknown;
+}
+
+interface TitanPatternEvidenceInput {
+  memory_id: string;
+  scene_id?: string;
+  role?: string;
+  score?: number;
+}
+
+interface TitanPatternCreateInput {
+  title: string;
+  kind?: string;
+  scope?: string;
+  status?: string;
+  summary: string;
+  recommended_behavior: string;
+  trigger_terms?: string[];
+  evidence?: TitanPatternEvidenceInput[];
+  confidence?: number;
+  applies_when?: string;
+  does_not_apply_when?: string;
+  actionability?: number;
+  retrieval_value?: number;
+  canonical_key?: string;
+  mined_run_id?: string;
+  source?: string;
+}
+
+interface TitanPatternMarkProcessedInput {
+  memory_ids: string[];
+  run_id?: string;
+  status?: string;
+  pattern_ids?: string[];
+  error?: string;
+  mode?: string;
+}
+
+interface TitanPatternEvidencePacket {
+  packet_id?: string;
+  packet_type?: string;
+  seed_memory_ids?: string[];
+  context_memory_ids?: string[];
+  selection_reasons?: string[];
+  temporal_context?: unknown[];
+  semantic_context?: unknown[];
+  entity_context?: unknown[];
+  pattern_context?: unknown[];
+  graph_context?: unknown;
+  questions_for_agent?: string[];
+  unprocessed_memory_ids?: string[];
+  related_old_memory_ids?: string[];
+  cluster_summaries?: Record<string, unknown>[];
+  central_memories?: Record<string, unknown>[];
+  bridge_memories?: Record<string, unknown>[];
+  tensions?: Record<string, unknown>[];
+  suggested_trigger_terms?: string[];
+  suggested_kind?: string;
+  suggested_scope?: string;
+  confidence_hints?: Record<string, unknown>;
+  processor_version?: string;
+  processor_config_hash?: string;
+  error?: string;
+  [key: string]: unknown;
+}
+
 /** Parse a fetch Response as JSON, returning an error object on failure. */
 async function safeJson(res: Response): Promise<Record<string, unknown>> {
   try {
@@ -504,6 +650,11 @@ async function apiGetRecentMemories(limit = 8): Promise<{ memories: TitanMemory[
   return (await safeJson(res)) as unknown as { memories: TitanMemory[]; count: number; total?: number };
 }
 
+async function apiGetRuntime(): Promise<TitanRuntimeResponse> {
+  const res = await fetch(`${TITAN_API_BASE}/api/runtime`);
+  return (await safeJson(res)) as TitanRuntimeResponse;
+}
+
 async function apiGetClusters(options: {
   clusterId?: number;
   sessionId?: string;
@@ -511,7 +662,7 @@ async function apiGetClusters(options: {
   detailLimit?: number;
 } = {}): Promise<TitanClustersResponse> {
   const params = new URLSearchParams();
-  params.set("limit", String(options.limit ?? 500));
+  params.set("limit", String(options.limit ?? 0));
   params.set("detail_limit", String(options.detailLimit ?? 12));
   if (options.clusterId !== undefined) params.set("cluster_id", String(options.clusterId));
   if (options.sessionId) params.set("session_id", options.sessionId);
@@ -528,7 +679,7 @@ async function apiAnalyzeClusters(options: {
 }): Promise<TitanCortexAnalysisResponse> {
   const params = new URLSearchParams();
   params.set("cluster_ids", options.clusterIds.join(","));
-  params.set("limit", String(options.limit ?? 500));
+  params.set("limit", String(options.limit ?? 0));
   params.set("detail_limit", String(options.detailLimit ?? 8));
   if (options.question) params.set("question", options.question);
   if (options.sessionId) params.set("session_id", options.sessionId);
@@ -545,9 +696,107 @@ async function apiStoreTracePacket(payload: Record<string, unknown>): Promise<Re
   return safeJson(res);
 }
 
+async function apiGetPatternStatus(): Promise<TitanPatternStatus> {
+  const res = await fetch(`${TITAN_API_BASE}/api/patterns/status`);
+  return (await safeJson(res)) as unknown as TitanPatternStatus;
+}
+
+async function apiGetPatternEvidencePacket(options: {
+  batchSize?: number;
+  contextLimit?: number;
+  sessionId?: string;
+  mode?: string;
+  packetType?: string;
+} = {}): Promise<TitanPatternEvidencePacket> {
+  const body: Record<string, unknown> = {};
+  if (options.batchSize !== undefined) body.batch_size = options.batchSize;
+  if (options.contextLimit !== undefined) body.context_limit = options.contextLimit;
+  if (options.sessionId) body.session_id = options.sessionId;
+  if (options.mode) body.mode = options.mode;
+  if (options.packetType) body.packet_type = options.packetType;
+  const res = await fetch(`${TITAN_API_BASE}/api/patterns/evidence-packet`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return (await safeJson(res)) as unknown as TitanPatternEvidencePacket;
+}
+
+async function apiListPatterns(options: { status?: string; scope?: string; limit?: number } = {}): Promise<Record<string, unknown>> {
+  const params = new URLSearchParams();
+  if (options.status) params.set("status", options.status);
+  if (options.scope) params.set("scope", options.scope);
+  params.set("limit", String(options.limit ?? 50));
+  const suffix = params.toString();
+  const res = await fetch(`${TITAN_API_BASE}/api/patterns${suffix ? `?${suffix}` : ""}`);
+  return safeJson(res);
+}
+
+async function apiGetPattern(patternId: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`${TITAN_API_BASE}/api/patterns/${encodeURIComponent(patternId)}`);
+  return safeJson(res);
+}
+
+async function apiCreatePattern(payload: TitanPatternCreateInput): Promise<Record<string, unknown>> {
+  const res = await fetch(`${TITAN_API_BASE}/api/patterns`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return safeJson(res);
+}
+
+async function apiUpdatePatternStatus(patternId: string, status: "accept" | "reject"): Promise<Record<string, unknown>> {
+  const res = await fetch(`${TITAN_API_BASE}/api/patterns/${encodeURIComponent(patternId)}/${status}`, { method: "POST" });
+  return safeJson(res);
+}
+
+async function apiMarkPatternsProcessed(payload: TitanPatternMarkProcessedInput): Promise<Record<string, unknown>> {
+  const res = await fetch(`${TITAN_API_BASE}/api/patterns/mark-processed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return safeJson(res);
+}
+
+async function apiExportPatternBundle(options: {
+  statuses?: string[];
+  includeMemorySummaries?: boolean;
+  includeProgress?: boolean;
+  limit?: number;
+} = {}): Promise<Record<string, unknown>> {
+  const res = await fetch(`${TITAN_API_BASE}/api/patterns/bundle/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      statuses: options.statuses ?? ["accepted"],
+      include_memory_summaries: options.includeMemorySummaries ?? true,
+      include_progress: options.includeProgress ?? true,
+      limit: options.limit ?? 500,
+    }),
+  });
+  return safeJson(res);
+}
+
+async function apiImportPatternBundle(bundle: Record<string, unknown>, options: { overwrite?: boolean; importProgress?: boolean } = {}): Promise<Record<string, unknown>> {
+  const res = await fetch(`${TITAN_API_BASE}/api/patterns/bundle/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      bundle,
+      overwrite: options.overwrite ?? false,
+      import_progress: options.importProgress ?? true,
+    }),
+  });
+  return safeJson(res);
+}
+
 function formatClusterSummary(data: TitanClustersResponse): string {
   if (data.error) return data.error;
-  const header = `Titan clusters: ${data.cluster_count} topics · ${data.memory_count} memories · ${data.connection_count} connections`;
+  const analyzed = data.raw_memory_count ?? data.memory_count;
+  const limited = data.total_memory_count && analyzed < data.total_memory_count ? ` of ${data.total_memory_count}` : "";
+  const header = `Titan clusters: ${data.cluster_count} topics · ${analyzed}${limited} memories analyzed · ${data.connection_count} connections`;
   const skipped = data.skipped_missing_embeddings
     ? `\nSkipped ${data.skipped_missing_embeddings} memories without embeddings.`
     : "";
@@ -641,6 +890,104 @@ function formatCortexAnalysis(data: TitanCortexAnalysisResponse): string {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function formatPatternStatus(data: TitanPatternStatus): string {
+  if (data.error) return String(data.error);
+  const lastRun = data.last_run && typeof data.last_run === "object"
+    ? `${data.last_run["status"] ?? "unknown"} · ${data.last_run["finished_at"] ?? data.last_run["started_at"] ?? "no timestamp"}`
+    : "none";
+  return [
+    "Titan Pattern Status",
+    "────────────────────",
+    `Total memories:      ${data.memories_total ?? 0}`,
+    `Processed current:   ${data.processed_current ?? 0}`,
+    `Unprocessed:         ${data.unprocessed ?? 0}`,
+    `Candidate patterns:  ${data.candidate_patterns ?? 0}`,
+    `Accepted patterns:   ${data.accepted_patterns ?? 0}`,
+    `Processor:           ${data.processor_version ?? "?"}`,
+    `Config hash:         ${data.processor_config_hash ?? "?"}`,
+    `Last run:            ${lastRun}`,
+  ].join("\n");
+}
+
+function formatPatternList(data: Record<string, unknown>): string {
+  if (data.error) return String(data.error);
+  const patterns = Array.isArray(data.patterns) ? data.patterns as Record<string, unknown>[] : [];
+  if (patterns.length === 0) return "No Titan patterns found.";
+  const lines = patterns.map((pattern, index) => {
+    const title = String(pattern.title ?? "untitled");
+    const status = String(pattern.status ?? "?");
+    const kind = String(pattern.kind ?? "?");
+    const confidence = typeof pattern.confidence === "number" ? pattern.confidence.toFixed(2) : String(pattern.confidence ?? "?");
+    return `${index + 1}. ${title} (${status}, ${kind}, confidence ${confidence})\n   id: ${pattern.id ?? "?"}`;
+  });
+  return [`Titan patterns (${patterns.length})`, "", ...lines].join("\n");
+}
+
+function parseTitanPatternsArgs(args: string): { action: string; rest: string; flags: Record<string, string | true> } {
+  const tokens = (args || "").trim().split(/\s+/).filter(Boolean);
+  const action = tokens.shift() || "list";
+  const restTokens: string[] = [];
+  const flags: Record<string, string | true> = {};
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token.startsWith("--")) {
+      restTokens.push(token);
+      continue;
+    }
+    const name = token.slice(2).replace(/-/g, "_");
+    const next = tokens[index + 1];
+    if (next && !next.startsWith("--")) {
+      flags[name] = next;
+      index += 1;
+    } else {
+      flags[name] = true;
+    }
+  }
+  return { action, rest: restTokens.join(" "), flags };
+}
+
+function numberFlag(flags: Record<string, string | true>, name: string): number | undefined {
+  const raw = flags[name];
+  if (typeof raw !== "string") return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function buildPatternBackfillPrompt(packet: TitanPatternEvidencePacket, status: TitanPatternStatus): string {
+  const unprocessedIds = packet.unprocessed_memory_ids ?? [];
+  return [
+    "Run the Titan pattern mining workflow for this evidence packet.",
+    "",
+    "Goal:",
+    "1. Inspect the evidence packet below.",
+    "2. Draft only evidence-backed candidate pattern cards. Do not invent patterns.",
+    "3. For each useful repeated behavior, call the `titan_patterns` tool with action `create_pattern`.",
+    "4. Each created pattern must include title, kind, scope, summary, recommended_behavior, trigger_terms, confidence, and evidence memory ids/scene ids.",
+    "   The backend requires at least 3 evidence items with role `support` and at least 2 evidence scenes.",
+    "5. If no durable pattern is justified, create nothing.",
+    "6. When inspection is complete, call `titan_patterns` with action `mark_processed` for every seed/unprocessed memory id from this packet, including memories that produced no pattern.",
+    "7. Summarize created pattern ids, skipped evidence, and any tensions that need human review.",
+    "",
+    "Rules:",
+    "- keep new patterns as status `candidate`; do not accept them",
+    "- recommended_behavior must tell future agents what to do differently",
+    "- use support/central/bridge/contradict evidence roles when clear",
+    "- treat tensions as signals to inspect, not final contradictions",
+    "- when pattern_context is present, compare it against new evidence and call out stale or superseded guidance instead of blindly creating duplicates",
+    "- mark only seed/unprocessed memory ids as processed; related/context memories are support evidence and must not be marked processed unless they are also seed ids",
+    "- if evidence has fewer than 3 support memories or fewer than 2 scenes, only create a pattern when it is clearly a user preference/decision",
+    "",
+    `Current status: ${status.unprocessed ?? 0} unprocessed · ${status.candidate_patterns ?? 0} candidate · ${status.accepted_patterns ?? 0} accepted`,
+    `Processor: ${packet.processor_version ?? status.processor_version ?? "?"} / ${packet.processor_config_hash ?? status.processor_config_hash ?? "?"}`,
+    `Unprocessed ids to mark when done: ${unprocessedIds.join(", ") || "none"}`,
+    "",
+    "Evidence packet JSON:",
+    "```json",
+    JSON.stringify(packet, null, 2),
+    "```",
+  ].join("\n");
 }
 
 function parseTitanCortexArgs(rawArgs: string): { clusterIds: number[]; question?: string } | null {
@@ -786,15 +1133,19 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       existsSync(resolve(TITAN_HOME, "config", "embedding_models.yaml"));
 
     // Try starting server if not running
+    ctx.ui.setStatus("titan-memory", "TITAN CHECKING");
     const serverOk = await ensureServerRunning();
     if (serverOk && hasConfig) {
+      ctx.ui.setStatus("titan-memory", "TITAN READY");
       ctx.ui.notify("Titan memory ready", "success");
     } else if (!hasConfig) {
+      ctx.ui.setStatus("titan-memory", "TITAN UNCONFIGURED");
       ctx.ui.notify(
         "Titan memory not configured. Run /titan-setup to get started.",
         "warning",
       );
     } else if (!serverOk) {
+      ctx.ui.setStatus("titan-memory", "TITAN OFFLINE");
       ctx.ui.notify(
         "Titan server not running. Run /titan-start or /titan-setup.",
         "warning",
@@ -875,6 +1226,207 @@ export default function titanPiExtension(pi: ExtensionAPI) {
   // =======================================================================
 
   pi.registerTool({
+    name: "titan",
+    label: "Titan Memory",
+    description:
+      "First-class Titan memory tool for recall, scene recovery, manual saves, recent memories, graph clusters, Cortex analysis, and health checks.",
+    promptSnippet:
+      "Use Titan memory for cross-session recall, project history, decisions, scene recovery, memory graph analysis, and durable memory saves",
+    promptGuidelines: [
+      "Before using titan for recall, project history, decisions, implementation archaeology, work reports, or any non-trivial memory query, first read and apply the titan-memory-workflow skill.",
+      "Treat Titan memories as semantic pointers; after titan query_memories returns scene IDs, expand important scenes and verify concrete repo facts with git or file inspection when needed.",
+    ],
+    parameters: Type.Object({
+      action: Type.Union([
+        Type.Literal("query_memories"),
+        Type.Literal("get_scene_context"),
+        Type.Literal("store_trace_packet"),
+        Type.Literal("recent"),
+        Type.Literal("inspect_clusters"),
+        Type.Literal("analyze_clusters"),
+        Type.Literal("doctor"),
+      ], {
+        description:
+          "Titan operation to run. Use query_memories for recall, get_scene_context for scene IDs, store_trace_packet to remember decisions/outcomes, recent for latest memories, inspect_clusters/analyze_clusters for graph work, doctor for health.",
+      }),
+      query: Type.Optional(Type.String({ description: "Search query for query_memories. Leave empty only with date_from/date_to." })),
+      limit: Type.Optional(Type.Number({ description: "Max results or memories to process (default depends on action)." })),
+      date_from: Type.Optional(Type.String({ description: "Start date/time filter for query_memories, ISO 8601." })),
+      date_to: Type.Optional(Type.String({ description: "End date/time filter for query_memories, ISO 8601." })),
+      scene_id: Type.Optional(Type.String({ description: "Scene ID for get_scene_context." })),
+      goal: Type.Optional(Type.String({ description: "Goal for store_trace_packet." })),
+      thoughts: Type.Optional(Type.String({ description: "Optional thoughts/decisions for store_trace_packet." })),
+      outcome: Type.Optional(Type.String({ description: "Optional outcome for store_trace_packet." })),
+      cluster_id: Type.Optional(Type.Number({ description: "Cluster ID for inspect_clusters detail mode." })),
+      cluster_ids: Type.Optional(Type.String({ description: "Comma-separated cluster IDs for analyze_clusters, e.g. '3,8'." })),
+      question: Type.Optional(Type.String({ description: "Optional question to guide analyze_clusters." })),
+      detail_limit: Type.Optional(Type.Number({ description: "Representative item limit for cluster actions." })),
+      session_id: Type.Optional(Type.String({ description: "Optional Titan session ID; use this for an external source such as a Glass meeting." })),
+      event_id: Type.Optional(Type.String({ description: "Stable dedupe event ID for store_trace_packet." })),
+    }),
+    async execute(_toolCallId, params) {
+      if (params.action === "doctor") {
+        const healthy = await isServerHealthy();
+        let stats = {};
+        let runtime: TitanRuntimeResponse = {};
+        if (healthy) {
+          try {
+            const data = await apiGetRecentMemories(1);
+            stats = { memory_count: data.total ?? data.count };
+          } catch {
+            stats = { memory_count: "unknown" };
+          }
+          try {
+            runtime = await apiGetRuntime();
+          } catch {
+            runtime = {};
+          }
+        }
+
+        const reportedHome = runtime.titan_home || TITAN_HOME;
+        const reportedSpoolDir = runtime.trace_dir || SPOOL_DIR;
+        const hasConfig =
+          existsSync(resolve(reportedHome, "config", "extraction_models.yaml")) &&
+          existsSync(resolve(reportedHome, "config", "embedding_models.yaml"));
+        const spoolExists = existsSync(reportedSpoolDir);
+        const capability = runtime.memory_capabilities;
+        const lnnStatus = capability?.lnn_status || (
+          capability?.lnn_state_store === false
+            ? "unsupported for selected backend"
+            : capability?.lnn_state_store === true
+              ? "enabled"
+              : "unknown"
+        );
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: [
+              `Titan Status:`,
+              `  Server:     ${healthy ? "✅ running" : "❌ not running"} (${TITAN_API_BASE})`,
+              `  Workspace:  ${reportedHome}`,
+              `  Spool dir:  ${reportedSpoolDir} ${spoolExists ? "✅" : "⚠️ missing"}`,
+              `  Config:     ${hasConfig ? "✅" : "⚠️ not configured (run /titan-setup)"}`,
+              runtime.memory_backend ? `  Backend:    ${runtime.memory_backend}` : "",
+              capability ? `  LNN:        ${lnnStatus}` : "",
+              `  Session ID: ${sessionId}`,
+              healthy ? `  Memories:   ${JSON.stringify(stats)}` : "",
+            ].filter(Boolean).join("\n"),
+          }],
+          details: { healthy, titan_home: reportedHome, trace_dir: reportedSpoolDir, runtime, ...stats },
+        };
+      }
+
+      if (!(await isServerHealthy())) {
+        return {
+          content: [{ type: "text" as const, text: "Titan server is not running. Tell the user to check /titan-status." }],
+        };
+      }
+
+      if (params.action === "query_memories") {
+        const query = params.query ?? "";
+        const data = await apiRetrieve(query, params.limit ?? 8, params.date_from, params.date_to);
+        const memories = data.memories ?? [];
+        if (memories.length === 0) {
+          return { content: [{ type: "text" as const, text: "No sufficiently relevant memories found." }] };
+        }
+        const lines = memories.map((m, i) => {
+          const sceneRef = m.scene_id ? ` [scene: ${m.scene_id}]` : "";
+          return `${i + 1}. ${m.text}${sceneRef}`;
+        });
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          details: { count: data.count, query, scene_count: 0 },
+        };
+      }
+
+      if (params.action === "get_scene_context") {
+        if (!params.scene_id) {
+          return { content: [{ type: "text" as const, text: "scene_id is required for get_scene_context." }] };
+        }
+        const data = await apiGetScene(params.scene_id);
+        if ("error" in data) {
+          return { content: [{ type: "text" as const, text: String(data.error) }] };
+        }
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+          details: { scene_id: params.scene_id },
+        };
+      }
+
+      if (params.action === "store_trace_packet") {
+        if (!params.goal) {
+          return { content: [{ type: "text" as const, text: "goal is required for store_trace_packet." }] };
+        }
+        const payload: Record<string, unknown> = {
+          goal: params.goal,
+          session_id: params.session_id || sessionId,
+        };
+        if (params.event_id) payload.event_id = params.event_id;
+        if (params.thoughts) payload.thoughts = params.thoughts;
+        if (params.outcome) payload.outcome = params.outcome;
+        const result = await apiStoreTracePacket(payload);
+        return {
+          content: [{ type: "text" as const, text: `Trace packet stored: ${JSON.stringify(result)}` }],
+          details: result,
+        };
+      }
+
+      if (params.action === "recent") {
+        const data = await apiGetRecentMemories(params.limit ?? 8);
+        const memories = data.memories ?? [];
+        if (memories.length === 0) {
+          return { content: [{ type: "text" as const, text: "No memories yet." }] };
+        }
+        const lines = memories.map((m, i) => {
+          const sceneRef = m.scene_id ? ` [scene: ${m.scene_id}]` : "";
+          return `${i + 1}. ${m.text}${sceneRef}`;
+        });
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          details: { count: data.count },
+        };
+      }
+
+      if (params.action === "inspect_clusters") {
+        const data = await apiGetClusters({
+          clusterId: params.cluster_id,
+          limit: params.limit ?? 500,
+          detailLimit: params.detail_limit ?? 12,
+          sessionId: params.session_id,
+        });
+        return {
+          content: [{ type: "text" as const, text: params.cluster_id ? formatClusterDetail(data) : formatClusterSummary(data) }],
+          details: data,
+        };
+      }
+
+      if (params.action === "analyze_clusters") {
+        if (!params.cluster_ids) {
+          return { content: [{ type: "text" as const, text: "cluster_ids is required for analyze_clusters." }] };
+        }
+        const parsed = parseTitanCortexArgs(params.cluster_ids);
+        if (!parsed) {
+          return { content: [{ type: "text" as const, text: "cluster_ids must contain at least one numeric cluster ID." }] };
+        }
+        const data = await apiAnalyzeClusters({
+          clusterIds: parsed.clusterIds,
+          question: params.question,
+          limit: params.limit ?? 500,
+          detailLimit: params.detail_limit ?? 8,
+          sessionId: params.session_id,
+        });
+        return {
+          content: [{ type: "text" as const, text: formatCortexAnalysis(data) }],
+          details: data,
+        };
+      }
+
+      return { content: [{ type: "text" as const, text: `Unknown Titan action: ${params.action}` }] };
+    },
+  });
+
+  pi.registerTool({
     name: "titan_query_memories",
     label: "Titan Query Memories",
     description:
@@ -884,6 +1436,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
     promptSnippet:
       "Search Titan cross-session memory for relevant context",
     promptGuidelines: [
+      "Before using titan_query_memories for recall, project history, decisions, implementation archaeology, work reports, or any non-trivial memory query, first read and apply the titan-memory-workflow skill.",
       "Use titan_query_memories when the user asks about previous work, decisions, or context from earlier sessions.",
     ],
     parameters: Type.Object({
@@ -990,6 +1543,12 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       outcome: Type.Optional(
         Type.String({ description: "What was the outcome?" }),
       ),
+      session_id: Type.Optional(
+        Type.String({ description: "Stable external source session ID, such as glass:<session-id>." }),
+      ),
+      event_id: Type.Optional(
+        Type.String({ description: "Stable dedupe event ID, such as glass-meeting:<session-id>:<transcript-hash>." }),
+      ),
     }),
     async execute(_toolCallId, params) {
       if (!(await isServerHealthy())) {
@@ -1001,8 +1560,9 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       }
       const payload: Record<string, unknown> = {
         goal: params.goal,
-        session_id: sessionId,
+        session_id: params.session_id || sessionId,
       };
+      if (params.event_id) payload.event_id = params.event_id;
       if (params.thoughts) payload.thoughts = params.thoughts;
       if (params.outcome) payload.outcome = params.outcome;
 
@@ -1067,7 +1627,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         Type.Number({ description: "Specific cluster ID to inspect in detail" }),
       ),
       limit: Type.Optional(
-        Type.Number({ description: "Max memories to cluster (default: 500)", default: 500 }),
+        Type.Number({ description: "Max memories to cluster; use 0 for all memories (default: all)", default: 0 }),
       ),
       detail_limit: Type.Optional(
         Type.Number({ description: "Representative memories to include for detail (default: 12)", default: 12 }),
@@ -1082,7 +1642,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       }
       const data = await apiGetClusters({
         clusterId: params.cluster_id,
-        limit: params.limit ?? 500,
+        limit: params.limit ?? 0,
         detailLimit: params.detail_limit ?? 12,
         sessionId: params.session_id,
       });
@@ -1111,7 +1671,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         Type.String({ description: "Optional question to guide the attention analysis" }),
       ),
       limit: Type.Optional(
-        Type.Number({ description: "Max memories to cluster before analysis (default: 500)", default: 500 }),
+        Type.Number({ description: "Max memories to cluster before analysis; use 0 for all memories (default: all)", default: 0 }),
       ),
       detail_limit: Type.Optional(
         Type.Number({ description: "Max items per analysis section (default: 8)", default: 8 }),
@@ -1131,7 +1691,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       const data = await apiAnalyzeClusters({
         clusterIds: parsed.clusterIds,
         question: params.question,
-        limit: params.limit ?? 500,
+        limit: params.limit ?? 0,
         detailLimit: params.detail_limit ?? 8,
         sessionId: params.session_id,
       });
@@ -1139,6 +1699,137 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         content: [{ type: "text" as const, text: formatCortexAnalysis(data) }],
         details: data,
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "titan_patterns",
+    label: "Titan Patterns",
+    description:
+      "Manage Titan learned patterns. Use for pattern mining workflows: get status, fetch evidence packets, create candidate patterns, list/show/accept/reject patterns, and mark inspected memories processed.",
+    promptSnippet: "Create and manage evidence-backed Titan pattern candidates",
+    promptGuidelines: [
+      "Use titan_patterns during /titan-patterns backfill to create only evidence-backed candidate patterns.",
+      "Never auto-accept a pattern during mining; created patterns should stay candidate until explicitly accepted.",
+      "After inspecting an evidence packet, mark only seed/unprocessed memory ids processed; use context ids only as evidence.",
+    ],
+    parameters: Type.Object({
+      action: Type.Union([
+        Type.Literal("status"),
+        Type.Literal("evidence_packet"),
+        Type.Literal("create_pattern"),
+        Type.Literal("list_patterns"),
+        Type.Literal("get_pattern"),
+        Type.Literal("accept_pattern"),
+        Type.Literal("reject_pattern"),
+        Type.Literal("mark_processed"),
+      ], { description: "Pattern operation to run." }),
+      pattern_id: Type.Optional(Type.String({ description: "Pattern id for get/accept/reject." })),
+      status: Type.Optional(Type.String({ description: "Pattern status filter or processing status." })),
+      scope: Type.Optional(Type.String({ description: "Pattern scope or list filter." })),
+      limit: Type.Optional(Type.Number({ description: "List limit." })),
+      batch_size: Type.Optional(Type.Number({ description: "Evidence packet batch size." })),
+      context_limit: Type.Optional(Type.Number({ description: "Evidence packet related-context limit." })),
+      session_id: Type.Optional(Type.String({ description: "Optional session id for evidence packet scope." })),
+      packet_mode: Type.Optional(Type.String({ description: "Evidence packet mode, e.g. adaptive or chronological." })),
+      packet_type: Type.Optional(Type.String({ description: "Adaptive packet type: high_signal, semantic_cluster, entity, bridge, contradiction, scene_episode, or chronological_fallback." })),
+      title: Type.Optional(Type.String({ description: "Candidate pattern title." })),
+      kind: Type.Optional(Type.String({ description: "Pattern kind: codebase, workflow, failure, preference, product, distribution." })),
+      summary: Type.Optional(Type.String({ description: "Short evidence-backed pattern summary." })),
+      recommended_behavior: Type.Optional(Type.String({ description: "What future agents should do differently." })),
+      applies_when: Type.Optional(Type.String({ description: "When the pattern applies." })),
+      does_not_apply_when: Type.Optional(Type.String({ description: "When the pattern should not apply." })),
+      confidence: Type.Optional(Type.Number({ description: "Confidence from 0 to 1." })),
+      actionability: Type.Optional(Type.Number({ description: "Actionability score from 0 to 1." })),
+      retrieval_value: Type.Optional(Type.Number({ description: "Retrieval value score from 0 to 1." })),
+      trigger_terms: Type.Optional(Type.Array(Type.String(), { description: "Trigger terms for retrieval." })),
+      evidence: Type.Optional(Type.Array(Type.Object({
+        memory_id: Type.String(),
+        scene_id: Type.Optional(Type.String()),
+        role: Type.Optional(Type.String()),
+        score: Type.Optional(Type.Number()),
+      }), { description: "Evidence records for create_pattern." })),
+      memory_ids: Type.Optional(Type.Array(Type.String(), { description: "Memory ids for mark_processed." })),
+      pattern_ids: Type.Optional(Type.Array(Type.String(), { description: "Created pattern ids for mark_processed." })),
+      error: Type.Optional(Type.String({ description: "Optional processing error." })),
+      mode: Type.Optional(Type.String({ description: "Processing mode, e.g. backfill or incremental." })),
+    }),
+    async execute(_toolCallId, params) {
+      if (!(await isServerHealthy())) {
+        return { content: [{ type: "text" as const, text: "Titan server is not running. Tell the user to run /titan-start." }] };
+      }
+
+      if (params.action === "status") {
+        const data = await apiGetPatternStatus();
+        return { content: [{ type: "text" as const, text: formatPatternStatus(data) }], details: data };
+      }
+
+      if (params.action === "evidence_packet") {
+        const data = await apiGetPatternEvidencePacket({
+          batchSize: params.batch_size,
+          contextLimit: params.context_limit,
+          sessionId: params.session_id,
+          mode: params.packet_mode,
+          packetType: params.packet_type,
+        });
+        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }], details: data };
+      }
+
+      if (params.action === "list_patterns") {
+        const data = await apiListPatterns({ status: params.status, scope: params.scope, limit: params.limit });
+        return { content: [{ type: "text" as const, text: formatPatternList(data) }], details: data };
+      }
+
+      if (params.action === "get_pattern") {
+        if (!params.pattern_id) return { content: [{ type: "text" as const, text: "pattern_id is required." }] };
+        const data = await apiGetPattern(params.pattern_id);
+        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }], details: data };
+      }
+
+      if (params.action === "accept_pattern" || params.action === "reject_pattern") {
+        if (!params.pattern_id) return { content: [{ type: "text" as const, text: "pattern_id is required." }] };
+        const data = await apiUpdatePatternStatus(params.pattern_id, params.action === "accept_pattern" ? "accept" : "reject");
+        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }], details: data };
+      }
+
+      if (params.action === "mark_processed") {
+        if (!params.memory_ids || params.memory_ids.length === 0) {
+          return { content: [{ type: "text" as const, text: "memory_ids is required for mark_processed." }] };
+        }
+        const data = await apiMarkPatternsProcessed({
+          memory_ids: params.memory_ids,
+          pattern_ids: params.pattern_ids,
+          status: params.status,
+          error: params.error,
+          mode: params.mode ?? "backfill",
+        });
+        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }], details: data };
+      }
+
+      if (params.action === "create_pattern") {
+        if (!params.title || !params.summary || !params.recommended_behavior) {
+          return { content: [{ type: "text" as const, text: "title, summary, and recommended_behavior are required for create_pattern." }] };
+        }
+        const data = await apiCreatePattern({
+          title: params.title,
+          kind: params.kind ?? "workflow",
+          scope: params.scope ?? "repo",
+          status: "candidate",
+          summary: params.summary,
+          recommended_behavior: params.recommended_behavior,
+          trigger_terms: params.trigger_terms ?? [],
+          evidence: params.evidence ?? [],
+          confidence: params.confidence ?? 0,
+          applies_when: params.applies_when,
+          does_not_apply_when: params.does_not_apply_when,
+          actionability: params.actionability ?? 0,
+          retrieval_value: params.retrieval_value ?? 0,
+          source: "pi-agent",
+        });
+        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }], details: data };
+      }
+
+      return { content: [{ type: "text" as const, text: `Unknown Titan pattern action: ${params.action}` }] };
     },
   });
 
@@ -1209,6 +1900,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         `Server: ${ok ? "running on port 8002" : "not running — check Python/Titan dependencies"}`,
         "",
         "If extraction needs an API key, add it to the .env file above, e.g.",
+        "OPENCODE_GO_API_KEY=...",
         "GEMINI_API_KEY=...",
         "OPENAI_API_KEY=...",
       ];
@@ -1217,131 +1909,22 @@ export default function titanPiExtension(pi: ExtensionAPI) {
     },
   });
 
-  // ── Provider model catalog ─────────────────────────────────────────
-  // Matches what's in config/extraction_models.yaml
-  const PROVIDERS: Array<{
-    id: string;
-    label: string;
-    keyEnv: string;
-    keyPlaceholder: string;
-    models: Array<{ id: string; label: string }>;
-  }> = [
-    {
-      id: "gemini",
-      label: "Gemini",
-      keyEnv: "GEMINI_API_KEY",
-      keyPlaceholder: "AIza...",
-      models: [
-        { id: "gemini-2.5-flash", label: "gemini-2.5-flash (recommended)" },
-        { id: "gemini-2.5-pro", label: "gemini-2.5-pro" },
-      ],
-    },
-    {
-      id: "openai",
-      label: "OpenAI",
-      keyEnv: "OPENAI_API_KEY",
-      keyPlaceholder: "sk-...",
-      models: [
-        { id: "gpt-4o-mini", label: "gpt-4o-mini (recommended)" },
-        { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
-        { id: "gpt-4.1", label: "gpt-4.1" },
-      ],
-    },
-    {
-      id: "openrouter",
-      label: "OpenRouter",
-      keyEnv: "OPENROUTER_API_KEY",
-      keyPlaceholder: "sk-or-...",
-      models: [
-        { id: "meta-llama/llama-3.1-8b-instruct:free", label: "Llama 3.1 8B (free)" },
-        { id: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet" },
-        { id: "openai/gpt-4o-mini", label: "GPT-4o-mini" },
-      ],
-    },
-    {
-      id: "deepseek",
-      label: "DeepSeek",
-      keyEnv: "DEEPSEEK_API_KEY",
-      keyPlaceholder: "sk-...",
-      models: [
-        { id: "deepseek-chat", label: "deepseek-chat (recommended — V3)" },
-        { id: "deepseek-reasoner", label: "deepseek-reasoner (R1 thinking)" },
-      ],
-    },
-  ];
-
-  function updateExtractionConfig(
-    providerId: string,
-    modelId: string,
-  ): string {
-    const configDir = resolve(TITAN_HOME, "config");
-    const configPath = resolve(configDir, "extraction_models.yaml");
-    if (!existsSync(configPath)) return configPath;
-
-    let yaml = readFileSync(configPath, "utf-8");
-
-    // 1. Set current provider
-    yaml = yaml.replace(/^current:\s*.*$/m, `current: ${providerId}`);
-
-    // 2. For each provider key, update enabled and model inside its block
-    for (const p of PROVIDERS) {
-      const key = p.id;
-      // Match block: "key:\n" then indented lines until next top-level key or EOF
-      const blockRegex = new RegExp(
-        `^${key}:\\s*\\n((?:\\s+.*\\n?)*)`,
-        "m",
-      );
-      const match = yaml.match(blockRegex);
-      if (!match) continue;
-
-      const body = match[1];
-      const isChosen = p.id === providerId;
-
-      // Update enabled line
-      let newBody = body.replace(
-        /^(\s+)enabled:\s*\S+\s*$/m,
-        `$1enabled: ${isChosen}`,
-      );
-
-      // Update model line (only for chosen provider)
-      if (isChosen) {
-        newBody = newBody.replace(
-          /^(\s+)model:\s*.*$/m,
-          `$1model: ${modelId}`,
-        );
-      }
-
-      yaml = yaml.replace(blockRegex, `${key}:\n${newBody}`);
-    }
-
-    writeFileSync(configPath, yaml, "utf-8");
-    return configPath;
-  }
-
   pi.registerCommand("titan-key", {
-    description: "Set Titan extraction provider, model, and API key",
+    description: "Add or update the Titan extraction API key",
     handler: async (_args, ctx) => {
       ensurePiWorkspace();
 
-      // 1. Pick provider
-      const provider = await ctx.ui.select("Choose your Titan extraction provider", [
-        ...PROVIDERS.map((p) => p.label),
+      const provider = await ctx.ui.select("Choose Titan extraction provider", [
+        "OpenCode Go / DeepSeek V4 Flash (OPENCODE_GO_API_KEY)",
+        "Gemini / AI Studio (GEMINI_API_KEY)",
       ]);
       if (!provider) return;
-      const prov = PROVIDERS.find((p) => p.label === provider)!;
 
-      // 2. Pick model for that provider
-      const modelChoice = await ctx.ui.select(
-        `Choose a ${prov.label} model`,
-        prov.models.map((m) => m.label),
-      );
-      if (!modelChoice) return;
-      const model = prov.models.find((m) => m.label === modelChoice)!;
-
-      // 3. Enter API key
+      const useOpenCodeGo = provider.startsWith("OpenCode Go");
+      const keyName = useOpenCodeGo ? "OPENCODE_GO_API_KEY" : "GEMINI_API_KEY";
       const value = await ctx.ui.input(
-        `Paste your ${prov.keyEnv}`,
-        prov.keyPlaceholder,
+        `Paste your ${keyName}`,
+        useOpenCodeGo ? "sk-opencode-..." : "AIza...",
       );
       const cleaned = value?.trim();
       if (!cleaned) {
@@ -1349,22 +1932,17 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         return;
       }
 
-      // 4. Save key to .env
-      const envPath = upsertEnvKey(prov.keyEnv, cleaned);
-
-      // 5. Update extraction config YAML
-      const configPath = updateExtractionConfig(prov.id, model.id);
-
-      // 6. Restart server
+      const envPath = upsertEnvKey(keyName, cleaned);
+      const configPath = setExtractionProvider(useOpenCodeGo ? "opencode_go" : "gemini");
       const serverOk = await restartOwnedServer();
       const suffix = cleaned.length >= 4 ? cleaned.slice(-4) : "****";
 
       ctx.ui.notify(
         [
-          "Titan extraction configured!",
-          `Provider: ${prov.label}`,
-          `Model: ${model.id}`,
-          `Key saved: ${prov.keyEnv}=...${suffix}`,
+          "Titan API key saved.",
+          `Provider: ${provider}`,
+          `Saved: ${keyName}=...${suffix}`,
+          `Secrets: ${envPath}`,
           `Config: ${configPath}`,
           `Server: ${serverOk ? "running" : "not running — run /titan-status"}`,
         ].join("\n"),
@@ -1409,6 +1987,42 @@ export default function titanPiExtension(pi: ExtensionAPI) {
     description: "Alias for /titan-graph",
   });
 
+  pi.registerCommand("titan-pattern-graph", {
+    description: "Open the Titan learned pattern graph in your browser",
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      const ok = await ensureServerRunning();
+      if (!ok) {
+        ctx.ui.notify("Titan server is not running, so I can't open the pattern graph.", "error");
+        return;
+      }
+
+      const trimmed = args?.trim();
+      const url = new URL(`${TITAN_API_BASE}/pattern-graph`);
+      if (trimmed) {
+        const maybeLimit = Number(trimmed);
+        if (!Number.isFinite(maybeLimit) || maybeLimit <= 0) {
+          ctx.ui.notify("Usage: /titan-pattern-graph [limit]", "warning");
+          return;
+        }
+        url.searchParams.set("limit", String(Math.floor(maybeLimit)));
+      }
+
+      try {
+        await openUrl(url.toString());
+        ctx.ui.notify(
+          [
+            "Titan pattern graph opened in your browser.",
+            url.toString(),
+            "Node color = status. Node size = confidence + evidence count. Edges = shared evidence, triggers, supports, contradicts, supersedes.",
+          ].join("\n"),
+          "success",
+        );
+      } catch (err) {
+        ctx.ui.notify(`Could not open Titan pattern graph: ${err}`, "error");
+      }
+    },
+  });
+
   const clusterCommand = {
     description: "Show Titan graph cluster topics, or inspect one with /titan-clusters <id>",
     getArgumentCompletions: (prefix: string) => {
@@ -1434,7 +2048,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       }
 
       try {
-        const data = await apiGetClusters({ clusterId, limit: 500, detailLimit: 12 });
+        const data = await apiGetClusters({ clusterId, limit: 0, detailLimit: 12 });
         ctx.ui.notify(clusterId ? formatClusterDetail(data) : formatClusterSummary(data), data.error ? "warning" : "info");
       } catch (err) {
         ctx.ui.notify(`Failed to inspect clusters: ${err}`, "error");
@@ -1481,6 +2095,148 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         ctx.ui.notify(formatCortexAnalysis(data), data.error ? "warning" : "info");
       } catch (err) {
         ctx.ui.notify(`Failed to analyze clusters: ${err}`, "error");
+      }
+    },
+  });
+
+  pi.registerCommand("titan-patterns", {
+    description: "Review learned Titan patterns or run pattern mining: /titan-patterns status|backfill|mine|accept <id>|reject <id>",
+    getArgumentCompletions: (prefix: string) => {
+      const options = ["status", "backfill", "mine", "list", "candidates", "accepted", "accept", "reject", "show", "export", "import"];
+      const token = (prefix || "").trim().split(/\s+/).pop() || "";
+      return options
+        .filter((value) => value.startsWith(token))
+        .map((value) => ({ value, label: value, description: `/titan-patterns ${value}` }));
+    },
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      const ok = await ensureServerRunning();
+      if (!ok) {
+        ctx.ui.notify("Titan server not running. Try /titan-start.", "warning");
+        return;
+      }
+
+      const parsed = parseTitanPatternsArgs(args ?? "");
+      const action = parsed.action;
+      try {
+        if (action === "status") {
+          const data = await apiGetPatternStatus();
+          ctx.ui.notify(formatPatternStatus(data), data.error ? "warning" : "info");
+          return;
+        }
+
+        if (action === "list" || action === "candidates" || action === "accepted") {
+          const data = await apiListPatterns({
+            status: action === "candidates" ? "candidate" : action === "accepted" ? "accepted" : (typeof parsed.flags.status === "string" ? parsed.flags.status : undefined),
+            scope: typeof parsed.flags.scope === "string" ? parsed.flags.scope : undefined,
+            limit: numberFlag(parsed.flags, "limit") ?? 50,
+          });
+          ctx.ui.notify(formatPatternList(data), data.error ? "warning" : "info");
+          return;
+        }
+
+        if (action === "show") {
+          const patternId = parsed.rest.trim();
+          if (!patternId) {
+            ctx.ui.notify("Usage: /titan-patterns show <pattern-id>", "warning");
+            return;
+          }
+          const data = await apiGetPattern(patternId);
+          ctx.ui.notify(JSON.stringify(data, null, 2), data.error ? "warning" : "info");
+          return;
+        }
+
+        if (action === "accept" || action === "reject") {
+          const patternId = parsed.rest.trim();
+          if (!patternId) {
+            ctx.ui.notify(`Usage: /titan-patterns ${action} <pattern-id>`, "warning");
+            return;
+          }
+          const data = await apiUpdatePatternStatus(patternId, action === "accept" ? "accept" : "reject");
+          ctx.ui.notify(JSON.stringify(data, null, 2), data.error ? "warning" : "success");
+          return;
+        }
+
+        if (action === "export") {
+          const outputPath = resolve(TITAN_HOME, parsed.rest.trim() || "titan-patterns.json");
+          const statuses = parsed.flags.include_candidates ? ["accepted", "candidate"] : ["accepted"];
+          const bundle = await apiExportPatternBundle({
+            statuses,
+            includeMemorySummaries: !parsed.flags.no_memory_summaries,
+            includeProgress: !parsed.flags.no_progress,
+            limit: numberFlag(parsed.flags, "limit") ?? 500,
+          });
+          if (bundle.error) {
+            ctx.ui.notify(String(bundle.error), "warning");
+            return;
+          }
+          writeFileSync(outputPath, `${JSON.stringify(bundle, null, 2)}\n`, "utf-8");
+          const patterns = Array.isArray(bundle.patterns) ? bundle.patterns.length : 0;
+          const evidence = Array.isArray(bundle.evidence) ? bundle.evidence.length : 0;
+          ctx.ui.notify(`Titan pattern bundle exported: ${outputPath}\nPatterns: ${patterns}; evidence: ${evidence}`, "success");
+          return;
+        }
+
+        if (action === "import") {
+          const inputPath = parsed.rest.trim();
+          if (!inputPath) {
+            ctx.ui.notify("Usage: /titan-patterns import <path> [--overwrite] [--no-progress]", "warning");
+            return;
+          }
+          const bundle = JSON.parse(readFileSync(resolve(TITAN_HOME, inputPath), "utf-8")) as Record<string, unknown>;
+          const result = await apiImportPatternBundle(bundle, {
+            overwrite: Boolean(parsed.flags.overwrite),
+            importProgress: !parsed.flags.no_progress,
+          });
+          ctx.ui.notify(JSON.stringify(result, null, 2), result.error ? "warning" : "success");
+          return;
+        }
+
+        if (action === "backfill" || action === "mine") {
+          const status = await apiGetPatternStatus();
+          if (status.error) {
+            ctx.ui.notify(formatPatternStatus(status), "warning");
+            return;
+          }
+          const packet = await apiGetPatternEvidencePacket({
+            batchSize: numberFlag(parsed.flags, "batch_size"),
+            contextLimit: numberFlag(parsed.flags, "context_limit"),
+            sessionId: action === "mine" ? sessionId : (typeof parsed.flags.session_id === "string" ? parsed.flags.session_id : undefined),
+            mode: typeof parsed.flags.mode === "string" ? parsed.flags.mode : undefined,
+            packetType: typeof parsed.flags.packet_type === "string" ? parsed.flags.packet_type : undefined,
+          });
+          if (packet.error) {
+            ctx.ui.notify(String(packet.error), "warning");
+            return;
+          }
+          const ids = packet.unprocessed_memory_ids ?? [];
+          if (ids.length === 0) {
+            ctx.ui.notify("No unprocessed memories for the current pattern miner.", "info");
+            return;
+          }
+          const prompt = buildPatternBackfillPrompt(packet, status);
+          ctx.ui.notify(`Pattern evidence packet ready (${ids.length} unprocessed memories). Handing it to the Pi agent.`, "info");
+          await ctx.waitForIdle();
+          pi.sendUserMessage(prompt);
+          return;
+        }
+
+        ctx.ui.notify(
+          [
+            "Usage:",
+            "/titan-patterns status",
+            "/titan-patterns backfill [--batch-size N] [--context-limit N] [--packet-type high_signal]",
+            "/titan-patterns mine",
+            "/titan-patterns list|candidates|accepted",
+            "/titan-patterns show <id>",
+            "/titan-patterns accept <id>",
+            "/titan-patterns reject <id>",
+            "/titan-patterns export [path] [--include-candidates]",
+            "/titan-patterns import <path> [--overwrite]",
+          ].join("\n"),
+          "info",
+        );
+      } catch (err) {
+        ctx.ui.notify(`Titan patterns command failed: ${err}`, "error");
       }
     },
   });

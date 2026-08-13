@@ -23,6 +23,7 @@ CHECKPOINT_FILE = TRACES_DIR / "checkpoints.json"
 RETRY_QUEUE_FILE = TRACES_DIR / "retry_queue.jsonl"
 SPOOL_CURSOR_FILE = TRACES_DIR / "spool_cursors.json"
 PENDING_USER_MESSAGES_FILE = TRACES_DIR / "pending_user_messages.json"
+_TRACE_ROOT = TRACES_DIR
 
 _LOCK = threading.Lock()
 _SECRET_KEY_MARKERS = ("token", "secret", "password", "api_key", "apikey", "auth", "authorization", "cookie")
@@ -32,6 +33,38 @@ _SECRET_VALUE_PATTERNS = (
     re.compile(r"\bsecret_[A-Za-z0-9]{12,}\b"),
     re.compile(r"\bBearer\s+[A-Za-z0-9._-]{8,}\b", re.IGNORECASE),
 )
+
+
+def refresh_trace_paths() -> None:
+    """Refresh ledger paths after the active runtime context changes.
+
+    Tests and integrations historically patch the module constants directly;
+    only values still pointing at the previous root are refreshed.
+    """
+
+    global _TRACE_ROOT, TRACE_FILE, EVENT_LEDGER_FILE, EVENT_INDEX_FILE
+    global CHECKPOINT_FILE, RETRY_QUEUE_FILE, SPOOL_CURSOR_FILE, PENDING_USER_MESSAGES_FILE
+    from . import sessions
+
+    sessions.refresh_runtime_paths()
+    current_root = sessions.TRACES_DIR
+
+    previous_root = _TRACE_ROOT
+    if current_root == previous_root:
+        return
+    names = (
+        ("TRACE_FILE", "trace_packets.json"),
+        ("EVENT_LEDGER_FILE", "events.jsonl"),
+        ("EVENT_INDEX_FILE", "event_index.json"),
+        ("CHECKPOINT_FILE", "checkpoints.json"),
+        ("RETRY_QUEUE_FILE", "retry_queue.jsonl"),
+        ("SPOOL_CURSOR_FILE", "spool_cursors.json"),
+        ("PENDING_USER_MESSAGES_FILE", "pending_user_messages.json"),
+    )
+    for variable, filename in names:
+        if globals()[variable] == previous_root / filename:
+            globals()[variable] = current_root / filename
+    _TRACE_ROOT = current_root
 
 
 def now_iso() -> str:
@@ -70,10 +103,13 @@ def sanitize_trace_value(value: Any, key_hint: Optional[str] = None) -> Any:
 
 
 def load_traces() -> List[Dict[str, Any]]:
+    refresh_trace_paths()
+    ensure_dirs()
     return read_json(TRACE_FILE, [])
 
 
 def append_trace(trace: Dict[str, Any]) -> None:
+    refresh_trace_paths()
     ensure_dirs()
     traces = load_traces()
     traces.append({"ts": now_iso(), **sanitize_trace_value(trace)})
@@ -85,18 +121,24 @@ def _canonical_event_key(session_id: str, event_id: str) -> str:
 
 
 def load_event_index() -> Dict[str, int]:
+    refresh_trace_paths()
+    ensure_dirs()
     return read_json(EVENT_INDEX_FILE, {})
 
 
 def save_event_index(index: Dict[str, int]) -> None:
+    refresh_trace_paths()
     write_json(EVENT_INDEX_FILE, index)
 
 
 def load_checkpoints() -> Dict[str, int]:
+    refresh_trace_paths()
+    ensure_dirs()
     return read_json(CHECKPOINT_FILE, {})
 
 
 def save_checkpoints(checkpoints: Dict[str, int]) -> None:
+    refresh_trace_paths()
     write_json(CHECKPOINT_FILE, checkpoints)
 
 
@@ -112,6 +154,8 @@ def update_session_checkpoint(session_id: str, seq: int) -> None:
 
 
 def load_pending_user_messages() -> Dict[str, Dict[str, Any]]:
+    refresh_trace_paths()
+    ensure_dirs()
     payload = read_json(PENDING_USER_MESSAGES_FILE, {})
     return payload if isinstance(payload, dict) else {}
 
@@ -121,6 +165,23 @@ def get_pending_user_message(session_id: str) -> str:
     if not isinstance(pending, dict):
         return ""
     return str(pending.get("content") or "").strip()
+
+
+def get_pending_user_message_seq(session_id: str) -> int:
+    """Return the ledger sequence associated with pending user context.
+
+    The sequence lets intake distinguish context carried over from a previous
+    batch from stale state that belongs to the events currently being tested or
+    replayed.  Older pending files without a sequence remain compatible.
+    """
+
+    pending = load_pending_user_messages().get(session_id)
+    if not isinstance(pending, dict):
+        return 0
+    try:
+        return int(pending.get("seq") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def set_pending_user_message(session_id: str, content: str, *, seq: int = 0, event_id: Optional[str] = None) -> None:
@@ -146,6 +207,8 @@ def clear_pending_user_message(session_id: str) -> None:
 
 
 def _read_events() -> List[Dict[str, Any]]:
+    refresh_trace_paths()
+    ensure_dirs()
     if not EVENT_LEDGER_FILE.exists():
         return []
 
@@ -453,6 +516,8 @@ def load_message_context(session_id: str) -> Tuple[Dict[str, str], Dict[str, str
 
 
 def load_retry_queue(session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    refresh_trace_paths()
+    ensure_dirs()
     if not RETRY_QUEUE_FILE.exists():
         return []
 
@@ -473,6 +538,7 @@ def load_retry_queue(session_id: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def append_retry_entry(entry: Dict[str, Any]) -> None:
+    refresh_trace_paths()
     ensure_dirs()
     record = {
         "ts": entry.get("ts") or now_iso(),
@@ -541,6 +607,8 @@ def _atomic_write_json(path: Path, data: Any) -> None:
 
 
 def load_spool_cursors() -> Dict[str, Dict[str, Any]]:
+    refresh_trace_paths()
+    ensure_dirs()
     if not SPOOL_CURSOR_FILE.exists():
         return {}
     try:
@@ -555,6 +623,7 @@ def load_spool_cursors() -> Dict[str, Dict[str, Any]]:
 
 
 def save_spool_cursors(cursors: Dict[str, Dict[str, Any]]) -> None:
+    refresh_trace_paths()
     ensure_dirs()
     _atomic_write_json(SPOOL_CURSOR_FILE, cursors)
 
@@ -806,6 +875,7 @@ def get_spool_latest_ts(session_id: str, spool_file: Path, max_scan_lines: int =
 
 
 def get_ledger_latest_ts(session_id: str, max_scan_lines: int = 2000) -> Optional[str]:
+    refresh_trace_paths()
     if not EVENT_LEDGER_FILE.exists():
         return None
 

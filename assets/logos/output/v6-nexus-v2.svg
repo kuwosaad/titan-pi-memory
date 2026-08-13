@@ -1,0 +1,50 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Orbital ring through satellites -->
+  <circle cx="50" cy="50" r="28" fill="none" stroke="currentColor" stroke-width="1" opacity="0.18"/>
+
+  <!-- Curved connections: center to satellites (quadratic bezier) -->
+  <path d="M 50 50 Q 53 35, 50 20" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+  <path d="M 50 50 Q 64 37, 71.21 28.79" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+  <path d="M 50 50 Q 65 50, 80 50" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+  <path d="M 50 50 Q 64 63, 71.21 71.21" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+  <path d="M 50 50 Q 47 65, 50 80" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+  <path d="M 50 50 Q 36 63, 28.79 71.21" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+  <path d="M 50 50 Q 35 50, 20 50" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+  <path d="M 50 50 Q 36 37, 28.79 28.79" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+
+  <!-- Arc connections between adjacent satellites -->
+  <path d="M 50 20 Q 65 20, 71.21 28.79" stroke="currentColor" stroke-width="0.8" fill="none" opacity="0.15"/>
+  <path d="M 71.21 28.79 Q 80 40, 80 50" stroke="currentColor" stroke-width="0.8" fill="none" opacity="0.15"/>
+  <path d="M 80 50 Q 80 62, 71.21 71.21" stroke="currentColor" stroke-width="0.8" fill="none" opacity="0.15"/>
+  <path d="M 71.21 71.21 Q 62 80, 50 80" stroke="currentColor" stroke-width="0.8" fill="none" opacity="0.15"/>
+  <path d="M 50 80 Q 38 80, 28.79 71.21" stroke="currentColor" stroke-width="0.8" fill="none" opacity="0.15"/>
+  <path d="M 28.79 71.21 Q 20 62, 20 50" stroke="currentColor" stroke-width="0.8" fill="none" opacity="0.15"/>
+  <path d="M 20 50 Q 20 38, 28.79 28.79" stroke="currentColor" stroke-width="0.8" fill="none" opacity="0.15"/>
+  <path d="M 28.79 28.79 Q 38 20, 50 20" stroke="currentColor" stroke-width="0.8" fill="none" opacity="0.15"/>
+
+  <!-- Tertiary micro-nodes (8 dots between satellites at 22.5° offsets) -->
+  <circle cx="62.6" cy="22.6" r="1.3" fill="currentColor" opacity="0.25"/>
+  <circle cx="77.4" cy="37.4" r="1.3" fill="currentColor" opacity="0.25"/>
+  <circle cx="77.4" cy="62.6" r="1.3" fill="currentColor" opacity="0.25"/>
+  <circle cx="62.6" cy="77.4" r="1.3" fill="currentColor" opacity="0.25"/>
+  <circle cx="37.4" cy="77.4" r="1.3" fill="currentColor" opacity="0.25"/>
+  <circle cx="22.6" cy="62.6" r="1.3" fill="currentColor" opacity="0.25"/>
+  <circle cx="22.6" cy="37.4" r="1.3" fill="currentColor" opacity="0.25"/>
+  <circle cx="37.4" cy="22.6" r="1.3" fill="currentColor" opacity="0.25"/>
+
+  <!-- Inner ring around center hub -->
+  <circle cx="50" cy="50" r="9" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.25"/>
+
+  <!-- Center hub -->
+  <circle cx="50" cy="50" r="5.5" fill="currentColor"/>
+
+  <!-- 8 Satellite nodes -->
+  <circle cx="50" cy="20" r="3.5" fill="currentColor"/>
+  <circle cx="71.21" cy="28.79" r="3.5" fill="currentColor"/>
+  <circle cx="80" cy="50" r="3.5" fill="currentColor"/>
+  <circle cx="71.21" cy="71.21" r="3.5" fill="currentColor"/>
+  <circle cx="50" cy="80" r="3.5" fill="currentColor"/>
+  <circle cx="28.79" cy="71.21" r="3.5" fill="currentColor"/>
+  <circle cx="20" cy="50" r="3.5" fill="currentColor"/>
+  <circle cx="28.79" cy="28.79" r="3.5" fill="currentColor"/>
+</svg>

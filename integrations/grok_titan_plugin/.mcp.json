@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "titan-memory": {
+      "command": "python3",
+      "args": ["${GROK_PLUGIN_ROOT}/scripts/titan_mcp_launcher.py", "--agent", "grok"],
+      "env": {
+        "TITAN_AGENT_NAME": "grok"
+      }
+    }
+  }
+}

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Titan-Karu Overnight Harness — launchd plist template
+
+    To install:
+      1. Copy this file to ~/Library/LaunchAgents/ai.titan.overnight.plist
+      2. Replace YOUR_USERNAME with your actual username
+      3. Replace /path/to/Titan-Karu-overnight with the actual path
+      4. Run: launchctl load ~/Library/LaunchAgents/ai.titan.overnight.plist
+
+    To run manually without launchd:
+      ./entrypoints/overnight/scripts/run_overnight.sh --manifest config/overnight_manifest.yaml
+
+    The harness writes artifacts to: ~/.titan-overnight/artifacts/
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.titan.overnight</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/YOUR_USERNAME/Desktop/Code/Titan-Karu-overnight/entrypoints/overnight/scripts/run_overnight.sh</string>
+        <string>--manifest</string>
+        <string>/Users/YOUR_USERNAME/Desktop/Code/Titan-Karu-overnight/config/overnight_manifest.yaml</string>
+    </array>
+
+    <!-- Run every day at 3:00 AM -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>3</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
+
+    <!--
+        Environment. The harness itself sets TITAN_BASE_DIR from the manifest,
+        but you can override here if needed.
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TITAN_OVERNIGHT_LABEL</key>
+        <string>launchd-scheduled</string>
+    </dict>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Users/YOUR_USERNAME/Desktop/Code/Titan-Karu-overnight</string>
+
+    <!-- Standard output/error logs -->
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/.titan-overnight/artifacts/launchd.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/.titan-overnight/artifacts/launchd.stderr.log</string>
+
+    <!-- Don't restart too aggressively -->
+    <key>ExitTimeOut</key>
+    <integer>300</integer>
+
+    <!-- Keep at most one instance -->
+    <key>MultipleInstances</key>
+    <false/>
+</dict>
+</plist>

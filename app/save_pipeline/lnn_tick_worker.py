@@ -4,14 +4,17 @@ import logging
 import threading
 from typing import Optional
 
-from app.storage.memories import get_memory_repository
+from app.storage.memories import get_lnn_state_repository
 
 LOGGER = logging.getLogger(__name__)
 
 
 def _lnn_tick_loop(stop_event: threading.Event, interval_seconds: float, tau_disuse_decay: float = 0.01,
                    weight_decay: float = 0.001) -> None:
-    repo = get_memory_repository()
+    repo = get_lnn_state_repository()
+    if repo is None:
+        LOGGER.info("lnn_tick: selected memory backend has no LNN capability; worker disabled")
+        return
     while not stop_event.is_set():
         try:
             dt_minutes = interval_seconds / 60.0

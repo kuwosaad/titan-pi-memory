@@ -1,0 +1,39 @@
+# Minimal smoke-run manifest for validating the overnight harness end to end.
+---
+version: "1"
+
+isolation:
+  base_dir: ~/.openclaw/night-runs/smoke-current
+  label: "overnight-smoke"
+  no_production_writes: true
+
+runtime:
+  max_hours: 0.02
+  max_queries: 1
+  warmup_queries: 0
+  query_timeout_seconds: 5.0
+
+health:
+  min_memories: 1
+  max_age_days: 30
+  required_backends: []
+  check_extraction: false
+  check_embedding: false
+
+artifacts:
+  output_dir: ~/.openclaw/night-runs/smoke-current/artifacts
+  log_level: INFO
+
+benchmarks:
+  - id: "smoke-both"
+    description: "Single-query smoke test for isolated overnight execution"
+    metrics:
+      - recall_at_k
+      - gold_in_pool_rate
+      - theme_hit_rate
+    queries:
+      - q: "what happened in the previous session"
+        mode: "both"
+        top_k: 5
+        gold_session_ids: []
+        expected_themes: []

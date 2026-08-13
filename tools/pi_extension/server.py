@@ -20,28 +20,12 @@ sys.path.insert(0, str(REPO_ROOT))
 TITAN_HOME = Path(
     os.getenv("TITAN_HOME", str(Path.home() / ".titan" / "agents" / "pi"))
 ).expanduser()
-os.environ.setdefault("TITAN_BASE_DIR", str(TITAN_HOME))
-TITAN_HOME.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("TITAN_PI_ADAPTER", "1")
+os.environ.setdefault("TITAN_PI_DEFAULT_AGENT", "pi")
+os.environ.setdefault("TITAN_PI_DEFAULT_HOME", str(TITAN_HOME))
 
 # ---------------------------------------------------------------------------
-# 2. Load .env from Pi agent home (API keys, config paths)
-# ---------------------------------------------------------------------------
-_env_file = TITAN_HOME / ".env"
-if _env_file.exists():
-    for _line in _env_file.read_text(encoding="utf-8").splitlines():
-        _line = _line.strip()
-        if _line and "=" in _line and not _line.startswith("#"):
-            _key, _val = _line.split("=", 1)
-            os.environ.setdefault(_key.strip(), _val.strip())
-
-# Point to Pi-specific model config
-for _cfg_key, _cfg_file in [
-    ("TITAN_EXTRACTION_CONFIG_PATH", TITAN_HOME / "config" / "extraction_models.yaml"),
-    ("TITAN_EMBEDDING_CONFIG_PATH", TITAN_HOME / "config" / "embedding_models.yaml"),
-]:
-    if _cfg_file.exists():
-        os.environ[_cfg_key] = str(_cfg_file)
-
+# 2. RuntimeContext resolves .env files and model paths after import.
 # ---------------------------------------------------------------------------
 # 3. Build the app (import triggers module-level init in entrypoints.main)
 # ---------------------------------------------------------------------------
@@ -54,6 +38,7 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("TITAN_PI_PORT", "8002"))
+    os.environ.setdefault("TITAN_PORT", str(port))
     log_level = os.getenv("TITAN_PI_LOG_LEVEL", "warning")
     access_log = os.getenv("TITAN_PI_ACCESS_LOG", "").lower() in {"1", "true", "yes"}
     uvicorn.run(

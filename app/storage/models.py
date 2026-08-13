@@ -122,42 +122,6 @@ class IngestResult(BaseModel):
     seq: Optional[int] = Field(None, description="Ledger sequence if ingested")
 
 
-class SceneMessage(BaseModel):
-    role: Literal["user", "assistant", "system"] = Field(..., description="Message role inside the scene")
-    content: str = Field(..., description="Message content")
-    message_id: Optional[str] = Field(None, description="Optional message identifier from the source trace")
-    event_id: Optional[str] = Field(None, description="Optional source event identifier")
-
-
-class SceneToolCall(BaseModel):
-    name: str = Field(..., description="Tool name")
-    call_id: Optional[str] = Field(None, description="Optional source tool call identifier")
-    status: str = Field("unknown", description="Compact status such as success, error, or unknown")
-    summary: str = Field("", description="Short human-readable summary of the tool call")
-    file_paths: List[str] = Field(default_factory=list, description="Relevant file paths mentioned by the tool call")
-    excerpt: Optional[str] = Field(None, description="Small excerpt of useful output, never the full raw output")
-    event_id: Optional[str] = Field(None, description="Optional source event identifier")
-
-
-class Scene(BaseModel):
-    scene_id: str = Field(..., description="Unique scene ID")
-    session_id: str = Field(..., description="Session the scene belongs to")
-    turn: int = Field(..., description="Turn number assigned when the scene was saved")
-    kind: Literal["message_exchange", "trace_packet", "raw_event"] = Field(..., description="Scene source type")
-    scene_seq: Optional[int] = Field(None, description="Lossless scene order inside the source session")
-    start_event_seq: Optional[int] = Field(None, description="First trace ledger sequence included in this scene")
-    end_event_seq: Optional[int] = Field(None, description="Last trace ledger sequence included in this scene")
-    anchor_event_id: Optional[str] = Field(None, description="Primary event that anchored scene creation")
-    source_event_ids: List[str] = Field(default_factory=list, description="All known source events for this scene")
-    raw_events: List[Dict[str, Any]] = Field(default_factory=list, description="Lossless raw events included in this scene chunk")
-    messages: List[SceneMessage] = Field(default_factory=list, description="Ordered messages that make up the scene")
-    tool_calls: List[SceneToolCall] = Field(default_factory=list, description="Compact tool calls that happened inside the scene")
-    extraction_user_text: str = Field(..., description="User-side text passed into the extractor")
-    extraction_assistant_text: str = Field(..., description="Assistant-side text passed into the extractor")
-    used_context_fallback: bool = Field(False, description="Whether approximate user context fallback was used")
-    ts: str = Field(..., description="Scene timestamp")
-
-
 class MemoriesResponse(BaseModel):
     memories: List[Memory] = Field(..., description="Memory records")
     count: int = Field(..., description="Total memory count")

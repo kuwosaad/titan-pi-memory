@@ -1,0 +1,25 @@
+{
+  "name": "titan-memory",
+  "displayName": "Titan Memory",
+  "version": "0.1.0",
+  "description": "Persistent memory, recall, and passive trace capture for Claude Code.",
+  "author": {
+    "name": "Titan"
+  },
+  "homepage": "https://github.com/kuwosaad/titan-karu",
+  "repository": "https://github.com/kuwosaad/titan-karu",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "mcp", "claude-code", "coding-agent"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
+  "userConfig": {
+    "agent_name": {
+      "type": "string",
+      "title": "Titan agent name",
+      "description": "Memory namespace under ~/.titan/agents/. Keep this stable.",
+      "default": "claude-code",
+      "required": true
+    }
+  }
+}

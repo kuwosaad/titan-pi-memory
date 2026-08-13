@@ -2,7 +2,8 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import networkx as nx
@@ -11,17 +12,132 @@ from networkx.algorithms.community import greedy_modularity_communities
 from app.embedding.embedder import embed
 from app.save_pipeline.extraction.extractor import is_hidden_metadata_memory
 from app.graph.similarity import cosine_similarity
-from app.storage.memories import query_memory_candidates, unpack_embedding
+from app.storage.memories import query_memory_candidates, query_memory_candidates_with_text, unpack_embedding
 from app.storage.repository import CandidateFilters
 
-
-# titan-pi-memory currently exposes one filtered candidate lane. Keep the
-# retrieval-selection contract without forcing a storage/FTS migration here.
-def query_memory_candidates_with_text(_fts_query: str, filters: CandidateFilters) -> List[Dict[str, Any]]:
-    return query_memory_candidates(filters)
-
-
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RetrievalRequest:
+    """Immutable compatibility request for the retrieval engine."""
+
+    query: str
+    session_id: Optional[str] = None
+    # A tuple prevents a caller from mutating the request after it has crossed
+    # the public boundary.  ``retrieve_memories`` still accepts a list and
+    # converts it at construction time, so the external call shape is intact.
+    memory_types: Optional[Tuple[str, ...]] = None
+    top_k: Optional[int] = None
+    min_similarity: Optional[float] = None
+    min_reliability: Optional[float] = None
+    mode: str = "both"
+    intent: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        # Direct construction is supported for internal callers and tests;
+        # normalize mutable sequences even when ``from_compat`` is bypassed.
+        if self.memory_types is not None and not isinstance(self.memory_types, tuple):
+            object.__setattr__(self, "memory_types", tuple(self.memory_types))
+
+    @classmethod
+    def from_compat(
+        cls,
+        query: str,
+        session_id: Optional[str] = None,
+        memory_types: Optional[List[str]] = None,
+        top_k: Optional[int] = None,
+        min_similarity: Optional[float] = None,
+        min_reliability: Optional[float] = None,
+        mode: str = "both",
+        intent: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> "RetrievalRequest":
+        return cls(
+            query=query,
+            session_id=session_id,
+            memory_types=tuple(memory_types) if memory_types is not None else None,
+            top_k=top_k,
+            min_similarity=min_similarity,
+            min_reliability=min_reliability,
+            mode=mode,
+            intent=intent,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+    def runner_kwargs(self) -> Dict[str, Any]:
+        """Return the legacy keyword values expected by the implementation.
+
+        Lists are recreated here deliberately: old adapters and tests may
+        mutate their input list, but cannot mutate the immutable request held
+        by the engine.
+        """
+        return {
+            "session_id": self.session_id,
+            "memory_types": list(self.memory_types) if self.memory_types is not None else None,
+            "top_k": self.top_k,
+            "min_similarity": self.min_similarity,
+            "min_reliability": self.min_reliability,
+            "mode": self.mode,
+            "intent": self.intent,
+            "date_from": self.date_from,
+            "date_to": self.date_to,
+        }
+
+
+@dataclass(frozen=True)
+class RetrievalPolicy:
+    """Resolved policy snapshot retained for future ranking changes.
+
+    Resolution lives here rather than in the ranking function so a future
+    engine can be tested against a stable policy independently of embeddings
+    or storage.  The fallback expressions intentionally mirror the historic
+    implementation (notably, a false-y ``top_k`` uses the configured default).
+    """
+
+    top_k: int
+    min_similarity: float
+    min_reliability: float
+    recency_days: Optional[int]
+    session_bias: bool
+
+    @classmethod
+    def resolve(cls, settings: Dict[str, Any], request: RetrievalRequest) -> "RetrievalPolicy":
+        reliability_config = settings.get("retrieval", {}) or {}
+        configured_top_k = settings.get("retrieval_top_k", 8)
+        configured_similarity = settings.get("retrieval_min_similarity", 0.25)
+        configured_reliability = reliability_config.get("min_reliability", 0.4)
+        return cls(
+            top_k=int(request.top_k or configured_top_k),
+            min_similarity=float(
+                request.min_similarity if request.min_similarity is not None else configured_similarity
+            ),
+            min_reliability=float(
+                request.min_reliability
+                if request.min_reliability is not None
+                else configured_reliability
+            ),
+            recency_days=settings.get("retrieval_recency_days"),
+            session_bias=bool(settings.get("retrieval_session_bias", True)),
+        )
+
+
+class RetrievalEngine:
+    """Small internal seam around the established ranking implementation.
+
+    The callable is deliberately injectable so admission/ranking tests can
+    exercise the public request contract without importing private stages.
+    """
+
+    def __init__(self, runner: Callable[..., List[Dict[str, Any]]]) -> None:
+        self._runner = runner
+
+    def retrieve(self, request: RetrievalRequest) -> List[Dict[str, Any]]:
+        return self._runner(request.query, **request.runner_kwargs())
 
 DUPLICATE_NEGATION_TERMS = {
     "avoid",
@@ -1131,6 +1247,11 @@ def _ode_rerank_hits(
 
     tau_boost = float(lnn_config.get("tau_boost", 0.05))
     repo = get_memory_repository()
+    # JSON remains a compatibility MemoryStore, not an LNN state store. Keep
+    # retrieval usable on JSON while preventing the reranker from mutating
+    # unsupported activation/weight fields.
+    if getattr(repo, "supports_lnn", True) is False:
+        return hits
     weight_delta_pairs: List[Tuple[str, str, float]] = []
 
     rescored: List[Dict[str, Any]] = []
@@ -1182,6 +1303,8 @@ def _expanding_ode_rerank_hits(
     from app.storage.memories import get_memory_repository
 
     repo = get_memory_repository()
+    if getattr(repo, "supports_lnn", True) is False:
+        return hits
 
     base_scores = np.array([float(h.get("base_score") or h.get("score") or 0.0) for h in hits], dtype=np.float32)
     memory_ids = [str((h.get("memory") or {}).get("id") or "") for h in hits]
@@ -2112,21 +2235,61 @@ def retrieve_memories(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    """Compatibility entrypoint preserving Titan's ten-parameter contract."""
+
+    request = RetrievalRequest.from_compat(
+        query,
+        session_id=session_id,
+        memory_types=memory_types,
+        top_k=top_k,
+        min_similarity=min_similarity,
+        min_reliability=min_reliability,
+        mode=mode,
+        intent=intent,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return RetrievalEngine(_retrieve_memories_impl).retrieve(request)
+
+
+def _retrieve_memories_impl(
+    query: str,
+    session_id: Optional[str] = None,
+    memory_types: Optional[List[str]] = None,
+    top_k: Optional[int] = None,
+    min_similarity: Optional[float] = None,
+    min_reliability: Optional[float] = None,
+    mode: str = "both",
+    intent: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     from .config import load_settings
     settings = load_settings()
+    request = RetrievalRequest.from_compat(
+        query,
+        session_id=session_id,
+        memory_types=memory_types,
+        top_k=top_k,
+        min_similarity=min_similarity,
+        min_reliability=min_reliability,
+        mode=mode,
+        intent=intent,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    policy = RetrievalPolicy.resolve(settings, request)
     lnn_config = settings.get("lnn") or {}
     step1_config = settings.get("step1", {}) or {}
     selection_config = settings.get("retrieval_selection", {}) or {}
     selection_enabled = bool(selection_config.get("enabled", False))
-    top_k = top_k or settings.get("retrieval_top_k", 8)
+    top_k = policy.top_k
     rerank = _resolve_rerank_config(settings, int(top_k))
-    min_similarity = min_similarity if min_similarity is not None else settings.get("retrieval_min_similarity", 0.25)
+    min_similarity = policy.min_similarity
+    min_reliability = policy.min_reliability
 
-    reliability_config = settings.get("retrieval", {})
-    min_reliability = min_reliability if min_reliability is not None else reliability_config.get("min_reliability", 0.4)
-
-    recency_days = settings.get("retrieval_recency_days")
-    session_bias = settings.get("retrieval_session_bias", True)
+    recency_days = policy.recency_days
+    session_bias = policy.session_bias
 
     extracted = extract_date_brackets(query)
     date_from = date_from or extracted["date_from"]

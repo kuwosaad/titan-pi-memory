@@ -11,14 +11,17 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .models import Memory
-from .repository import CandidateFilters, MemoryRepository
+from .repository import CandidateFilters, MemoryRepository, MemoryStore, LnnStateStore, get_lnn_state_store
 from .sessions import BASE_DIR, MEMORIES_DIR, read_json, write_json
-from .sqlite_schema import ensure_memory_readable_views, ensure_memory_store_metadata
+from . import sessions as _sessions
+from .sqlite import connect_sqlite
+from .sqlite_schema import ensure_memory_readable_views, ensure_memory_store_metadata, ensure_pattern_tables
 
 
 LOGGER = logging.getLogger(__name__)
 MEMORIES_FILE = MEMORIES_DIR / "memories.json"
 DEFAULT_SQLITE_FILE = MEMORIES_DIR / "memory_store.db"
+_MEMORY_ROOT = MEMORIES_DIR
 SQLITE_TIMEOUT_SECONDS = 30.0
 _MEMORIES_LOCK = threading.RLock()
 _REPO_CACHE: Optional[MemoryRepository] = None
@@ -33,6 +36,28 @@ _ALLOWED_MEMORY_KINDS = {
     "relationship",
     "workflow",
     "issue",
+}
+
+
+def _refresh_json_paths() -> None:
+    """Keep the compatibility JSON adapter aligned with the active context."""
+
+    global MEMORIES_FILE, DEFAULT_SQLITE_FILE, _MEMORY_ROOT
+    _sessions.refresh_runtime_paths()
+    current_root = _sessions.MEMORIES_DIR
+    if current_root == _MEMORY_ROOT:
+        return
+    if MEMORIES_FILE == _MEMORY_ROOT / "memories.json":
+        MEMORIES_FILE = current_root / "memories.json"
+    if DEFAULT_SQLITE_FILE == _MEMORY_ROOT / "memory_store.db":
+        DEFAULT_SQLITE_FILE = current_root / "memory_store.db"
+    _MEMORY_ROOT = current_root
+_ALLOWED_SPEAKER_FOCUS = {"kuwo", "karu", "shared", "system"}
+_LEGACY_SPEAKER_FOCUS_ALIASES = {
+    "mixed": "shared",
+    "both": "shared",
+    "user": "kuwo",
+    "assistant": "karu",
 }
 
 
@@ -87,6 +112,16 @@ def _normalize_memory_kind(mem: Dict[str, Any]) -> Optional[str]:
     return normalized_kind if normalized_kind in _ALLOWED_MEMORY_KINDS else None
 
 
+def _normalize_speaker_focus(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    speaker_focus = str(value).strip().lower()
+    if not speaker_focus:
+        return None
+    speaker_focus = _LEGACY_SPEAKER_FOCUS_ALIASES.get(speaker_focus, speaker_focus)
+    return speaker_focus if speaker_focus in _ALLOWED_SPEAKER_FOCUS else None
+
+
 def _normalize_memory(mem: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(mem)
     normalized.setdefault("stream", "rough")
@@ -98,7 +133,7 @@ def _normalize_memory(mem: Dict[str, Any]) -> Dict[str, Any]:
         normalized["source_reliability"] = 0.3
     normalized.setdefault("verification_status", "unverified")
     normalized.setdefault("fallback_generated", False)
-    normalized.setdefault("speaker_focus", None)
+    normalized["speaker_focus"] = _normalize_speaker_focus(normalized.get("speaker_focus"))
     normalized["memory_kind"] = _normalize_memory_kind(normalized)
     provenance = normalized.get("provenance")
     if not isinstance(provenance, dict):
@@ -117,30 +152,18 @@ def _normalize_stream(value: Any) -> str:
 
 
 def _resolve_sqlite_path() -> Path:
-    from app.retrieval_pipeline.config import load_settings
-
-    settings = load_settings()
-    configured = str(settings.get("memory_store_sqlite_path") or "").strip()
-    if not configured:
-        return DEFAULT_SQLITE_FILE
-    path = Path(configured).expanduser()
-    if not path.is_absolute():
-        path = BASE_DIR / path
-    return path
+    from app.runtime.context import get_runtime_context
+    return get_runtime_context().memory_db_path
 
 
 def _resolve_backend() -> str:
-    from app.retrieval_pipeline.config import load_settings
-
-    settings = load_settings()
-    return str(settings.get("memory_store_backend", "sqlite")).strip().lower() or "sqlite"
+    from app.runtime.context import get_runtime_context
+    return get_runtime_context().memory_backend
 
 
 def _resolve_read_fallback() -> str:
-    from app.retrieval_pipeline.config import load_settings
-
-    settings = load_settings()
-    return str(settings.get("memory_store_read_fallback", "json")).strip().lower() or "json"
+    from app.runtime.context import get_runtime_context
+    return get_runtime_context().read_fallback
 
 
 def _is_database_locked_error(exc: Exception) -> bool:
@@ -148,6 +171,19 @@ def _is_database_locked_error(exc: Exception) -> bool:
 
 
 class JsonMemoryRepository:
+    """Legacy JSON adapter for basic MemoryStore operations.
+
+    JSON files remain intentionally supported for migration and simple reads,
+    but they are not an LNN state store.  The legacy LNN methods below are kept
+    as compatibility shims; new callers must use ``get_lnn_state_store``.
+    """
+
+    supports_lnn = False
+
+    @property
+    def capabilities(self) -> Dict[str, bool]:
+        return {"memory_store": True, "lnn_state_store": False}
+
     def load_all_memories(self) -> List[Dict[str, Any]]:
         with _MEMORIES_LOCK:
             return [_normalize_memory(mem) for mem in read_json(MEMORIES_FILE, [])]
@@ -163,11 +199,13 @@ class JsonMemoryRepository:
             write_json(MEMORIES_FILE, all_memories)
         return records
 
-    def get_recent_memories(self, limit: int = 8, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_recent_memories(self, limit: Optional[int] = 8, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
         all_memories = self.load_all_memories()
         if session_id:
             all_memories = [mem for mem in all_memories if mem.get("session_id") == session_id]
-        sliced = all_memories[-limit:]
+        # ``None`` is the explicit unlimited form used by corpus analysis.
+        # Keep the historical positive-integer behavior unchanged.
+        sliced = all_memories if limit is None else all_memories[-int(limit):]
         return list(reversed(sliced))
 
     def get_memory_count(self, session_id: Optional[str] = None) -> int:
@@ -188,6 +226,9 @@ class JsonMemoryRepository:
                 if len(result) >= limit:
                     break
         return result
+
+    def query_candidates_with_text(self, fts_query: str, filters: CandidateFilters) -> List[Dict[str, Any]]:
+        return self.query_candidates(filters)
 
     def query_candidates(self, filters: CandidateFilters) -> List[Dict[str, Any]]:
         memories = self.load_all_memories()
@@ -320,6 +361,11 @@ class JsonMemoryRepository:
 
 
 class SqliteMemoryRepository:
+    supports_lnn = True
+
+    @property
+    def capabilities(self) -> Dict[str, bool]:
+        return {"memory_store": True, "lnn_state_store": True}
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -327,10 +373,7 @@ class SqliteMemoryRepository:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=SQLITE_TIMEOUT_SECONDS)
-        conn.execute(f"PRAGMA busy_timeout = {int(SQLITE_TIMEOUT_SECONDS * 1000)}")
-        conn.row_factory = sqlite3.Row
-        return conn
+        return connect_sqlite(self.db_path)
 
     def _init_schema(self) -> None:
         ddl = """
@@ -367,6 +410,27 @@ class SqliteMemoryRepository:
         CREATE INDEX IF NOT EXISTS idx_memories_type_ts ON memories(type, ts DESC);
         CREATE INDEX IF NOT EXISTS idx_memories_reliability ON memories(source_reliability);
         CREATE INDEX IF NOT EXISTS idx_memories_ts ON memories(ts DESC);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+            text,
+            content='memories',
+            content_rowid='rowid',
+            tokenize='porter unicode61 remove_diacritics 2'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+            INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+        END;
+
+        DROP TRIGGER IF EXISTS memories_au;
+        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE OF text ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+            INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text);
+        END;
         """
         with self._lock, self._connect() as conn:
             conn.executescript(ddl)
@@ -387,6 +451,17 @@ class SqliteMemoryRepository:
                 conn.execute("ALTER TABLE memories ADD COLUMN incoming_weights BLOB")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_scene_id ON memories(scene_id)")
             ensure_memory_store_metadata(conn)
+            ensure_pattern_tables(conn)
+            fts_count = conn.execute("SELECT COUNT(*) AS c FROM memories_fts").fetchone()["c"]
+            mem_count = conn.execute("SELECT COUNT(*) AS c FROM memories").fetchone()["c"]
+            if mem_count > 0:
+                try:
+                    conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('integrity-check')")
+                    if fts_count == 0:
+                        conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+                except sqlite3.DatabaseError:
+                    conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+            conn.commit()
             ensure_memory_readable_views(conn)
             conn.commit()
 
@@ -542,15 +617,17 @@ class SqliteMemoryRepository:
             rows = conn.execute(query).fetchall()
         return [self._row_to_memory(row, decode_embedding=True) for row in rows]
 
-    def get_recent_memories(self, limit: int = 8, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_recent_memories(self, limit: Optional[int] = 8, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
         where = ""
         params: List[Any] = []
         if session_id:
             where = "WHERE session_id = ?"
             params.append(session_id)
 
-        query = f"SELECT * FROM memories {where} ORDER BY ts DESC LIMIT ?"
-        params.append(int(limit))
+        query = f"SELECT * FROM memories {where} ORDER BY ts DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(int(limit))
         with self._lock, self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_memory(row, decode_embedding=True) for row in rows]
@@ -572,7 +649,7 @@ class SqliteMemoryRepository:
             rows = conn.execute(query, (int(limit),)).fetchall()
         return [row["session_id"] for row in rows if row["session_id"]]
 
-    def _filtered_rows(self, filters: CandidateFilters, session_id: Optional[str] = None) -> List[sqlite3.Row]:
+    def _filtered_rows(self, filters: CandidateFilters, session_id: Optional[str] = None, fts_rowids: Optional[set[int]] = None) -> List[sqlite3.Row]:
         clauses = ["source_reliability >= ?"]
         params: List[Any] = [float(filters.min_reliability)]
 
@@ -603,6 +680,14 @@ class SqliteMemoryRepository:
             params.append(session_id)
 
         where = " AND ".join(clauses) if clauses else "1=1"
+
+        if fts_rowids is not None:
+            if not fts_rowids:
+                return []
+            placeholders = ",".join("?" for _ in fts_rowids)
+            where = f"({where}) AND rowid IN ({placeholders})"
+            params.extend(list(fts_rowids))
+
         query = f"SELECT * FROM memories WHERE {where} ORDER BY ts DESC"
         with self._lock, self._connect() as conn:
             return conn.execute(query, params).fetchall()
@@ -615,6 +700,32 @@ class SqliteMemoryRepository:
         else:
             rows = self._filtered_rows(filters, session_id=None)
         return [self._row_to_memory(row, decode_embedding=False, include_blob=True) for row in rows]
+
+    def _fts5_search(self, fts_query: str) -> Optional[set[int]]:
+        try:
+            with self._lock, self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?",
+                    (fts_query,),
+                ).fetchall()
+                return {int(r["rowid"]) for r in rows}
+        except sqlite3.OperationalError:
+            return None
+
+    def query_candidates_with_text(self, fts_query: str, filters: CandidateFilters) -> List[Dict[str, Any]]:
+        if not fts_query or not fts_query.strip():
+            return self.query_candidates(filters)
+        fts_rowids = self._fts5_search(fts_query)
+        if fts_rowids is not None:
+            if filters.session_id and filters.session_bias:
+                rows = self._filtered_rows(filters, session_id=filters.session_id, fts_rowids=fts_rowids)
+                if not rows:
+                    rows = self._filtered_rows(filters, session_id=None, fts_rowids=fts_rowids)
+            else:
+                rows = self._filtered_rows(filters, session_id=None, fts_rowids=fts_rowids)
+            if rows:
+                return [self._row_to_memory(row, decode_embedding=False, include_blob=True) for row in rows]
+        return self.query_candidates(filters)
 
     def update_lnn_state(self, memory_id: str, h: Optional[float] = None, tau: Optional[float] = None,
                          outgoing_weights: Optional[Dict[str, float]] = None,
@@ -764,6 +875,7 @@ class SqliteMemoryRepository:
 def get_memory_repository() -> MemoryRepository:
     global _REPO_CACHE, _REPO_CACHE_KEY
 
+    _refresh_json_paths()
     backend = _resolve_backend()
     sqlite_path = _resolve_sqlite_path()
     cache_key = (backend, str(sqlite_path))
@@ -788,6 +900,17 @@ def get_memory_repository() -> MemoryRepository:
             raise
     _REPO_CACHE_KEY = cache_key
     return _REPO_CACHE
+
+
+def get_lnn_state_repository() -> Optional[LnnStateStore]:
+    """Return the selected repository's LNN capability, if available.
+
+    JSON-backed installations deliberately return ``None``.  This is the
+    explicit capability boundary used by workers and diagnostics while the
+    older repository methods remain available for import compatibility.
+    """
+
+    return get_lnn_state_store(get_memory_repository())
 
 
 def load_all_memories() -> List[Dict[str, Any]]:
@@ -885,12 +1008,12 @@ def get_memories_for_session(session_id: str) -> List[Memory]:
     return session_memories
 
 
-def get_recent_memories(limit: int = 8, session_id: Optional[str] = None) -> List[Memory]:
+def get_recent_memories(limit: Optional[int] = 8, session_id: Optional[str] = None) -> List[Memory]:
     memories = get_memory_repository().get_recent_memories(limit=limit, session_id=session_id)
 
     try:
         from app.save_pipeline.dedup_buffer import peek_dedup_buffer
-        buf_limit = max(limit // 2, 2)
+        buf_limit = max((limit // 2) if limit is not None else 100, 2)
         buffer_entries = peek_dedup_buffer(limit=buf_limit, session_id=session_id)
         seen_ids = {mem.get("id") for mem in memories}
         for buf in buffer_entries:
@@ -903,7 +1026,7 @@ def get_recent_memories(limit: int = 8, session_id: Optional[str] = None) -> Lis
         pass
 
     memories.sort(key=lambda m: m.get("ts", ""), reverse=True)
-    return [Memory(**_normalize_memory(mem)) for mem in memories[:limit]]
+    return [Memory(**_normalize_memory(mem)) for mem in (memories if limit is None else memories[:limit])]
 
 
 def get_memory_count(session_id: Optional[str] = None) -> int:
@@ -919,6 +1042,7 @@ def migrate_legacy_memories() -> int:
     Add source and stream fields to legacy JSON memories created before v2.
     This migration intentionally targets memories.json for backward compatibility.
     """
+    _refresh_json_paths()
     all_memories = read_json(MEMORIES_FILE, [])
     migrated = 0
     for mem in all_memories:
@@ -946,7 +1070,12 @@ def query_memory_candidates(filters: CandidateFilters) -> List[Dict[str, Any]]:
     return get_memory_repository().query_candidates(filters)
 
 
+def query_memory_candidates_with_text(fts_query: str, filters: CandidateFilters) -> List[Dict[str, Any]]:
+    return get_memory_repository().query_candidates_with_text(fts_query, filters)
+
+
 def migrate_json_to_sqlite(sqlite_path: Optional[Path] = None) -> Dict[str, Any]:
+    _refresh_json_paths()
     started_at = datetime.now(timezone.utc)
     source = read_json(MEMORIES_FILE, [])
     db_path = sqlite_path or _resolve_sqlite_path()

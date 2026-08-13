@@ -1,0 +1,65 @@
+{
+  "_comment": "Titan-Karu benchmark experiment manifest. Defines available benchmark packs, their run configuration, and global defaults.",
+  "version": "1.0.0",
+  "benchmarks": {
+    "longmemeval-oracle": {
+      "name": "LongMemEval Oracle",
+      "script": "tools/benchmarks/longmemeval_oracle.py",
+      "dataset": ".bench/longmemeval-oracle/data/longmemeval_oracle.json",
+      "isolated_home": ".bench/longmemeval-oracle/titan-home",
+      "config_dir": ".bench/longmemeval-oracle/config",
+      "runs_dir": ".bench/longmemeval-oracle/runs",
+      "description": "LongMemEval oracle benchmark. Tests multi-session memory recall, temporal reasoning, and knowledge update handling. Uses isolated TITAN_HOME per run.",
+      "env_defaults": {
+        "TITAN_AUTO_INGEST_ENABLED": "0",
+        "TITAN_SETTINGS_PATH": ".bench/longmemeval-oracle/config/settings.yaml",
+        "TITAN_EXTRACTION_CONFIG_PATH": ".bench/longmemeval-oracle/config/extraction_models.yaml",
+        "TITAN_EMBEDDING_CONFIG_PATH": ".bench/longmemeval-oracle/config/embedding_models.yaml"
+      },
+      "params": {
+        "mode": "pilot",
+        "pilot_size": 20,
+        "retrieval_limit": 8,
+        "brief_max_items": 6,
+        "brief_max_chars": 700,
+        "reader_temperature": 0.1
+      }
+    },
+    "cross-rerank-probe": {
+      "name": "Cross-Memory Reranking Probe",
+      "script": "tools/benchmarks/memory_cross_rerank_probe.py",
+      "db_path": "out/memories/memory_store.db",
+      "runs_dir": ".bench/cross-rerank-probe/runs",
+      "description": "Reads the live memory_store.db in read-only mode. Mines weak-label eval cases from rough→learnings support pairs. No writes to production store.",
+      "env_defaults": {},
+      "params": {
+        "sample_size": 40,
+        "candidate_pool": 12,
+        "final_k": 5,
+        "min_overlap": 2,
+        "max_turn_gap": 8,
+        "alpha": 0.3,
+        "show_cases": 8
+      }
+    }
+  },
+  "default_bounds": {
+    "pilot_size": 20,
+    "max_runtime_minutes": 45,
+    "retrieval_limit": 8,
+    "brief_max_chars": 700,
+    "reader_temperature": 0.1,
+    "skip_eval": false
+  },
+  "harness": {
+    "shadow_mode_default": false,
+    "notify_artifacts_dir": ".bench/notifications",
+    "log_dir": ".bench/logs"
+  },
+  "nightly_schedule": {
+    "enabled": false,
+    "benchmarks_to_run": ["longmemeval-oracle"],
+    "default_run_name_prefix": "overnight",
+    "notification_webhook_env": "BENCHMARK_WEBHOOK_URL"
+  }
+}

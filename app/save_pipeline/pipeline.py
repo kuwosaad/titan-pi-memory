@@ -68,6 +68,7 @@ from app.storage.traces import (
     remove_retry_entries,
     update_session_checkpoint,
     get_pending_user_message,
+    get_pending_user_message_seq,
     set_pending_user_message,
     clear_pending_user_message,
 )
@@ -775,7 +776,7 @@ def _recap_from_records(records: List[Dict[str, Any]]) -> str:
     return " ".join(texts[:3])
 
 
-def process_session_events(session_id: str, limit: int = 200) -> Dict[str, Any]:
+def _process_session_events_impl(session_id: str, limit: int = 200) -> Dict[str, Any]:
     # Process only events that were not previously checkpointed for this session.
     events = load_unprocessed_events(session_id, limit=limit)
     if not events:
@@ -799,12 +800,22 @@ def process_session_events(session_id: str, limit: int = 200) -> Dict[str, Any]:
 
     role_by_message_id, parent_by_message_id, latest_text_by_message_id = load_message_context(session_id)
     recent_user_text = get_pending_user_message(session_id)
+    # A pending context record is valid only when it predates this batch.  In
+    # addition to preventing stale user text from leaking into unrelated
+    # sessions, this keeps replay/tests isolated from an existing on-disk
+    # pending-state file while preserving cross-batch pairing.
+    pending_seq = get_pending_user_message_seq(session_id)
+    pending_context_is_stale = bool(
+        pending_seq and events and pending_seq >= min(int(item.get("seq") or 0) for item in events)
+    )
+    if pending_context_is_stale:
+        recent_user_text = ""
     pending_tool_calls: List[Dict[str, Any]] = []
     for message_id, role in role_by_message_id.items():
         if role != "user":
             continue
         text = (latest_text_by_message_id.get(message_id) or "").strip()
-        if text:
+        if text and not pending_context_is_stale:
             recent_user_text = text
 
     for index, event in enumerate(events):
@@ -935,7 +946,7 @@ def process_session_events(session_id: str, limit: int = 200) -> Dict[str, Any]:
     }
 
 
-def ingest_trace_event(event: TraceEvent, process_new: bool = True) -> Dict[str, Any]:
+def _ingest_trace_event_impl(event: TraceEvent, process_new: bool = True) -> Dict[str, Any]:
     # Idempotent ingest boundary for event-first pipeline.
     ensure_dirs()
     status, seq = append_event(event.model_dump())
@@ -950,11 +961,11 @@ def ingest_trace_event(event: TraceEvent, process_new: bool = True) -> Dict[str,
 
     payload = result.model_dump()
     if status != "duplicate" and process_new:
-        payload.update(process_session_events(event.session_id))
+        payload.update(_process_session_events_impl(event.session_id))
     return payload
 
 
-def ingest_spool_session(session_id: str, spool_dir: str = ".opencode/titan/traces") -> Dict[str, Any]:
+def _ingest_spool_session_impl(session_id: str, spool_dir: str = ".opencode/titan/traces") -> Dict[str, Any]:
     ensure_dirs()
     spool_path = Path(spool_dir)
     ingest_counts = ingest_spool_file(session_id, spool_path)
@@ -973,7 +984,7 @@ def ingest_spool_session(session_id: str, spool_dir: str = ".opencode/titan/trac
         "skip_reasons": {},
     }
     for processed_session_id in processed_sessions:
-        process_counts = process_session_events(processed_session_id)
+        process_counts = _process_session_events_impl(processed_session_id)
         for key in aggregate_counts:
             if key == "skip_reasons":
                 for reason, count in (process_counts.get("skip_reasons") or {}).items():
@@ -1007,7 +1018,7 @@ def ingest_spool_session(session_id: str, spool_dir: str = ".opencode/titan/trac
     }
 
 
-def get_pipeline_debug_status(session_id: Optional[str] = None) -> Dict[str, Any]:
+def _get_pipeline_debug_status_impl(session_id: Optional[str] = None) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "session_id": session_id,
         "retry_queue_size": get_retry_queue_size(session_id=session_id),
@@ -1025,6 +1036,10 @@ def get_pipeline_debug_status(session_id: Optional[str] = None) -> Dict[str, Any
     configured_spool_dir = os.getenv("TITAN_SPOOL_DIR")
     if configured_spool_dir:
         spool_dir_value = str(configured_spool_dir)
+    elif settings.get("plugin_spool_dir"):
+        # Keep the historical settings key as a compatibility fallback.  An
+        # explicit TITAN_SPOOL_DIR always wins, as documented by RuntimeContext.
+        spool_dir_value = str(settings.get("plugin_spool_dir"))
     else:
         spool_dir_value = str(Path(os.getenv("TITAN_HOME", str(BASE_DIR))) / "traces")
     spool_dir = Path(spool_dir_value)
@@ -1057,6 +1072,33 @@ def get_pipeline_debug_status(session_id: Optional[str] = None) -> Dict[str, Any
         }
     )
     return payload
+
+
+# Compatibility forwarding interfaces.  Keep the historical imports stable
+# while routing all trace use cases through the framework-neutral TraceIntake
+# seam introduced for the architecture deepening program.
+def process_session_events(session_id: str, limit: int = 200) -> Dict[str, Any]:
+    from app.save_pipeline.trace_intake import get_trace_intake
+
+    return get_trace_intake().process_session_events(session_id=session_id, limit=limit)
+
+
+def ingest_trace_event(event: TraceEvent, process_new: bool = True) -> Dict[str, Any]:
+    from app.save_pipeline.trace_intake import get_trace_intake
+
+    return get_trace_intake().ingest_trace_event(event=event, process_new=process_new)
+
+
+def ingest_spool_session(session_id: str, spool_dir: str = ".opencode/titan/traces") -> Dict[str, Any]:
+    from app.save_pipeline.trace_intake import get_trace_intake
+
+    return get_trace_intake().ingest_spool_session(session_id=session_id, spool_dir=spool_dir)
+
+
+def get_pipeline_debug_status(session_id: Optional[str] = None) -> Dict[str, Any]:
+    from app.save_pipeline.trace_intake import get_trace_intake
+
+    return get_trace_intake().debug_status(session_id=session_id)
 
 
 def _safe_parse_iso(value: str) -> Optional[datetime]:
@@ -1165,10 +1207,21 @@ def retrieve_memory_brief(
         date_from=date_from,
         date_to=date_to,
     )
-    brief = build_memory_notes(
+    memory_brief = build_memory_notes(
         hits, max_items=max_items, max_chars=max_chars,
         cluster_mode=settings.get("step2", {}).get("cluster_compression_enabled", False),
     )
+    pattern_hits: List[Dict[str, Any]] = []
+    pattern_brief = ""
+    try:
+        from app.patterns.brief import build_pattern_brief
+        from app.patterns.retrieval import retrieve_accepted_patterns
+
+        pattern_hits = retrieve_accepted_patterns(safe_query)
+        pattern_brief = build_pattern_brief(pattern_hits, max_items=max_items, max_chars=max_chars)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Pattern retrieval failed: %s", exc)
+    brief = "\n\n".join(part for part in [pattern_brief, memory_brief] if part)
 
     memories = []
     for hit in hits:
@@ -1186,6 +1239,8 @@ def retrieve_memory_brief(
         "memories": memories,
         "scenes": [],
         "brief": brief,
+        "pattern_brief": pattern_brief,
+        "patterns": [hit.get("pattern", {}) for hit in pattern_hits],
         "scene_brief": "",
         "route": route,
     }

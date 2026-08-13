@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Titan — Logo Design Exploration</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background: #FAFAFA;
+            color: #1A1A1A;
+            overflow-x: hidden;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+        }
+
+        /* Subtle grain texture */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* Smooth scroll */
+        html {
+            scroll-behavior: smooth;
+        }
+
+        /* Logo hover effects */
+        .logo-card {
+            transition: all 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .logo-card:hover {
+            transform: translateY(-4px);
+        }
+
+        .logo-canvas {
+            position: relative;
+            transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Aura effect on hover */
+        .logo-aura {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, rgba(255,255,255,0.4) 0%, transparent 70%);
+            border-radius: 50%;
+            transform: scale(0.5);
+            opacity: 0;
+            transition: all 1s cubic-bezier(0.16, 1, 0.3, 1);
+            filter: blur(40px);
+            pointer-events: none;
+        }
+
+        .logo-card:hover .logo-aura {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        /* Divider animation */
+        .divider-line {
+            width: 0;
+            height: 1px;
+            background: #1A1A1A;
+            opacity: 0.2;
+            transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .logo-card:hover .divider-line {
+            width: 100%;
+        }
+
+        /* Showcase image effects */
+        .showcase-img {
+            transition: transform 0.5s ease, box-shadow 0.5s ease;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .showcase-img:hover {
+            transform: scale(1.02);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.12);
+        }
+
+        /* Typography refinements */
+        .tracking-ultra-wide {
+            letter-spacing: 0.2em;
+        }
+
+        .text-balance {
+            text-wrap: balance;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        const Logo1 = () => (
+            <svg viewBox="0 0 100 100" className="w-full h-full" fill="none" stroke="currentColor">
+                <polygon points="50,10 85,30 85,70 50,90 15,70 15,30" strokeWidth="2" />
+                <polygon points="50,25 70,38 70,62 50,75 30,62 30,38" strokeWidth="2" opacity="0.5" />
+                <line x1="15" y1="30" x2="50" y2="50" strokeWidth="1.5" />
+                <line x1="85" y1="30" x2="50" y2="50" strokeWidth="1.5" />
+                <line x1="50" y1="90" x2="50" y2="50" strokeWidth="1.5" />
+                <circle cx="50" cy="50" r="4" fill="currentColor" />
+                <circle cx="50" cy="10" r="3" fill="currentColor" />
+                <circle cx="85" cy="30" r="3" fill="currentColor" />
+                <circle cx="85" cy="70" r="3" fill="currentColor" />
+                <circle cx="50" cy="90" r="3" fill="currentColor" />
+                <circle cx="15" cy="70" r="3" fill="currentColor" />
+                <circle cx="15" cy="30" r="3" fill="currentColor" />
+            </svg>
+        );
+
+        const Logo2 = () => (
+            <svg viewBox="0 0 100 100" className="w-full h-full" fill="none" stroke="currentColor">
+                <path d="M50 10 L90 50 L50 90 L10 50 Z" strokeWidth="2" />
+                <path d="M30 30 L70 30" strokeWidth="4" />
+                <path d="M50 30 L50 70" strokeWidth="4" />
+                <circle cx="50" cy="50" r="3" fill="#FAFAFA" />
+            </svg>
+        );
+
+        const Logo3 = () => (
+            <svg viewBox="0 0 100 100" className="w-full h-full" fill="none" stroke="currentColor">
+                <circle cx="35" cy="50" r="20" strokeWidth="2" />
+                <circle cx="65" cy="50" r="20" strokeWidth="2" opacity="0.8" />
+                <circle cx="50" cy="30" r="15" strokeWidth="1.5" opacity="0.6" />
+                <circle cx="50" cy="70" r="15" strokeWidth="1.5" opacity="0.6" />
+                <path d="M50 15 L50 85" strokeWidth="1" strokeDasharray="2 2" />
+                <path d="M15 50 L85 50" strokeWidth="1" strokeDasharray="2 2" />
+                <circle cx="50" cy="50" r="3" fill="currentColor" />
+            </svg>
+        );
+
+        const Logo4 = () => (
+            <svg viewBox="0 0 100 100" className="w-full h-full" fill="none" stroke="currentColor">
+                <rect x="25" y="20" width="10" height="60" strokeWidth="2" />
+                <rect x="65" y="20" width="10" height="60" strokeWidth="2" />
+                <rect x="42" y="35" width="16" height="30" strokeWidth="2" />
+                <line x1="10" y1="50" x2="25" y2="50" strokeWidth="2" />
+                <line x1="75" y1="50" x2="90" y2="50" strokeWidth="2" />
+                <line x1="35" y1="50" x2="42" y2="50" strokeWidth="2" />
+                <line x1="58" y1="50" x2="65" y2="50" strokeWidth="2" />
+            </svg>
+        );
+
+        const Logo5 = () => (
+            <svg viewBox="0 0 100 100" className="w-full h-full" fill="currentColor">
+                <rect x="20" y="20" width="8" height="8" />
+                <rect x="46" y="20" width="8" height="8" />
+                <rect x="72" y="20" width="8" height="8" />
+                <rect x="33" y="33" width="8" height="8" opacity="0.7" />
+                <rect x="59" y="33" width="8" height="8" opacity="0.7" />
+                <rect x="20" y="46" width="8" height="8" />
+                <rect x="46" y="46" width="8" height="8" opacity="0.4" />
+                <rect x="72" y="46" width="8" height="8" />
+                <rect x="33" y="59" width="8" height="8" opacity="0.7" />
+                <rect x="59" y="59" width="8" height="8" opacity="0.7" />
+                <rect x="20" y="72" width="8" height="8" />
+                <rect x="46" y="72" width="8" height="8" />
+                <rect x="72" y="72" width="8" height="8" />
+                <path d="M24 28 L24 46" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+                <path d="M76 28 L76 46" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+                <path d="M24 54 L24 72" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+                <path d="M76 54 L76 72" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+                <path d="M28 24 L46 24" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+                <path d="M54 24 L72 24" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+            </svg>
+        );
+
+        const Logo6 = () => (
+            <svg viewBox="0 0 100 100" className="w-full h-full" fill="none" stroke="currentColor">
+                <path d="M10 50 Q 50 10 90 50 Q 50 90 10 50" strokeWidth="2" />
+                <circle cx="50" cy="50" r="15" strokeWidth="2" />
+                <circle cx="50" cy="50" r="5" fill="currentColor" />
+                <line x1="50" y1="10" x2="50" y2="35" strokeWidth="2" />
+                <line x1="50" y1="90" x2="50" y2="65" strokeWidth="2" />
+                <line x1="10" y1="50" x2="35" y2="50" strokeWidth="2" />
+                <line x1="90" y1="50" x2="65" y2="50" strokeWidth="2" />
+                <path d="M30 30 L40 40" strokeWidth="1.5" opacity="0.6"/>
+                <path d="M70 30 L60 40" strokeWidth="1.5" opacity="0.6"/>
+                <path d="M30 70 L40 60" strokeWidth="1.5" opacity="0.6"/>
+                <path d="M70 70 L60 60" strokeWidth="1.5" opacity="0.6"/>
+            </svg>
+        );
+
+        const Logo7 = () => (
+            <svg viewBox="0 0 100 100" className="w-full h-full">
+                {/* Left Hemisphere: Organic (Green) */}
+                <g stroke="#2ECC71" strokeWidth="3.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M47,18 C30,18 18,30 18,45 C18,58 22,68 32,76 C38,80 44,80 47,78" />
+                    <path d="M47,28 C35,28 28,35 28,45 C28,52 35,55 40,52 C45,49 47,55 47,55" />
+                    <path d="M28,45 C24,45 24,55 28,58 C32,61 30,68 35,72 C40,75 45,72 47,70" />
+                    <path d="M35,35 C35,35 42,32 47,35" />
+                    <path d="M47,42 C42,42 38,45 38,48 C38,52 47,62 47,62" />
+                    <path d="M38,62 C38,62 42,65 47,65" />
+                </g>
+                {/* Right Hemisphere: Network (CurrentColor) */}
+                <g stroke="currentColor" strokeWidth="1.5" fill="none">
+                    <path d="M53,18 L65,22 L75,32 L82,45 L78,60 L68,72 L53,78" />
+                    <path d="M53,18 L60,32 L53,45 L62,55 L53,65 L53,78" />
+                    <path d="M65,22 L60,32 L75,32" />
+                    <path d="M75,32 L70,45 L82,45" />
+                    <path d="M60,32 L70,45 L53,45" />
+                    <path d="M70,45 L72,55 L78,60" />
+                    <path d="M62,55 L72,55 L68,72" />
+                    <path d="M62,55 L65,65 L53,65" />
+                    <path d="M65,65 L68,72" />
+                    <path d="M65,65 L53,78" />
+                </g>
+                <g fill="currentColor">
+                    <circle cx="53" cy="18" r="3" />
+                    <circle cx="65" cy="22" r="3" />
+                    <circle cx="75" cy="32" r="3" />
+                    <circle cx="82" cy="45" r="3" />
+                    <circle cx="78" cy="60" r="3" />
+                    <circle cx="68" cy="72" r="3" />
+                    <circle cx="53" cy="78" r="3" />
+                    <circle cx="60" cy="32" r="3" />
+                    <circle cx="70" cy="45" r="3" />
+                    <circle cx="53" cy="45" r="3" />
+                    <circle cx="62" cy="55" r="3" />
+                    <circle cx="72" cy="55" r="3" />
+                    <circle cx="53" cy="65" r="3" />
+                    <circle cx="65" cy="65" r="3" />
+                </g>
+            </svg>
+        );
+
+        const LogoShowcase = () => {
+            const logos = [
+                {
+                    Component: Logo1,
+                    title: "Hexagonal Graph",
+                    subtitle: "NETWORK STRUCTURE",
+                    philosophy: "A literal representation of the Titan Memory Graph. Nodes map symmetrically across a stable hex structure, emphasizing strength and perfect recall."
+                },
+                {
+                    Component: Logo2,
+                    title: "Diamond 'T'",
+                    subtitle: "CORE IDENTITY",
+                    philosophy: "A bold, minimalist monogram forming the letter 'T' within a pristine diamond shell. It symbolizes the sharp, indestructible core of Titan."
+                },
+                {
+                    Component: Logo3,
+                    title: "Infinite Scale",
+                    subtitle: "EXPANSION & MEMORY",
+                    philosophy: "Intersecting spheres of context. The design visualizes overlapping domains of knowledge and memory expanding infinitely."
+                },
+                {
+                    Component: Logo4,
+                    title: "The Pillars",
+                    subtitle: "FOUNDATION & ARCHITECTURE",
+                    philosophy: "Structured, architectural stability. The pillars reflect the underlying engineering of agents, held together by a central intelligence."
+                },
+                {
+                    Component: Logo5,
+                    title: "Symmetry Matrix",
+                    subtitle: "DIGITAL LATTICE",
+                    philosophy: "A data lattice forming a perfectly balanced system. The fading connections illustrate memory prioritization and pruning."
+                },
+                {
+                    Component: Logo6,
+                    title: "Eye of Titan",
+                    subtitle: "AWARENESS & FOCUS",
+                    philosophy: "An organic yet highly mechanical eye. It reflects Titan's constant vigilance, parsing inputs and drawing connections from all directions."
+                },
+                {
+                    Component: Logo7,
+                    title: "Neural Convergence",
+                    subtitle: "ORGANIC & LOGICAL",
+                    philosophy: "Inspired by the dual-hemisphere brain concept. It merges the organic, emergent intelligence of agents (left) with structured, geometric data networks (right)."
+                }
+            ];
+
+            return (
+                <div className="min-h-screen flex flex-col items-center py-20 px-6">
+
+                    {/* Header */}
+                    <div className="text-center mb-20 max-w-3xl">
+                        <h1 className="text-6xl md:text-7xl font-extralight tracking-wider mb-6">
+                            TITAN
+                        </h1>
+                        <p className="font-mono text-xs opacity-40 uppercase tracking-ultra-wide mb-8">
+                            AGENTIC MEMORY CORE
+                        </p>
+                        <div className="w-12 h-[1px] bg-[#1A1A1A] mx-auto opacity-30"></div>
+                    </div>
+
+                    {/* Logo Grid */}
+                    <div className="max-w-7xl w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-16 mb-32">
+                        {logos.map((logo, index) => (
+                            <div key={index} className="flex flex-col items-center logo-card cursor-pointer">
+
+                                {/* Logo Canvas */}
+                                <div className="w-64 h-64 mb-10 flex items-center justify-center relative">
+                                    <div className="logo-aura"></div>
+                                    <div className="w-32 h-32 relative z-10 logo-canvas">
+                                        <logo.Component />
+                                    </div>
+                                </div>
+
+                                {/* Text Description */}
+                                <div className="text-center w-full px-4">
+                                    <h2 className="text-xl font-medium tracking-wider mb-2 uppercase">
+                                        {logo.title}
+                                    </h2>
+                                    <h3 className="text-xs font-mono opacity-50 tracking-widest mb-6">
+                                        {logo.subtitle}
+                                    </h3>
+                                    <p className="text-sm leading-relaxed opacity-70 text-left font-light text-balance">
+                                        {logo.philosophy}
+                                    </p>
+                                </div>
+
+                                {/* Bottom Divider */}
+                                <div className="divider-line mt-8 mx-auto"></div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="mt-32 max-w-2xl text-center">
+                        <p className="font-mono text-xs opacity-40 uppercase tracking-ultra-wide leading-loose">
+                            Generated with Logo Generator Skill<br/>
+                            2026
+                        </p>
+                    </div>
+
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<LogoShowcase />);
+    </script>
+
+</body>
+</html>

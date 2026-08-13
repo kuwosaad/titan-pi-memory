@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -7,16 +8,40 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .models import Session, Message
+from app.runtime.context import get_runtime_context
 
 
-_BASE_DIR_OVERRIDE = os.getenv("TITAN_BASE_DIR")
-BASE_DIR = Path(_BASE_DIR_OVERRIDE).expanduser().resolve() if _BASE_DIR_OVERRIDE else Path(__file__).resolve().parents[2]
+_RUNTIME_CONTEXT = get_runtime_context()
+BASE_DIR = _RUNTIME_CONTEXT.base_dir
 OUT_DIR = BASE_DIR / "out"
 SESSIONS_DIR = OUT_DIR / "sessions"
 MEMORIES_DIR = OUT_DIR / "memories"
-TRACES_DIR = OUT_DIR / "traces"
+TRACES_DIR = _RUNTIME_CONTEXT.trace_dir
+LEGACY_TRACES_DIR = OUT_DIR / "traces"
 GRAPHS_DIR = OUT_DIR / "graphs"
 _FILE_LOCK = threading.RLock()
+_CONTEXT_BASE_DIR = BASE_DIR
+_CONTEXT_TRACE_DIR = TRACES_DIR
+
+
+def refresh_runtime_paths() -> None:
+    """Refresh storage paths when a host selects a new runtime context."""
+
+    global _RUNTIME_CONTEXT, _CONTEXT_BASE_DIR, _CONTEXT_TRACE_DIR
+    global BASE_DIR, OUT_DIR, SESSIONS_DIR, MEMORIES_DIR, TRACES_DIR, LEGACY_TRACES_DIR, GRAPHS_DIR
+    context = get_runtime_context()
+    if context.base_dir == _CONTEXT_BASE_DIR and context.trace_dir == _CONTEXT_TRACE_DIR:
+        return
+    _RUNTIME_CONTEXT = context
+    _CONTEXT_BASE_DIR = context.base_dir
+    _CONTEXT_TRACE_DIR = context.trace_dir
+    BASE_DIR = context.base_dir
+    OUT_DIR = BASE_DIR / "out"
+    SESSIONS_DIR = OUT_DIR / "sessions"
+    MEMORIES_DIR = OUT_DIR / "memories"
+    TRACES_DIR = context.trace_dir
+    LEGACY_TRACES_DIR = OUT_DIR / "traces"
+    GRAPHS_DIR = OUT_DIR / "graphs"
 
 
 def now_iso() -> str:
@@ -50,15 +75,62 @@ def write_json(path: Path, data: Any) -> None:
 
 
 def session_path(session_id: str) -> Path:
+    refresh_runtime_paths()
     return SESSIONS_DIR / f"{session_id}.json"
 
 
 def ensure_dirs() -> None:
+    refresh_runtime_paths()
+    # ``traces`` imports these paths by value for backwards-compatible patch
+    # points; refresh them after the session context has been refreshed.
+    try:
+        from . import traces
+
+        traces.refresh_trace_paths()
+    except ImportError:
+        # Avoid an import cycle during the initial module load.
+        pass
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     MEMORIES_DIR.mkdir(parents=True, exist_ok=True)
     TRACES_DIR.mkdir(parents=True, exist_ok=True)
+    # Keep the historical repository layout available for older adapters and
+    # readable views even when an explicit spool directory is configured.
+    if LEGACY_TRACES_DIR != TRACES_DIR:
+        LEGACY_TRACES_DIR.mkdir(parents=True, exist_ok=True)
+        _migrate_legacy_trace_files()
     GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _migrate_legacy_trace_files() -> None:
+    """Copy old ``out/traces`` state into the active spool when absent."""
+
+    names = (
+        "trace_packets.json",
+        "events.jsonl",
+        "event_index.json",
+        "checkpoints.json",
+        "retry_queue.jsonl",
+        "spool_cursors.json",
+        "pending_user_messages.json",
+    )
+    for name in names:
+        source = LEGACY_TRACES_DIR / name
+        target = TRACES_DIR / name
+        if source == target or not source.exists() or target.exists():
+            continue
+        temporary = target.with_suffix(f"{target.suffix}.migration.tmp")
+        try:
+            shutil.copyfile(source, temporary)
+            os.replace(temporary, target)
+        except OSError:
+            # A read-only or concurrently removed legacy file can be retried
+            # on the next invocation without taking down the active store.
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
 
 
 def create_session() -> Session:

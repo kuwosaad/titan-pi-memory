@@ -47,7 +47,7 @@ def fetch_health() -> Dict[str, Any]:
     return _get("/health")
 
 
-def fetch_clusters(session_id: Optional[str] = None, limit: int = 1000,
+def fetch_clusters(session_id: Optional[str] = None, limit: int = 0,
                    detail_limit: int = 6) -> Dict[str, Any]:
     return _get("/api/clusters", session_id=session_id, limit=limit, detail_limit=detail_limit)
 
@@ -132,6 +132,7 @@ def build_dashboard(
         from rich.table import Table
         from rich.text import Text
         from rich import box
+
     except ImportError:
         return _build_plain_dashboard(session_id)
 
@@ -339,9 +340,8 @@ def build_dashboard(
     console.print(status_text)
     console.print()
 
-    # Stats + Pipeline + Storage side by side. Use a table instead of Rich Columns:
-    # Columns shrink/wrap the short Pipeline panel, which can leave a visible gap in
-    # its top-right border on some terminals.
+    # Stats + Pipeline + Storage side by side (Table ensures equal column widths —
+    # avoids the gap-on-top-right-corner glitch that Columns causes on narrow panels)
     top_row = Table(show_header=False, box=None, padding=0, expand=True)
     top_row.add_column(ratio=1)
     top_row.add_column(ratio=1)

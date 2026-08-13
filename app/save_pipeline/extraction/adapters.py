@@ -98,11 +98,6 @@ class OpenAIExtractionAdapter(ExtractionAdapter):
         return data["choices"][0]["message"]["content"]
 
 
-class DeepSeekExtractionAdapter(OpenAIExtractionAdapter):
-    def __init__(self, model: str, api_key: str, base_url: str = "https://api.deepseek.com/v1", temperature: float = 0.1) -> None:
-        super().__init__(model=model, api_key=api_key, base_url=base_url, temperature=temperature)
-
-
 class GeminiExtractionAdapter(ExtractionAdapter):
     def __init__(
         self,
@@ -233,6 +228,14 @@ def get_extraction_adapter(config_path: str = "config/extraction_models.yaml") -
             base_url=openai_cfg.get("base_url", "https://api.openai.com/v1"),
             temperature=_read_temperature(openai_cfg),
         )
+    if current == "opencode_go":
+        opencode_cfg = config["opencode_go"]
+        return OpenAIExtractionAdapter(
+            model=opencode_cfg.get("model", "deepseek-v4-flash"),
+            api_key=_resolve_api_key(opencode_cfg, "opencode_go"),
+            base_url=opencode_cfg.get("base_url", "https://opencode.ai/zen/go/v1"),
+            temperature=_read_temperature(opencode_cfg),
+        )
     if current == "gemini":
         gemini_cfg = config["gemini"]
         return GeminiExtractionAdapter(
@@ -243,14 +246,6 @@ def get_extraction_adapter(config_path: str = "config/extraction_models.yaml") -
             request_timeout=float(gemini_cfg.get("request_timeout", 300.0) or 300.0),
             max_retries=int(gemini_cfg.get("max_retries", 3) or 3),
             retry_backoff_seconds=float(gemini_cfg.get("retry_backoff_seconds", 2.0) or 2.0),
-        )
-    if current == "deepseek":
-        deepseek_cfg = config["deepseek"]
-        return DeepSeekExtractionAdapter(
-            model=deepseek_cfg["model"],
-            api_key=_resolve_api_key(deepseek_cfg, "deepseek"),
-            base_url=deepseek_cfg.get("base_url", "https://api.deepseek.com/v1"),
-            temperature=_read_temperature(deepseek_cfg),
         )
     raise ValueError(f"Unsupported extraction backend: {current}")
 
@@ -276,24 +271,19 @@ def get_dedup_adapter(config_path: str = "config/extraction_models.yaml") -> Ext
             max_retries=int(dedup_cfg.get("max_retries", 2) or 2),
             retry_backoff_seconds=float(dedup_cfg.get("retry_backoff_seconds", 1.0) or 1.0),
         )
-    if backend == "openai":
+    if backend in {"openai", "opencode_go"}:
+        default_model = "deepseek-v4-flash" if backend == "opencode_go" else "gpt-4o-mini"
+        default_base_url = "https://opencode.ai/zen/go/v1" if backend == "opencode_go" else "https://api.openai.com/v1"
         return OpenAIExtractionAdapter(
-            model=dedup_cfg.get("model", "gpt-4o-mini"),
+            model=dedup_cfg.get("model", default_model),
             api_key=_resolve_api_key(dedup_cfg, "dedup"),
-            base_url=dedup_cfg.get("base_url", "https://api.openai.com/v1"),
+            base_url=dedup_cfg.get("base_url", default_base_url),
             temperature=_read_temperature(dedup_cfg),
         )
     if backend == "ollama":
         return OllamaExtractionAdapter(
             model=dedup_cfg.get("model", "llama3.1:8b"),
             base_url=dedup_cfg.get("base_url", "http://localhost:11434"),
-            temperature=_read_temperature(dedup_cfg),
-        )
-    if backend == "deepseek":
-        return DeepSeekExtractionAdapter(
-            model=dedup_cfg.get("model", "deepseek-chat"),
-            api_key=_resolve_api_key(dedup_cfg, "dedup"),
-            base_url=dedup_cfg.get("base_url", "https://api.deepseek.com/v1"),
             temperature=_read_temperature(dedup_cfg),
         )
     return get_extraction_adapter(config_path=config_path)
@@ -310,7 +300,6 @@ __all__ = [
     "OllamaExtractionAdapter",
     "OpenRouterExtractionAdapter",
     "OpenAIExtractionAdapter",
-    "DeepSeekExtractionAdapter",
     "GeminiExtractionAdapter",
     "get_extraction_adapter",
     "get_extraction_adapter_with_config",

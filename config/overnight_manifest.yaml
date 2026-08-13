@@ -1,0 +1,114 @@
+# Default overnight manifest for Titan-Karu retrieval benchmarking.
+#
+# This manifest drives the overnight retrieval harness.
+# Override values using CLI flags or copy and edit this file.
+#
+# Key isolation guarantee: TITAN_BASE_DIR is set to ~/.titan-overnight
+# which is completely separate from the live Titan-Karu storage.
+#
+# To run:
+#   python -m entrypoints.overnight.runner --manifest config/overnight_manifest.yaml
+#   # or
+#   ./entrypoints/overnight/scripts/run_overnight.sh --manifest config/overnight_manifest.yaml
+
+---
+version: "1"
+
+# --- Isolation ---
+# All overnight runs use a completely separate TITAN_BASE_DIR.
+# This ensures no production data is ever touched.
+isolation:
+  base_dir: ~/.titan-overnight
+  label: "overnight-v1"
+  no_production_writes: true   # always enforced
+
+# --- Runtime bounds ---
+# These prevent runaway overnight runs.
+runtime:
+  max_hours: 3.0               # hard stop after this many hours
+  max_queries: 50              # hard cap on total queries
+  warmup_queries: 3             # run a few warmup queries first
+  query_timeout_seconds: 30.0  # per-query timeout
+
+# --- Pre-flight health checks ---
+health:
+  min_memories: 5               # abort if fewer memories than this
+  max_age_days: 30              # warn if no memories in last N days
+  required_backends: []         # backends that must be available
+  check_extraction: true
+  check_embedding: true
+
+# --- Artifact output ---
+artifacts:
+  output_dir: ~/.titan-overnight/artifacts
+  log_level: INFO               # DEBUG, INFO, WARNING, ERROR
+
+# --- Benchmark definitions ---
+# These queries are run in order. Each query is scored against gold answers.
+# Metrics: recall_at_k, gold_in_pool_rate, theme_hit_rate
+benchmarks:
+  - id: "learnings_recall_probe"
+    description: "Probe retrieval recall for learnings stream — cross-session durable memories"
+    metrics:
+      - recall_at_k
+      - gold_in_pool_rate
+      - theme_hit_rate
+    queries:
+      # Generic probe queries that test cross-session recall
+      # These have no gold_session_ids so only measure theme_hit_rate and elapsed time
+      - q: "what decisions were made about error handling"
+        mode: "learnings"
+        top_k: 12
+        gold_session_ids: []
+        expected_themes: ["error", "decision"]
+      - q: "what did we decide about the project structure"
+        mode: "learnings"
+        top_k: 12
+        gold_session_ids: []
+        expected_themes: ["project", "structure", "decision"]
+      - q: "what conventions should I follow for python code"
+        mode: "learnings"
+        top_k: 10
+        gold_session_ids: []
+        expected_themes: ["python", "convention", "code"]
+      - q: "what preferences did kuwo mention"
+        mode: "learnings"
+        top_k: 8
+        gold_session_ids: []
+        expected_themes: ["kuwo", "preference"]
+
+  - id: "rough_recall_probe"
+    description: "Probe retrieval recall for rough stream — recent event context"
+    metrics:
+      - recall_at_k
+      - gold_in_pool_rate
+      - theme_hit_rate
+    queries:
+      - q: "what was the last file we worked on"
+        mode: "rough"
+        top_k: 8
+        gold_session_ids: []
+        expected_themes: ["file"]
+      - q: "what tool was used most recently"
+        mode: "rough"
+        top_k: 8
+        gold_session_ids: []
+        expected_themes: ["tool"]
+
+  - id: "both_stream_recall"
+    description: "Recall test across both streams"
+    metrics:
+      - recall_at_k
+      - gold_in_pool_rate
+      - theme_hit_rate
+    queries:
+      - q: "what happened in the previous session"
+        mode: "both"
+        top_k: 12
+        gold_session_ids: []
+        expected_themes: []
+      - q: "tell me about the context of this project"
+        mode: "both"
+        top_k: 12
+        gold_session_ids: []
+        expected_themes: ["project", "context"]

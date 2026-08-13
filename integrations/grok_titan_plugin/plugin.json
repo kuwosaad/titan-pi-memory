@@ -1,0 +1,11 @@
+{
+  "name": "titan-memory",
+  "displayName": "Titan Memory",
+  "version": "0.1.0",
+  "description": "Persistent evolutionary memory for Grok. Passive capture, semantic recall, scene recovery, and graph tools via Titan.",
+  "author": { "name": "Titan" },
+  "homepage": "https://github.com/kuwosaad/titan-karu",
+  "repository": "https://github.com/kuwosaad/titan-karu",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "mcp", "grok", "coding-agent", "titan"]
+}

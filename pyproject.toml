@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "titan-memory-cli"
+version = "0.1.0"
+description = "Titan Memory CLI and local-first memory runtime for coding agents"
+readme = "docs/pypi_titan_memory_cli.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["memory", "codex", "mcp", "agent", "recall"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "requests",
+  "pyyaml",
+  "numpy",
+  "networkx",
+  "pydantic",
+  "mcp",
+]
+
+[project.scripts]
+titan = "tools.cli.titan:main"
+
+[project.urls]
+Homepage = "https://github.com/kuwosaad/titan-karu"
+Repository = "https://github.com/kuwosaad/titan-karu"
+"Codex Plugin" = "https://github.com/kuwosaad/titan-memory-codex"
+Issues = "https://github.com/kuwosaad/titan-karu/issues"
+
+[tool.setuptools.packages.find]
+include = ["app*", "tools*", "entrypoints*", "config*", "integrations*"]
+
+[tool.setuptools.package-data]
+config = ["*.yaml"]
+"integrations.codex_titan_plugin" = [
+  "README.md",
+  "PRIVACY.md",
+  "TERMS.md",
+  ".mcp.json",
+  ".agents/plugins/*.json",
+  ".codex-plugin/*.json",
+  "assets/*.png",
+  "hooks/*.json",
+  "scripts/*.py",
+  "skills/*/SKILL.md",
+]

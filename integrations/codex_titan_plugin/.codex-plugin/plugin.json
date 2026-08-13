@@ -1,0 +1,40 @@
+{
+  "name": "titan-memory",
+  "version": "0.1.0",
+  "description": "Persistent memory, recall, and passive trace capture for Codex.",
+  "author": {
+    "name": "Titan Memory",
+    "url": "https://github.com/kuwosaad/titan"
+  },
+  "homepage": "https://github.com/kuwosaad/titan-memory-codex",
+  "repository": "https://github.com/kuwosaad/titan-memory-codex",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "codex", "mcp", "agent", "recall"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Titan Memory",
+    "shortDescription": "Durable memory and recall for Codex.",
+    "longDescription": "Give Codex persistent project memory, prior-decision recall, scene recovery, graph inspection, pattern workflows, and passive session capture.",
+    "developerName": "Titan Memory",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/kuwosaad/titan-memory-codex",
+    "privacyPolicyURL": "https://github.com/kuwosaad/titan-memory-codex/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/kuwosaad/titan-memory-codex/blob/main/TERMS.md",
+    "defaultPrompt": [
+      "Use Titan Memory to recover prior decisions about this project.",
+      "Use Titan Memory to remember the outcome of this work.",
+      "Check Titan health and memory context before making risky changes."
+    ],
+    "brandColor": "#d4687a",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "screenshots": [
+      "./assets/screenshot-recall.png",
+      "./assets/screenshot-graph.png",
+      "./assets/screenshot-patterns.png"
+    ]
+  }
+}

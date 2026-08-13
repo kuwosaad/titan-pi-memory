@@ -10,15 +10,33 @@ from typing import Any, Dict, List, Optional, Protocol
 
 from .models import Scene
 from .sessions import BASE_DIR, MEMORIES_DIR, read_json, write_json
+from . import sessions as _sessions
+from .sqlite import connect_sqlite
 from .sqlite_schema import ensure_memory_store_metadata, ensure_scene_readable_views
 
 
 LOGGER = logging.getLogger(__name__)
 SCENES_FILE = MEMORIES_DIR / "scenes.json"
 DEFAULT_SQLITE_FILE = MEMORIES_DIR / "memory_store.db"
+_SCENE_ROOT = MEMORIES_DIR
 _SCENES_LOCK = threading.RLock()
 _REPO_CACHE: Optional["SceneRepository"] = None
 _REPO_CACHE_KEY: Optional[tuple[str, str]] = None
+
+
+def _refresh_json_paths() -> None:
+    """Keep JSON scene compatibility storage aligned with runtime context."""
+
+    global SCENES_FILE, DEFAULT_SQLITE_FILE, _SCENE_ROOT
+    _sessions.refresh_runtime_paths()
+    current_root = _sessions.MEMORIES_DIR
+    if current_root == _SCENE_ROOT:
+        return
+    if SCENES_FILE == _SCENE_ROOT / "scenes.json":
+        SCENES_FILE = current_root / "scenes.json"
+    if DEFAULT_SQLITE_FILE == _SCENE_ROOT / "memory_store.db":
+        DEFAULT_SQLITE_FILE = current_root / "memory_store.db"
+    _SCENE_ROOT = current_root
 
 
 def now_iso() -> str:
@@ -26,30 +44,18 @@ def now_iso() -> str:
 
 
 def _resolve_sqlite_path() -> Path:
-    from app.retrieval_pipeline.config import load_settings
-
-    settings = load_settings()
-    configured = str(settings.get("memory_store_sqlite_path") or "").strip()
-    if not configured:
-        return DEFAULT_SQLITE_FILE
-    path = Path(configured).expanduser()
-    if not path.is_absolute():
-        path = BASE_DIR / path
-    return path
+    from app.runtime.context import get_runtime_context
+    return get_runtime_context().memory_db_path
 
 
 def _resolve_backend() -> str:
-    from app.retrieval_pipeline.config import load_settings
-
-    settings = load_settings()
-    return str(settings.get("memory_store_backend", "sqlite")).strip().lower() or "sqlite"
+    from app.runtime.context import get_runtime_context
+    return get_runtime_context().memory_backend
 
 
 def _resolve_read_fallback() -> str:
-    from app.retrieval_pipeline.config import load_settings
-
-    settings = load_settings()
-    return str(settings.get("memory_store_read_fallback", "json")).strip().lower() or "json"
+    from app.runtime.context import get_runtime_context
+    return get_runtime_context().read_fallback
 
 
 def _normalize_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
@@ -192,9 +198,7 @@ class SqliteSceneRepository:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return connect_sqlite(self.db_path)
 
     def _init_schema(self) -> None:
         ddl = """
@@ -361,6 +365,7 @@ class SqliteSceneRepository:
 def get_scene_repository() -> SceneRepository:
     global _REPO_CACHE, _REPO_CACHE_KEY
 
+    _refresh_json_paths()
     backend = _resolve_backend()
     sqlite_path = _resolve_sqlite_path()
     cache_key = (backend, str(sqlite_path))
