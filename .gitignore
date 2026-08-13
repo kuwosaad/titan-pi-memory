@@ -27,3 +27,4 @@ node_modules/
 # Generated output
 out/
 *.log
+.gstack/

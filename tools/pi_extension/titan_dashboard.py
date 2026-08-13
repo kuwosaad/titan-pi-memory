@@ -131,9 +131,7 @@ def build_dashboard(
         from rich.panel import Panel
         from rich.table import Table
         from rich.text import Text
-        from rich.layout import Layout
         from rich import box
-        from rich.columns import Columns
     except ImportError:
         return _build_plain_dashboard(session_id)
 
@@ -341,8 +339,15 @@ def build_dashboard(
     console.print(status_text)
     console.print()
 
-    # Stats + Pipeline side by side
-    console.print(Columns([stats_panel, panel("⚙️ Pipeline", pipeline_text, border_style="yellow"), storage_panel]))
+    # Stats + Pipeline + Storage side by side. Use a table instead of Rich Columns:
+    # Columns shrink/wrap the short Pipeline panel, which can leave a visible gap in
+    # its top-right border on some terminals.
+    top_row = Table(show_header=False, box=None, padding=0, expand=True)
+    top_row.add_column(ratio=1)
+    top_row.add_column(ratio=1)
+    top_row.add_column(ratio=1)
+    top_row.add_row(stats_panel, panel("Pipeline", pipeline_text, border_style="yellow"), storage_panel)
+    console.print(top_row)
     console.print()
 
     # Clusters full width
