@@ -58,6 +58,7 @@ class CorpusAnalysis:
     vectors: np.ndarray
     revision: str
     block_size: int = 256
+    source_memories: Tuple[Dict[str, Any], ...] = ()
 
     @classmethod
     def from_memories(
@@ -100,6 +101,7 @@ class CorpusAnalysis:
             vectors=matrix,
             revision=revision or content_revision(normalized_memories),
             block_size=max(16, int(block_size or 256)),
+            source_memories=normalized_memories,
         )
 
     @classmethod
@@ -134,6 +136,7 @@ class CorpusAnalysis:
             vectors=self.vectors[list(selected)].copy() if selected else np.empty((0, self.vectors.shape[1]), dtype=np.float32),
             revision=self.revision,
             block_size=self.block_size,
+            source_memories=tuple(self.memories[index] for index in selected),
         )
 
     def top_k_edges(

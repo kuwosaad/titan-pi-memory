@@ -54,10 +54,13 @@ def redact_text(value: object) -> str:
 def build_runtime_env(agent: str, base_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(base_env or os.environ)
     safe_agent = agent.strip() or DEFAULT_AGENT
-    default_home = Path.home() / ".titan" / "agents" / safe_agent
+    default_home = Path(
+        env.get("GROK_TITAN_HOME")
+        or (Path.home() / ".titan" / "agents" / safe_agent)
+    ).expanduser()
     env["TITAN_AGENT_NAME"] = safe_agent
-    env.setdefault("TITAN_HOME", str(default_home))
-    env.setdefault("TITAN_BASE_DIR", env["TITAN_HOME"])
+    env["TITAN_HOME"] = str(default_home)
+    env["TITAN_BASE_DIR"] = str(default_home)
     return env
 
 
@@ -200,7 +203,7 @@ def run(
     exec_fn: Callable[[str, Sequence[str], Mapping[str, str]], None] = os.execvpe,
 ) -> int:
     parser = argparse.ArgumentParser(description="Launch Titan MCP for Grok over stdio.")
-    parser.add_argument("--agent", default=(base_env or os.environ).get("TITAN_AGENT_NAME", DEFAULT_AGENT))
+    parser.add_argument("--agent", default=DEFAULT_AGENT)
     parser.add_argument(
         "--no-package-fallback",
         action="store_true",

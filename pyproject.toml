@@ -8,8 +8,7 @@ version = "0.1.0"
 description = "Titan Memory CLI and local-first memory runtime for coding agents"
 readme = "docs/pypi_titan_memory_cli.md"
 requires-python = ">=3.10"
-license = "Apache-2.0"
-license-files = ["LICENSE"]
+license = { file = "LICENSE" }
 keywords = ["memory", "codex", "mcp", "agent", "recall"]
 classifiers = [
   "Development Status :: 3 - Alpha",

@@ -1,9 +1,11 @@
+import errno
 import importlib
 import json
 import multiprocessing
 import os
 import queue
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -55,7 +57,112 @@ def _set_pending_from_process(path: str, session_id: str, barrier, errors) -> No
         errors.put(f"{type(exc).__name__}: {exc}")
 
 
+def _record_locked_section(lock_path: str, events_path: str, ready) -> None:
+    """Record a critical section from an independently spawned process."""
+
+    import app.storage.sessions as sessions_module
+
+    ready.wait(timeout=20)
+    with sessions_module.interprocess_lock(Path(lock_path)):
+        with open(events_path, "a", encoding="utf-8") as handle:
+            handle.write("enter\n")
+            handle.flush()
+        time.sleep(0.1)
+        with open(events_path, "a", encoding="utf-8") as handle:
+            handle.write("exit\n")
+            handle.flush()
+
+
 class StorageDirTests(unittest.TestCase):
+    def test_interprocess_lock_serializes_spawned_processes_on_all_platforms(self):
+        context = multiprocessing.get_context("spawn")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            lock_path = Path(tmp_dir) / "ingest.lock"
+            events_path = Path(tmp_dir) / "events.log"
+            ready = context.Event()
+            processes = [
+                context.Process(target=_record_locked_section, args=(str(lock_path), str(events_path), ready)),
+                context.Process(target=_record_locked_section, args=(str(lock_path), str(events_path), ready)),
+            ]
+            for process in processes:
+                process.start()
+            ready.set()
+            for process in processes:
+                process.join(timeout=20)
+
+            self.assertTrue(all(not process.is_alive() for process in processes))
+            self.assertEqual([process.exitcode for process in processes], [0, 0])
+            self.assertEqual(events_path.read_text(encoding="utf-8").splitlines(), [
+                "enter", "exit", "enter", "exit",
+            ])
+
+    def test_interprocess_lock_uses_windows_file_lock_when_fcntl_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            import app.storage.sessions as sessions_module
+
+            calls = []
+
+            class FakeMsvcrt:
+                LK_NBLCK = 2
+                LK_UNLCK = 0
+
+                @staticmethod
+                def locking(fd, mode, size):
+                    calls.append((fd, mode, size))
+
+            lock_path = Path(tmp_dir) / "nested" / "ingest.lock"
+            with patch.object(sessions_module, "fcntl", None), patch.object(sessions_module, "msvcrt", FakeMsvcrt):
+                with sessions_module.interprocess_lock(lock_path):
+                    self.assertTrue(lock_path.exists())
+
+            self.assertEqual([mode for _fd, mode, _size in calls], [FakeMsvcrt.LK_NBLCK, FakeMsvcrt.LK_UNLCK])
+
+    def test_windows_lock_propagates_non_contention_errors(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            import app.storage.sessions as sessions_module
+
+            class FakeMsvcrt:
+                LK_NBLCK = 2
+                LK_UNLCK = 0
+
+                @staticmethod
+                def locking(_fd, _mode, _size):
+                    raise OSError(22, "invalid argument")
+
+            lock_path = Path(tmp_dir) / "ingest.lock"
+            with patch.object(sessions_module, "fcntl", None), patch.object(sessions_module, "msvcrt", FakeMsvcrt):
+                with self.assertRaises(OSError):
+                    with sessions_module.interprocess_lock(lock_path):
+                        pass
+
+    def test_windows_lock_retries_contention_errors(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            import app.storage.sessions as sessions_module
+
+            calls = []
+
+            class FakeMsvcrt:
+                LK_NBLCK = 2
+                LK_UNLCK = 0
+
+                @staticmethod
+                def locking(_fd, mode, _size):
+                    calls.append(mode)
+                    if len(calls) == 1:
+                        busy = OSError(errno.EINVAL, "lock is busy")
+                        busy.winerror = 33
+                        raise busy
+
+            lock_path = Path(tmp_dir) / "ingest.lock"
+            with patch.object(sessions_module, "fcntl", None), patch.object(sessions_module, "msvcrt", FakeMsvcrt), patch.object(
+                sessions_module.time, "sleep"
+            ) as sleep_mock:
+                with sessions_module.interprocess_lock(lock_path):
+                    pass
+
+            self.assertEqual(calls, [FakeMsvcrt.LK_NBLCK, FakeMsvcrt.LK_NBLCK, FakeMsvcrt.LK_UNLCK])
+            sleep_mock.assert_called_once_with(0.05)
+
     def test_ensure_dirs_creates_missing_parents(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             base_dir = Path(tmp_dir) / "missing" / "titan-home"

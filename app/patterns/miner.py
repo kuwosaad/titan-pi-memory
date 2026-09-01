@@ -4,6 +4,7 @@ import math
 import re
 import sqlite3
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -91,8 +92,20 @@ def build_evidence_packet(
         ordered_unprocessed = [mem for mem in ordered_unprocessed if mem.get("session_id") == session_id]
 
     all_memories = repo.load_all_memories()
+    if snapshot_cutoff:
+        cutoff = _parse_rfc3339(snapshot_cutoff)
+        if cutoff is not None:
+            all_memories = [
+                mem
+                for mem in all_memories
+                if (memory_ts := _parse_rfc3339(mem.get("ts"))) is not None and memory_ts <= cutoff
+            ]
     if session_id:
         all_memories = [mem for mem in all_memories if mem.get("session_id") == session_id]
+    allowed_memory_ids = {str(mem.get("id")) for mem in all_memories if mem.get("id")}
+    ordered_unprocessed = [
+        mem for mem in ordered_unprocessed if str(mem.get("id")) in allowed_memory_ids
+    ]
     # Build one immutable evidence snapshot for this planning pass. Cluster
     # inspection and Cortex analysis can reuse its normalized vectors and
     # content revision instead of rebuilding the graph independently.
@@ -109,6 +122,7 @@ def build_evidence_packet(
                     session_id=session_id,
                     limit=0,
                     detail_limit=25,
+                    corpus=corpus,
                 )
         plans = PatternMiningPlanner(
             unprocessed_memories=ordered_unprocessed,
@@ -167,7 +181,12 @@ def build_evidence_packet(
         to_ts=to_ts,
         snapshot_cutoff=snapshot_cutoff,
         unprocessed_total=unprocessed_total,
-        pattern_context=[],
+        pattern_context=_pattern_context(
+            resolved_db_path,
+            packet_memories=[*batch_memories, *[item[0] for item in related_context]],
+            packet_type=plan.packet_type,
+            snapshot_cutoff=snapshot_cutoff,
+        ),
     )
 
 
@@ -197,6 +216,7 @@ def build_packet_from_plan(
         pattern_db_path,
         packet_memories=[*batch_memories, *context_memories],
         packet_type=plan.packet_type,
+        snapshot_cutoff=snapshot_cutoff,
     )
     return _build_packet_payload(
         plan=plan,
@@ -316,13 +336,33 @@ def _build_packet_payload(
     }
 
 
-def _timeline_key(memory: Dict[str, Any]) -> tuple[str, int, str]:
+def _timeline_key(memory: Dict[str, Any]) -> tuple[int, datetime, int, str]:
+    timestamp = _parse_rfc3339(memory.get("ts"))
     turn = memory.get("turn")
     try:
         turn_value = int(turn)
     except (TypeError, ValueError):
         turn_value = 0
-    return (str(memory.get("ts") or ""), turn_value, str(memory.get("id") or ""))
+    return (
+        0 if timestamp is None else 1,
+        timestamp or datetime.min.replace(tzinfo=timezone.utc),
+        turn_value,
+        str(memory.get("id") or ""),
+    )
+
+
+def _parse_rfc3339(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        # Legacy memory rows may contain a timezone-naive ISO timestamp;
+        # storage has historically treated those values as UTC.
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _bridge_cluster_ids(
@@ -373,6 +413,7 @@ def _pattern_context(
     packet_memories: Sequence[Dict[str, Any]],
     packet_type: str,
     limit: int = 8,
+    snapshot_cutoff: Optional[str] = None,
 ) -> list[Dict[str, Any]]:
     if not db_path or not packet_memories:
         return []
@@ -383,9 +424,21 @@ def _pattern_context(
 
     try:
         store = PatternStore(db_path)
-        patterns = [*store.list_patterns(status="accepted", limit=100), *store.list_patterns(status="candidate", limit=100)]
+        pattern_query = {"created_before": snapshot_cutoff} if snapshot_cutoff else {}
+        patterns = [
+            *store.list_patterns(status="accepted", limit=100, **pattern_query),
+            *store.list_patterns(status="candidate", limit=100, **pattern_query),
+        ]
     except (OSError, sqlite3.Error, PatternValidationError):
         return []
+
+    cutoff = _parse_rfc3339(snapshot_cutoff) if snapshot_cutoff else None
+    if cutoff is not None:
+        patterns = [
+            pattern
+            for pattern in patterns
+            if (created_at := _parse_rfc3339(pattern.created_at)) is not None and created_at <= cutoff
+        ]
 
     scored: list[tuple[float, Dict[str, Any]]] = []
     for pattern in patterns:
@@ -522,7 +575,7 @@ def _related_context(
         if score <= 0.05:
             continue
         scored.append((old, score))
-    scored.sort(key=lambda item: (-item[1], str(item[0].get("ts") or ""), str(item[0].get("id") or "")))
+    scored.sort(key=lambda item: (-item[1], *_timeline_key(item[0])))
     return scored[:limit]
 
 

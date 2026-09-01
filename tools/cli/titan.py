@@ -7,6 +7,7 @@ import getpass
 import importlib.util
 import json
 import os
+import queue
 import re
 import shutil
 import socket
@@ -14,6 +15,7 @@ import subprocess
 import sqlite3
 import sys
 import selectors
+import threading
 import time
 import webbrowser
 from pathlib import Path
@@ -1833,6 +1835,8 @@ def codex_mcp_stdio_handshake(
         return False, [], "Codex MCP server cwd must stay inside the plugin root"
     process = None
     selector = selectors.DefaultSelector()
+    response_queue = None
+    reader_thread = None
     try:
         process = popen_fn(
             command,
@@ -1851,7 +1855,35 @@ def codex_mcp_stdio_handshake(
         except (OSError, ValueError):
             selector = None
 
+        def start_stdout_reader() -> None:
+            nonlocal response_queue, reader_thread
+            if response_queue is not None:
+                return
+            # Windows pipes cannot be registered with ``select``. A dedicated
+            # daemon reader keeps the blocking pipe operation away from the
+            # handshake thread, so the configured timeout remains effective.
+            response_queue = queue.Queue()
+
+            def read_stdout() -> None:
+                try:
+                    while True:
+                        line = process.stdout.readline()
+                        if not line:
+                            break
+                        response_queue.put(("line", line))
+                except Exception as exc:  # pragma: no cover - pipe failures are platform-specific
+                    response_queue.put(("error", exc))
+                finally:
+                    response_queue.put(("eof", None))
+
+            reader_thread = threading.Thread(target=read_stdout, name="titan-codex-mcp-reader", daemon=True)
+            reader_thread.start()
+
+        if selector is None:
+            start_stdout_reader()
+
         def request(payload: dict, expected_id: int | None) -> dict:
+            nonlocal selector
             process.stdin.write(json.dumps(payload) + "\n")
             process.stdin.flush()
             deadline = time.monotonic() + timeout_sec
@@ -1859,9 +1891,36 @@ def codex_mcp_stdio_handshake(
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError("timed out waiting for Codex MCP response")
-                if selector is not None and not selector.select(remaining):
-                    raise TimeoutError("timed out waiting for Codex MCP response")
-                line = process.stdout.readline()
+                if selector is not None:
+                    try:
+                        ready = selector.select(remaining)
+                    except (OSError, ValueError):
+                        # Some Windows selector implementations accept a pipe
+                        # during registration but fail once select() runs.
+                        # Switch to the queue reader without restarting the
+                        # deadline or consuming the child's output.
+                        failed_selector = selector
+                        selector = None
+                        try:
+                            failed_selector.close()
+                        except Exception:
+                            pass
+                        start_stdout_reader()
+                        continue
+                    if not ready:
+                        raise TimeoutError("timed out waiting for Codex MCP response")
+                if selector is None:
+                    try:
+                        kind, payload = response_queue.get(timeout=remaining)
+                    except queue.Empty as exc:
+                        raise TimeoutError("timed out waiting for Codex MCP response") from exc
+                    if kind == "error":
+                        raise payload
+                    if kind == "eof":
+                        raise RuntimeError("Codex MCP launcher exited before responding")
+                    line = payload
+                else:
+                    line = process.stdout.readline()
                 if not line:
                     raise RuntimeError("Codex MCP launcher exited before responding")
                 try:
@@ -1902,10 +1961,27 @@ def codex_mcp_stdio_handshake(
         if process is not None:
             try:
                 process.terminate()
+            except Exception:
+                pass
+            try:
                 process.wait(timeout=2)
             except Exception:
                 try:
                     process.kill()
+                except Exception:
+                    pass
+                try:
+                    process.wait(timeout=2)
+                except Exception:
+                    pass
+        if reader_thread is not None:
+            reader_thread.join(timeout=2)
+        for stream_name in ("stdin", "stdout", "stderr"):
+            stream = getattr(process, stream_name, None) if process is not None else None
+            close = getattr(stream, "close", None)
+            if callable(close):
+                try:
+                    close()
                 except Exception:
                     pass
 

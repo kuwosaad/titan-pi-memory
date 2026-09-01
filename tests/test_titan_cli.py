@@ -1,8 +1,11 @@
-import tempfile
-import unittest
-import os
-import json
 import io
+import json
+import os
+import sys
+import tempfile
+import threading
+import time
+import unittest
 import yaml
 from pathlib import Path
 from types import SimpleNamespace
@@ -48,6 +51,122 @@ from tools.cli.titan import (
 
 
 class TitanCliTests(unittest.TestCase):
+    def test_codex_mcp_handshake_falls_back_when_selector_fails_after_registration(self):
+        class ExplodingSelector:
+            def register(self, _stream, _events):
+                return None
+
+            def select(self, _timeout):
+                raise OSError("anonymous pipes are not selectable")
+
+            def close(self):
+                return None
+
+        class FakeProcess:
+            def __init__(self):
+                self.stdin = io.StringIO()
+                self.stdout = io.StringIO(
+                    '{"jsonrpc":"2.0","id":1,"result":{}}\n'
+                    '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"doctor"}]}}\n'
+                )
+                self.stderr = io.StringIO()
+
+            def terminate(self):
+                return None
+
+            def wait(self, timeout=None):
+                return 0
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_root = Path(tmp_dir) / "plugin"
+            plugin_root.mkdir()
+            (plugin_root / ".mcp.json").write_text(
+                json.dumps({"mcpServers": {"titan-memory": {
+                    "command": "python3",
+                    "args": ["./scripts/titan_mcp_launcher.py"],
+                    "cwd": ".",
+                }}}),
+                encoding="utf-8",
+            )
+            with patch("tools.cli.titan.selectors.DefaultSelector", ExplodingSelector):
+                ok, tools, detail = codex_mcp_stdio_handshake(
+                    plugin_root=plugin_root,
+                    timeout_sec=1,
+                    popen_fn=lambda *_args, **_kwargs: FakeProcess(),
+                )
+
+        self.assertTrue(ok, detail)
+        self.assertEqual(tools, ["doctor"])
+
+    def test_codex_mcp_handshake_times_out_with_real_silent_child(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_root = Path(tmp_dir) / "plugin"
+            plugin_root.mkdir()
+            (plugin_root / ".mcp.json").write_text(
+                json.dumps({"mcpServers": {"titan-memory": {
+                    "command": sys.executable,
+                    "args": ["-c", "import time; time.sleep(30)"],
+                    "cwd": ".",
+                }}}),
+                encoding="utf-8",
+            )
+            started = time.monotonic()
+            ok, tools, detail = codex_mcp_stdio_handshake(
+                plugin_root=plugin_root,
+                timeout_sec=0.1,
+            )
+            elapsed = time.monotonic() - started
+
+        self.assertFalse(ok)
+        self.assertEqual(tools, [])
+        self.assertIn("timed out", detail)
+        self.assertLess(elapsed, 5.0)
+
+    def test_codex_mcp_handshake_timeout_survives_unselectable_stdout(self):
+        class BlockingStdout:
+            def __init__(self):
+                self.release = threading.Event()
+
+            def readline(self):
+                self.release.wait()
+                return ""
+
+        class FakeProcess:
+            def __init__(self):
+                self.stdin = io.StringIO()
+                self.stdout = BlockingStdout()
+                self.stderr = io.StringIO()
+
+            def terminate(self):
+                self.stdout.release.set()
+
+            def wait(self, timeout=None):
+                return 0
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_root = Path(tmp_dir) / "plugin"
+            plugin_root.mkdir()
+            (plugin_root / ".mcp.json").write_text(
+                json.dumps({"mcpServers": {"titan-memory": {
+                    "command": "python3",
+                    "args": ["./scripts/titan_mcp_launcher.py"],
+                    "cwd": ".",
+                }}}),
+                encoding="utf-8",
+            )
+            started = time.monotonic()
+            ok, tools, detail = codex_mcp_stdio_handshake(
+                plugin_root=plugin_root,
+                timeout_sec=0.05,
+                popen_fn=lambda *_args, **_kwargs: FakeProcess(),
+            )
+            elapsed = time.monotonic() - started
+
+        self.assertFalse(ok)
+        self.assertEqual(tools, [])
+        self.assertIn("timed out", detail)
+        self.assertLess(elapsed, 1.0)
+
     def test_codex_effective_mcp_transport_parses_codex_json_contract(self):
         completed = SimpleNamespace(
             returncode=0,

@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from app.patterns.miner import build_evidence_packet
 from app.patterns.models import Pattern, PatternEvidence
@@ -430,6 +430,206 @@ class PatternMinerTests(unittest.TestCase):
             self.assertEqual(packet["unprocessed_memory_ids"], ["new1:1:0"])
             self.assertIn("old1:1:0", packet["related_old_memory_ids"])
 
+    def test_snapshot_cutoff_bounds_all_packet_evidence_not_only_seeds(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            records = _records()
+            future_record = {
+                **records[3],
+                "id": "future-related:1:0",
+                "text": "Use webhook entitlement checks before editing billing state in the future.",
+                "ts": "2026-06-06T00:00:00+00:00",
+                "session_id": "future-related",
+                "scene_id": "scene-future-related",
+            }
+
+            def build_packet(db_file: Path) -> dict:
+                return build_evidence_packet(
+                    processor_version=PROCESSOR_VERSION,
+                    processor_config_hash=CONFIG_HASH,
+                    db_path=db_file,
+                    batch_size=1,
+                    context_limit=20,
+                    from_ts="2026-06-04T00:00:00+00:00",
+                    to_ts="2026-06-04T23:59:59+00:00",
+                    snapshot_cutoff="2026-06-04T23:59:59+00:00",
+                    mode="adaptive",
+                )
+
+            baseline_db = Path(tmp_dir) / "baseline.db"
+            SqliteMemoryRepository(baseline_db).append_memories(records)
+            baseline = build_packet(baseline_db)
+
+            bounded_db = Path(tmp_dir) / "bounded.db"
+            records_with_future = [*records, future_record]
+            SqliteMemoryRepository(bounded_db).append_memories(records_with_future)
+            packet = build_packet(bounded_db)
+
+            self.assertEqual(packet, baseline)
+            self.assertEqual(packet["unprocessed_memory_ids"], ["new1:1:0"])
+
+            evidence_ids = {
+                item["id"]
+                for section in packet["memories"].values()
+                for item in section
+            }
+            evidence_ids.update(item["id"] for item in packet["temporal_context"])
+            self.assertNotIn("future-related:1:0", evidence_ids)
+            self.assertNotIn("future-related:1:0", packet["related_old_memory_ids"])
+
+    def test_packet_temporal_context_orders_offset_timestamps_by_instant(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            template = _records()[0]
+            records = []
+            records.extend(
+                [
+                    {
+                        **template,
+                        "id": "context-earlier:1:0",
+                        "text": template["text"],
+                        "ts": "2026-06-01T01:00:00+05:30",
+                        "session_id": "context-earlier",
+                        "scene_id": "scene-context-earlier",
+                    },
+                    {
+                        **template,
+                        "id": "context-later:1:0",
+                        "text": template["text"],
+                        "ts": "2026-06-01T00:00:00+00:00",
+                        "session_id": "context-later",
+                        "scene_id": "scene-context-later",
+                    },
+                    {
+                        **template,
+                        "id": "context-seed:1:0",
+                        "text": template["text"],
+                        "ts": "2026-06-02T00:00:00+00:00",
+                        "session_id": "context-seed",
+                        "scene_id": "scene-context-seed",
+                    },
+                ]
+            )
+            SqliteMemoryRepository(sqlite_file).append_memories(records)
+
+            packet = build_evidence_packet(
+                processor_version=PROCESSOR_VERSION,
+                processor_config_hash=CONFIG_HASH,
+                db_path=sqlite_file,
+                batch_size=1,
+                context_limit=2,
+                from_ts="2026-06-02T00:00:00+00:00",
+                to_ts="2026-06-02T23:59:59+00:00",
+                mode="chronological",
+            )
+
+            self.assertEqual(packet["unprocessed_memory_ids"], ["context-seed:1:0"])
+            self.assertEqual(packet["related_old_memory_ids"], ["context-earlier:1:0", "context-later:1:0"])
+            self.assertEqual(
+                [item["id"] for item in packet["temporal_context"]],
+                ["context-earlier:1:0", "context-later:1:0", "context-seed:1:0"],
+            )
+
+    def test_snapshot_cutoff_excludes_patterns_created_after_cutoff(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_contradiction_records())
+            PatternStore(sqlite_file).create_pattern(
+                Pattern(
+                    id="pattern:old",
+                    title="Add package validation before release",
+                    kind="workflow",
+                    scope="repo",
+                    status="accepted",
+                    summary="Package tooling releases should add validation before shipping.",
+                    recommended_behavior="Add package tooling validation before release.",
+                    trigger_terms=["package", "tooling", "validation", "release"],
+                    confidence=0.8,
+                    created_at="2026-06-01T00:00:00+00:00",
+                    updated_at="2026-06-01T00:00:00+00:00",
+                ),
+                [PatternEvidence(pattern_id="pattern:old", memory_id="tension-old:1:0", role="support", score=0.9)],
+            )
+            PatternStore(sqlite_file).create_pattern(
+                Pattern(
+                    id="pattern:future",
+                    title="Remove package validation after release",
+                    kind="workflow",
+                    scope="repo",
+                    status="accepted",
+                    summary="Package tooling releases should remove validation after shipping.",
+                    recommended_behavior="Remove package tooling validation after release.",
+                    trigger_terms=["package", "tooling", "validation", "release"],
+                    confidence=0.9,
+                    created_at="2026-06-03T00:00:00+00:00",
+                    updated_at="2026-06-03T00:00:00+00:00",
+                ),
+                [PatternEvidence(pattern_id="pattern:future", memory_id="tension-new:1:0", role="support", score=0.9)],
+            )
+
+            packet = build_evidence_packet(
+                processor_version=PROCESSOR_VERSION,
+                processor_config_hash=CONFIG_HASH,
+                db_path=sqlite_file,
+                batch_size=2,
+                context_limit=0,
+                snapshot_cutoff="2026-06-02T23:59:59+00:00",
+                mode="chronological",
+            )
+
+            self.assertEqual([item["pattern_id"] for item in packet["pattern_context"]], ["pattern:old"])
+
+    def test_snapshot_cutoff_finds_old_pattern_beyond_newest_pattern_limit(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_contradiction_records())
+            store = PatternStore(sqlite_file)
+            store.create_pattern(
+                Pattern(
+                    id="pattern:old-beyond-limit",
+                    title="Add package validation before release",
+                    kind="workflow",
+                    scope="repo",
+                    status="accepted",
+                    summary="Package tooling releases should add validation before shipping.",
+                    recommended_behavior="Add package tooling validation before release.",
+                    trigger_terms=["package", "tooling", "validation", "release"],
+                    confidence=0.8,
+                    created_at="2026-06-01T00:00:00+00:00",
+                    updated_at="2026-06-01T00:00:00+00:00",
+                ),
+                [PatternEvidence(pattern_id="pattern:old-beyond-limit", memory_id="tension-old:1:0", role="support", score=0.9)],
+            )
+            for index in range(101):
+                pattern_id = f"pattern:future-{index}"
+                store.create_pattern(
+                    Pattern(
+                        id=pattern_id,
+                        title="Add package validation before release",
+                        kind="workflow",
+                        scope="repo",
+                        status="accepted",
+                        summary="Package tooling releases should add validation before shipping.",
+                        recommended_behavior="Add package tooling validation before release.",
+                        trigger_terms=["package", "tooling", "validation", "release"],
+                        confidence=0.9,
+                        created_at="2026-06-03T00:00:00+00:00",
+                        updated_at="2026-06-03T00:00:00+00:00",
+                    ),
+                    [PatternEvidence(pattern_id=pattern_id, memory_id="tension-new:1:0", role="support", score=0.9)],
+                )
+
+            packet = build_evidence_packet(
+                processor_version=PROCESSOR_VERSION,
+                processor_config_hash=CONFIG_HASH,
+                db_path=sqlite_file,
+                batch_size=2,
+                context_limit=0,
+                snapshot_cutoff="2026-06-02T23:59:59+00:00",
+                mode="chronological",
+            )
+
+            self.assertEqual([item["pattern_id"] for item in packet["pattern_context"]], ["pattern:old-beyond-limit"])
+
     def test_serialized_evidence_preserves_memory_provenance(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             sqlite_file = Path(tmp_dir) / "memory_store.db"
@@ -690,7 +890,7 @@ class PatternMinerTests(unittest.TestCase):
                     packet_type="bridge",
                 )
 
-            mock_analyze.assert_called_once_with([1, 2], session_id=None, limit=0, detail_limit=25)
+            mock_analyze.assert_called_once_with([1, 2], session_id=None, limit=0, detail_limit=25, corpus=ANY)
             self.assertEqual(packet["packet_type"], "bridge")
             self.assertEqual(packet["unprocessed_memory_ids"], ["bridge-new-1:1:0", "bridge-new-2:1:0"])
             self.assertEqual(packet["context_memory_ids"], ["bridge-old-1:1:0", "bridge-old-2:1:0"])
@@ -747,7 +947,7 @@ class PatternMinerTests(unittest.TestCase):
                     packet_type="contradiction",
                 )
 
-            mock_analyze.assert_called_once_with([1], session_id=None, limit=0, detail_limit=25)
+            mock_analyze.assert_called_once_with([1], session_id=None, limit=0, detail_limit=25, corpus=ANY)
             self.assertEqual(packet["packet_type"], "contradiction")
             self.assertEqual(packet["unprocessed_memory_ids"], ["tension-new:1:0"])
             self.assertEqual(packet["context_memory_ids"], ["tension-old:1:0"])
@@ -804,7 +1004,7 @@ class PatternMinerTests(unittest.TestCase):
                     context_limit=2,
                 )
 
-            mock_analyze.assert_called_once_with([2, 1], session_id=None, limit=0, detail_limit=25)
+            mock_analyze.assert_called_once_with([2, 1], session_id=None, limit=0, detail_limit=25, corpus=ANY)
             self.assertEqual(packet["packet_type"], "contradiction")
             self.assertEqual(packet["unprocessed_memory_ids"], ["tension-new:1:0"])
 

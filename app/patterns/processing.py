@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -13,6 +14,18 @@ from .storage import connect_pattern_db
 
 _PROCESSING_STATUSES = {"processed", "skipped", "failed"}
 _RUN_STATUSES = {"running", "completed", "failed"}
+
+
+def _normalize_rfc3339_bound(value: str) -> str:
+    """Normalize an RFC3339 bound to UTC before SQLite evaluates it."""
+
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    if parsed.tzinfo is None:
+        return str(value)
+    return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds")
 
 
 class PatternProcessingLedger:
@@ -174,14 +187,14 @@ class PatternProcessingLedger:
                 clauses.append("m.session_id = ?")
                 params.append(session_id)
             if from_ts:
-                clauses.append("m.ts >= ?")
-                params.append(from_ts)
+                clauses.append("julianday(m.ts) >= julianday(?)")
+                params.append(_normalize_rfc3339_bound(from_ts))
             if to_ts:
-                clauses.append("m.ts <= ?")
-                params.append(to_ts)
+                clauses.append("julianday(m.ts) <= julianday(?)")
+                params.append(_normalize_rfc3339_bound(to_ts))
             if snapshot_cutoff:
-                clauses.append("m.ts <= ?")
-                params.append(snapshot_cutoff)
+                clauses.append("julianday(m.ts) <= julianday(?)")
+                params.append(_normalize_rfc3339_bound(snapshot_cutoff))
             params.append(int(limit))
             rows = conn.execute(
                 f"""
@@ -192,7 +205,7 @@ class PatternProcessingLedger:
                     AND p.processor_version = ?
                     AND p.processor_config_hash = ?
                 WHERE {' AND '.join(clauses)}
-                ORDER BY m.ts ASC, m.id ASC
+                ORDER BY julianday(m.ts) ASC, m.id ASC
                 LIMIT ?
                 """,
                 tuple(params),
@@ -220,14 +233,14 @@ class PatternProcessingLedger:
                 clauses.append("m.session_id = ?")
                 params.append(session_id)
             if from_ts:
-                clauses.append("m.ts >= ?")
-                params.append(from_ts)
+                clauses.append("julianday(m.ts) >= julianday(?)")
+                params.append(_normalize_rfc3339_bound(from_ts))
             if to_ts:
-                clauses.append("m.ts <= ?")
-                params.append(to_ts)
+                clauses.append("julianday(m.ts) <= julianday(?)")
+                params.append(_normalize_rfc3339_bound(to_ts))
             if snapshot_cutoff:
-                clauses.append("m.ts <= ?")
-                params.append(snapshot_cutoff)
+                clauses.append("julianday(m.ts) <= julianday(?)")
+                params.append(_normalize_rfc3339_bound(snapshot_cutoff))
             row = conn.execute(
                 f"""
                 SELECT COUNT(*) AS count

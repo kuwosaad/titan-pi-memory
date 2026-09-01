@@ -139,6 +139,18 @@ on session start/end, prompts, tool use, compact, and stop. Capture writes redac
   out/memories/memory_store.db
 ```
 
+The CLI and MCP launcher ignore an ambient generic `TITAN_HOME` so another
+Titan adapter cannot redirect Grok's reads or writes. To deliberately use a
+different Grok store, set the Grok-specific override before invoking either:
+
+```bash
+export GROK_TITAN_HOME="$HOME/.titan/agents/grok-work"
+titan-grok doctor
+```
+
+The override applies only to `titan-grok` and the Grok MCP launcher; it does not
+change another adapter's namespace.
+
 ## MCP launch
 
 The plugin `.mcp.json` starts Titan through the Python launcher so a broken global `titan` is not a hard dependency:

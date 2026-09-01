@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from app.graph.builder import DEFAULT_GRAPH_MEMORY_LIMIT, build_graph, load_memories
+from app.graph.clusters import inspect_memory_clusters
+from app.graph.corpus_analysis import snapshot_for_memories
 
 
 class BuildGraphTests(unittest.TestCase):
@@ -112,6 +114,41 @@ class BuildGraphTests(unittest.TestCase):
         self.assertIn('data-recent="false"', html)
         self.assertIn("show all memories", html)
         self.assertIn("memoryPreviewBody", html)
+
+    @patch("app.graph.clusters.load_visual_config", return_value={})
+    def test_explicit_corpus_limit_preserves_source_count_and_missing_embeddings(self, _mock_load_config):
+        memories = [
+            self._memory("limit-old", "Old memory", "2026-06-01T00:00:00+00:00"),
+            self._memory("limit-mid", "Middle memory", "2026-06-02T00:00:00+00:00", embedding=[0.9, 0.1, 0.0]),
+            self._memory("limit-recent", "Recent memory", "2026-06-04T00:00:00+00:00", embedding=[0.8, 0.2, 0.0]),
+            self._memory("limit-missing", "Latest missing embedding", "2026-06-05T00:00:00+00:00", embedding=None),
+        ]
+        corpus = snapshot_for_memories(memories)
+
+        payload = inspect_memory_clusters(corpus=corpus, limit=2)
+
+        self.assertEqual(payload["total_memory_count"], 4)
+        self.assertEqual(payload["raw_memory_count"], 2)
+        self.assertEqual(payload["memory_count"], 1)
+        self.assertEqual(payload["skipped_missing_embeddings"], 1)
+        self.assertEqual(payload["clusters"][0]["memory_ids"], ["limit-recent"])
+
+    @patch("app.graph.clusters.load_visual_config", return_value={})
+    def test_cluster_representative_equal_degree_uses_instant_order(self, _mock_load_config):
+        template = self._memory("representative-earlier", "Same topic", "2026-06-01T01:00:00+05:30")
+        memories = [
+            template,
+            self._memory(
+                "representative-later",
+                "Same topic",
+                "2026-06-01T00:00:00+00:00",
+                embedding=[0.9, 0.1, 0.0],
+            ),
+        ]
+
+        payload = inspect_memory_clusters(corpus=snapshot_for_memories(memories), limit=0, detail_limit=1)
+
+        self.assertEqual(payload["clusters"][0]["examples"][0]["id"], "representative-earlier")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,10 @@ import json
 import os
 import shutil
 import subprocess
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 compatibility
+    import tomli as tomllib
 from pathlib import Path
 
 
@@ -86,6 +89,7 @@ def test_python_package_exposes_the_current_pypi_cli_contract():
     project = pyproject["project"]
 
     assert project["name"] == "titan-memory-cli"
+    assert project["license"] == {"file": "LICENSE"}
     assert project["readme"] == "docs/pypi_titan_memory_cli.md"
     assert "mcp>=1.5.0,<2" in project["dependencies"]
     assert project["scripts"]["titan"] == "tools.cli.titan:main"

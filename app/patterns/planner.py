@@ -4,6 +4,7 @@ import hashlib
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 
@@ -142,9 +143,9 @@ class PatternMiningPlanner:
         if not candidates:
             return None
 
-        def candidate_key(items: list[Dict[str, Any]]) -> tuple[float, int, str]:
+        def candidate_key(items: list[Dict[str, Any]]) -> tuple[float, int, datetime]:
             signal = sum(_high_signal_score(mem) for mem in items)
-            latest = max(str(mem.get("ts") or "") for mem in items)
+            latest = max(_timeline_key(mem)[1] for mem in items)
             return (signal, len(items), latest)
 
         selected_memories = sorted(max(candidates, key=candidate_key), key=_timeline_key)[: self.batch_size]
@@ -335,7 +336,7 @@ class PatternMiningPlanner:
         selected = self._ordered_unprocessed_ids(seed_scores)[: self.batch_size]
         selected_set = set(selected)
         context_memories = [by_id[memory_id] for memory_id in context_scores if memory_id in by_id and memory_id not in selected_set]
-        context_memories.sort(key=lambda mem: (-context_scores[str(mem["id"])], str(mem.get("ts") or ""), str(mem.get("id") or "")))
+        context_memories.sort(key=lambda mem: (-context_scores[str(mem["id"])], *_timeline_key(mem)))
         context_ids = [str(mem["id"]) for mem in context_memories[: self.context_limit]]
         score = min(0.97, 0.64 + (0.08 * min(4, len(selected))) + (0.04 * min(4, len(context_ids))) + (0.03 * min(4, len(bridges))))
         return EvidencePacketPlan(
@@ -395,7 +396,7 @@ class PatternMiningPlanner:
             if memory_id not in selected_set:
                 context_scores[memory_id] = max(context_scores.get(memory_id, 0.0), score)
         context_memories = [by_id[memory_id] for memory_id in context_scores if memory_id in by_id and memory_id not in selected_set]
-        context_memories.sort(key=lambda mem: (-context_scores[str(mem["id"])], str(mem.get("ts") or ""), str(mem.get("id") or "")))
+        context_memories.sort(key=lambda mem: (-context_scores[str(mem["id"])], *_timeline_key(mem)))
         context_ids = [str(mem["id"]) for mem in context_memories[: self.context_limit]]
         score = min(0.97, 0.66 + (0.08 * min(4, len(selected))) + (0.05 * min(4, len(context_ids))) + (0.04 * min(4, len(source_tensions))))
         return EvidencePacketPlan(
@@ -435,7 +436,7 @@ class PatternMiningPlanner:
 
     def _ordered_unprocessed_ids(self, scored_ids: dict[str, float]) -> list[str]:
         memories = [mem for mem in self.unprocessed_memories if str(mem.get("id")) in scored_ids]
-        memories.sort(key=lambda mem: (-scored_ids[str(mem["id"])], str(mem.get("ts") or ""), str(mem.get("id") or "")))
+        memories.sort(key=lambda mem: (-scored_ids[str(mem["id"])], *_timeline_key(mem)))
         return [str(mem["id"]) for mem in memories]
 
     def _context_ids(self, seed_memory_ids: Sequence[str]) -> list[str]:
@@ -459,7 +460,7 @@ class PatternMiningPlanner:
             if score <= 0.05:
                 continue
             scored.append((mem, score))
-        scored.sort(key=lambda item: (-item[1], str(item[0].get("ts") or ""), str(item[0].get("id") or "")))
+        scored.sort(key=lambda item: (-item[1], *_timeline_key(item[0])))
         return [str(mem.get("id")) for mem, _score in scored[: self.context_limit] if mem.get("id")]
 
     def _scene_count(self, memory_ids: Sequence[str]) -> int:
@@ -532,13 +533,31 @@ def _dedupe(items: Sequence[str]) -> list[str]:
     return list(dict.fromkeys(str(item) for item in items if item))
 
 
-def _timeline_key(memory: Dict[str, Any]) -> tuple[str, int, str]:
+def _parse_rfc3339(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _timeline_key(memory: Dict[str, Any]) -> tuple[int, datetime, int, str]:
+    timestamp = _parse_rfc3339(memory.get("ts"))
     turn = memory.get("turn")
     try:
         turn_value = int(turn)
     except (TypeError, ValueError):
         turn_value = 0
-    return (str(memory.get("ts") or ""), turn_value, str(memory.get("id") or ""))
+    return (
+        0 if timestamp is None else 1,
+        timestamp or datetime.min.replace(tzinfo=timezone.utc),
+        turn_value,
+        str(memory.get("id") or ""),
+    )
 
 
 def _high_signal_score(memory: Dict[str, Any]) -> float:

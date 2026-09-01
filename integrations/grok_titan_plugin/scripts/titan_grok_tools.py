@@ -66,7 +66,13 @@ def _load_env_file(path: Path) -> None:
 
 def bootstrap_grok_runtime(agent: str = DEFAULT_AGENT) -> Path:
     safe = (agent or DEFAULT_AGENT).strip() or DEFAULT_AGENT
-    home = Path(os.environ.get("TITAN_HOME") or (Path.home() / ".titan" / "agents" / safe)).expanduser()
+    # Grok is commonly launched from a shell shared with another adapter.  Do
+    # not let that adapter's generic TITAN_HOME leak into this namespace.  A
+    # Grok-specific override remains available for custom installations.
+    home = Path(
+        os.environ.get("GROK_TITAN_HOME")
+        or (Path.home() / ".titan" / "agents" / safe)
+    ).expanduser()
     home.mkdir(parents=True, exist_ok=True)
     os.environ["TITAN_AGENT_NAME"] = safe
     os.environ["TITAN_HOME"] = str(home)
@@ -363,7 +369,7 @@ MCP equivalents when connected: titan-memory__query_memories, etc.
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="titan-grok", description="Pi-parity Titan tools for Grok.")
-    parser.add_argument("--agent", default=os.getenv("TITAN_AGENT_NAME", DEFAULT_AGENT))
+    parser.add_argument("--agent", default=DEFAULT_AGENT)
     parser.add_argument("--json", action="store_true", help="Machine-readable JSON.")
     sub = parser.add_subparsers(dest="command")
 

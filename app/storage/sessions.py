@@ -1,8 +1,10 @@
+import errno as errno_codes
 import json
 import os
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -16,6 +18,11 @@ try:
     import fcntl
 except ImportError:  # pragma: no cover - Windows has no POSIX flock
     fcntl = None
+
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX has no Windows CRT locking
+    msvcrt = None
 
 
 _RUNTIME_CONTEXT = get_runtime_context()
@@ -31,16 +38,68 @@ _CONTEXT_BASE_DIR = BASE_DIR
 _CONTEXT_TRACE_DIR = TRACES_DIR
 
 
+def _is_windows_lock_contention(exc: OSError) -> bool:
+    """Return whether a CRT lock failure means another process owns it."""
+
+    # msvcrt may expose either errno or winerror depending on Python/Windows
+    # version. Do not retry unrelated failures such as invalid descriptors or
+    # inaccessible paths: those are actionable errors, not contention.
+    return (
+        getattr(exc, "errno", None) in {
+            errno_codes.EACCES,
+            errno_codes.EAGAIN,
+            errno_codes.EDEADLK,
+        }
+        or getattr(exc, "winerror", None) in {
+            32,   # ERROR_SHARING_VIOLATION
+            33,   # ERROR_LOCK_VIOLATION
+            167,  # ERROR_LOCK_FAILED
+        }
+    )
+
+
 @contextmanager
 def interprocess_lock(path: Path):
     """Serialize read-modify-write transactions shared by agent processes."""
 
-    if fcntl is None:
-        yield
-        return
-
     lock_path = Path(path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if fcntl is None:
+        if msvcrt is None:  # pragma: no cover - every supported Windows Python has msvcrt
+            raise RuntimeError("No supported interprocess locking primitive is available")
+
+        # ``msvcrt.locking`` operates on a byte range starting at the current
+        # file position. Keep one byte in the lock file so the range is stable,
+        # then use the non-blocking mode in a short retry loop. ``LK_LOCK``
+        # retries only ten times internally, which is too short for a busy MCP
+        # ingest; the explicit loop preserves the blocking contract of flock.
+        with lock_path.open("a+b") as handle:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+            handle.flush()
+            os.fsync(handle.fileno())
+            lock_mode = getattr(msvcrt, "LK_NBLCK", getattr(msvcrt, "LK_LOCK", 1))
+            unlock_mode = getattr(msvcrt, "LK_UNLCK", 0)
+            acquired = False
+            try:
+                while not acquired:
+                    handle.seek(0)
+                    try:
+                        msvcrt.locking(handle.fileno(), lock_mode, 1)
+                        acquired = True
+                    except OSError as exc:
+                        if not _is_windows_lock_contention(exc):
+                            raise
+                        time.sleep(0.05)
+                yield
+            finally:
+                if acquired:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), unlock_mode, 1)
+        return
+
     with lock_path.open("a+") as handle:
         try:
             lock_path.chmod(0o600)

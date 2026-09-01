@@ -40,6 +40,29 @@ class PiExtensionContractTests(unittest.TestCase):
         self.assertIn("const proc = spawn(pythonCommand, [serverScript]", self.source)
         self.assertNotIn('spawn("python3", [serverScript]', self.source)
 
+    def test_dashboard_rich_install_is_verified_and_has_user_scope_fallback(self):
+        self.assertIn("async function ensureRichDependency", self.source)
+        self.assertIn('["-m", "pip", "install", "--user", "rich"]', self.source)
+        self.assertIn('["-m", "pip", "install", "--user", "--break-system-packages", "rich"]', self.source)
+        self.assertIn("const richReady = await ensureRichDependency(pythonCommand);", self.source)
+        self.assertIn("if (!richReady)", self.source)
+        self.assertIn('scriptArgs.push("--plain");', self.source)
+        self.assertIn("Rich is unavailable; launching the plain-text dashboard.", self.source)
+
+    def test_dashboard_rich_mode_is_gated_by_verified_import(self):
+        dashboard = self.source[self.source.index('pi.registerCommand("titan-dashboard"'):]
+        check = dashboard.index("const richReady = await ensureRichDependency(pythonCommand);")
+        launch = dashboard.index("const result = await runProcess(pythonCommand, scriptArgs")
+        self.assertLess(check, launch)
+        self.assertIn("if (await canImportRich()) return true;", self.source)
+
+    def test_dashboard_unavailable_rich_uses_explicit_plain_mode(self):
+        dashboard = self.source[self.source.index('pi.registerCommand("titan-dashboard"'):]
+        fallback = dashboard.index('scriptArgs.push("--plain");')
+        launch = dashboard.index("const result = await runProcess(pythonCommand, scriptArgs")
+        self.assertLess(fallback, launch)
+        self.assertIn('ctx.ui.notify("Rich is unavailable; launching the plain-text dashboard.", "warning")', dashboard)
+
 
 if __name__ == "__main__":
     unittest.main()

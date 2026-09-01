@@ -251,6 +251,40 @@ async function ensurePythonDependencies(): Promise<{ ok: boolean; message: strin
   return { ok: false, message: `install failed: ${excerpt}` };
 }
 
+/** Ensure the optional Rich dashboard dependency is importable by this Python. */
+async function ensureRichDependency(pythonCommand: string): Promise<boolean> {
+  const canImportRich = async (): Promise<boolean> => {
+    const result = await runProcess(
+      pythonCommand,
+      ["-c", "import rich"],
+      { cwd: REPO_ROOT, env: process.env },
+    );
+    return result.code === 0;
+  };
+
+  if (await canImportRich()) return true;
+
+  // Try the normal install first, then user-scoped installs for externally
+  // managed interpreters (PEP 668). Never launch rich mode until the import
+  // check succeeds after an install attempt; the caller may use plain mode.
+  for (const installArgs of [
+    ["-m", "pip", "install", "rich"],
+    ["-m", "pip", "install", "--user", "rich"],
+    // pip 23+ may require this explicit opt-in even for a user-site install
+    // when the selected interpreter carries the PEP 668 marker. User scope
+    // keeps the override out of the managed interpreter's site-packages.
+    ["-m", "pip", "install", "--user", "--break-system-packages", "rich"],
+  ]) {
+    await runProcess(pythonCommand, installArgs, {
+      cwd: REPO_ROOT,
+      env: process.env,
+    });
+    if (await canImportRich()) return true;
+  }
+
+  return false;
+}
+
 function ensurePiWorkspace(): { copiedConfigs: string[]; envCreated: boolean } {
   const configDir = resolve(TITAN_HOME, "config");
   mkdirSync(configDir, { recursive: true });
@@ -2442,17 +2476,17 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         return;
       }
 
-      // Check rich is installed
-      const richCheck = await runProcess(pythonCommand, ["-c", "import rich"], { cwd: REPO_ROOT });
-      if (richCheck.code !== 0) {
-        ctx.ui.notify("Installing dashboard dependency (rich)...", "info");
-        await runProcess(pythonCommand, ["-m", "pip", "install", "rich"], { cwd: REPO_ROOT });
-      }
+      ctx.ui.notify("Checking dashboard dependency (rich)...", "info");
+      const richReady = await ensureRichDependency(pythonCommand);
 
       const sessionArg = args?.trim() || "";
       const scriptArgs = sessionArg
         ? [dashboardScript, "--session-id", sessionArg]
         : [dashboardScript];
+      if (!richReady) {
+        scriptArgs.push("--plain");
+        ctx.ui.notify("Rich is unavailable; launching the plain-text dashboard.", "warning");
+      }
 
       const result = await runProcess(pythonCommand, scriptArgs, {
         cwd: REPO_ROOT,

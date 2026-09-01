@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import networkx as nx
@@ -111,6 +112,17 @@ def _shorten(text: str, limit: int = 220) -> str:
     return text[: limit - 1].rstrip() + "…"
 
 
+def _timestamp_sort_key(memory: Dict[str, Any]) -> tuple[datetime, str]:
+    value = memory.get("ts")
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        parsed = datetime.min.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc), str(memory.get("id") or "")
+
+
 def _cache_key(session_id: Optional[str], limit: int, memories: Sequence[Dict[str, Any]]) -> tuple[Any, ...]:
     # The revision is content/embedding based; LNN activation-only updates do
     # not invalidate graph structure, while edits to text or embeddings do.
@@ -138,10 +150,26 @@ def inspect_memory_clusters(
     corpus: Optional[CorpusAnalysis] = None,
 ) -> Dict[str, Any]:
     """Return fast, deterministic topic summaries for the graph communities."""
-    total_memory_count = get_memory_count(session_id=session_id)
+    if corpus is not None:
+        # An explicit corpus is an immutable caller-owned analysis boundary.
+        # Do not reload the database here: doing so both defeats bounded
+        # snapshots and makes the cache key independent of the supplied data.
+        source_memories = list(corpus.source_memories or corpus.memories)
+        total_memory_count = len(source_memories)
+        safe_limit = resolve_cluster_memory_limit(limit, total_memory_count)
+        raw_memories = source_memories
+        if safe_limit < len(source_memories):
+            raw_memories = sorted(
+                source_memories,
+                key=_timestamp_sort_key,
+                reverse=True,
+            )[:safe_limit]
+            corpus = snapshot_for_memories(raw_memories)
+    else:
+        total_memory_count = get_memory_count(session_id=session_id)
+        raw_memories = [_memory_dict(mem) for mem in load_memories(session_id=session_id, limit=resolve_cluster_memory_limit(limit, total_memory_count))]
     safe_limit = resolve_cluster_memory_limit(limit, total_memory_count)
     detail_limit = max(1, min(int(detail_limit or DEFAULT_DETAIL_LIMIT), 50))
-    raw_memories = [_memory_dict(mem) for mem in load_memories(session_id=session_id, limit=safe_limit)]
 
     key = _cache_key(session_id, safe_limit, raw_memories)
     if key in _CACHE:
@@ -178,7 +206,7 @@ def inspect_memory_clusters(
             degrees = dict(subgraph.degree())
             representative_indices = sorted(
                 member_indices,
-                key=lambda node: (-degrees.get(node, 0), str(indexed_memories[node].get("ts") or "")),
+                key=lambda node: (-degrees.get(node, 0), *_timestamp_sort_key(indexed_memories[node])),
             )[:detail_limit]
             weights = [float(data.get("weight", 0.0)) for _u, _v, data in subgraph.edges(data=True)]
             types: Counter[str] = Counter(str(mem.get("type") or "memory") for mem in cluster_memories)

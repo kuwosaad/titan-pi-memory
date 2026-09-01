@@ -203,6 +203,31 @@ class PatternStoreTests(unittest.TestCase):
             self.assertEqual(next_version_status.unprocessed, 3)
             self.assertEqual(unprocessed, ["s3:1:0"])
 
+    def test_processing_ledger_compares_timezone_aware_bounds_by_instant(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_memory_records())
+            ledger = PatternProcessingLedger(sqlite_file)
+
+            bounds = {
+                "from_ts": "2026-06-01T01:00:00+05:30",
+                "to_ts": "2026-06-01T06:00:00+05:30",
+            }
+            listed = ledger.list_unprocessed_memory_ids(
+                processor_version="pattern-miner-v1",
+                processor_config_hash="abc",
+                limit=10,
+                **bounds,
+            )
+            counted = ledger.count_unprocessed_memory_ids(
+                processor_version="pattern-miner-v1",
+                processor_config_hash="abc",
+                **bounds,
+            )
+
+            self.assertEqual(listed, ["s1:1:0"])
+            self.assertEqual(counted, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

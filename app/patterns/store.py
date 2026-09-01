@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
@@ -17,6 +18,16 @@ _PATTERN_SCOPES = {"user", "repo", "team", "agent", "global"}
 _PATTERN_STATUSES = {"candidate", "accepted", "rejected", "superseded"}
 _EVIDENCE_ROLES = {"support", "contradict", "bridge", "central"}
 _UNSET = object()
+
+
+def _normalize_timestamp_bound(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds")
 
 
 class PatternValidationError(PatternValidation):
@@ -77,6 +88,7 @@ class PatternStore:
         status: Optional[str] = None,
         scope: Optional[str] = None,
         limit: int = 50,
+        created_before: Optional[str] = None,
     ) -> List[Pattern]:
         clauses: list[str] = []
         params: list[object] = []
@@ -90,6 +102,9 @@ class PatternStore:
                 raise PatternValidationError(f"Invalid pattern scope: {scope}")
             clauses.append("scope = ?")
             params.append(scope)
+        if created_before:
+            clauses.append("julianday(created_at) <= julianday(?)")
+            params.append(_normalize_timestamp_bound(created_before))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(int(limit))
         with self._lock, self._connect() as conn:
