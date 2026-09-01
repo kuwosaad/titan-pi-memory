@@ -2,7 +2,7 @@
 
 Your Grok agent should remember.
 
-Titan Memory gives Grok durable project memory: prior decisions, scene recovery, recent work, graph inspection, passive session capture, and slash skills that call Titan over MCP. It runs locally and stores Grok memory under your own `~/.titan/agents/grok` directory.
+Titan Memory gives Grok durable project memory: prior decisions, scene recovery, recent work, graph inspection, passive session capture, and slash skills that call Titan over MCP. It runs locally and writes Grok data under your own `~/.titan/agents/grok` directory. Recall is read-only and federated across all discovered agent namespaces.
 
 This plugin does **not** invent a new memory engine. Grok talks to the existing Titan CLI via MCP (`titan mcp --agent grok`) plus skills and hooks.
 
@@ -182,7 +182,8 @@ Check whether Titan is healthy in this Grok session.
 
 ## Privacy and local storage
 
-Titan Memory is local-first. Grok memory lives under:
+Titan Memory is local-first. Grok writes memory and operational state only
+under:
 
 ```text
 ~/.titan/agents/grok
@@ -196,9 +197,17 @@ Passive capture writes hook traces under:
 
 Put provider keys in `~/.titan/agents/grok/.env` (for example `GEMINI_API_KEY`). Do not commit secrets.
 
-## Cross-agent memory
+## Federated recall
 
-Grok memory is isolated from Pi, Codex, Claude Code, Aider, and OpenCode by default. Ask explicitly if you want cross-agent history.
+By default, `query_memories` and other recall tools search every discovered
+agent namespace under `~/.titan/agents` through a read-only federation. A
+missing or invalid namespace is skipped. Every result preserves its
+`source_agent` provenance; pass that value to `get_scene_context` when
+recovering a scene from another agent.
+
+Grok never writes into another agent's namespace. Traces, pending/spool state,
+and pattern workspaces remain local to Grok. Cross-agent import is a separate
+operation when you need a copied record, not a prerequisite for recall.
 
 ## Troubleshooting
 

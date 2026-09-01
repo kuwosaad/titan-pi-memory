@@ -17,7 +17,9 @@ Titan gives this coding agent persistent memory across sessions. It works in two
 Pi is only the adapter. The installed package carries the Titan engine that owns trace
 processing, storage, retrieval, patterns, and graph analysis. Pi uses its own namespace
 (`~/.titan/agents/pi` by default), so its state remains separate from Codex, Claude, and
-other agents. Existing trace files and memory IDs remain readable across upgrades.
+other agents. Pi writes only to that namespace, while Memory and Scene recall searches
+every discovered agent namespace read-only by default. Existing trace files and memory
+IDs remain readable across upgrades.
 
 ## 1. Passive capture (automatic)
 
@@ -141,7 +143,7 @@ Phase 2 — Navigate temporally from anchor:
 ## Order of operations
 
 1. When the user asks about previous work, start with `titan_query_memories`
-2. If a returned memory has a `scene_id`, open the scene for richer context
+2. If a returned memory has a `scene_id`, open the scene for richer context; pass its `source_agent` when it belongs to another agent
 3. Memories are semantically ranked — the first results are most relevant
 4. If you find contradictory memories, open both scenes to resolve
 

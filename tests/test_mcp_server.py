@@ -255,13 +255,55 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(payload["recent_trace_files_exist"])
         self.assertTrue(payload["trace_dir_exists"])
         self.assertEqual(payload["trace_file_count"], 1)
-        self.assertEqual(payload["agent_namespace"], str(Path.home() / ".titan" / "agents" / "codex"))
+        self.assertEqual(payload["agent_namespace"], str(agent_home))
         self.assertGreaterEqual(payload["mcp_tool_count"], 18)
         self.assertIn("patterns_export_bundle", payload["mcp_tools"])
         self.assertEqual(payload["auto_ingest"]["spool_dir"], str(trace_dir))
         self.assertTrue(payload["auto_ingest"]["starts_with_mcp_server"])
         self.assertTrue(payload["required_config_files"]["settings"])
         self.assertIn("provider_keys", payload)
+
+    async def test_doctor_discovers_valid_agent_namespaces_and_reports_recall_sources(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            titan_root = Path(tmp_dir) / ".titan"
+            agents_dir = titan_root / "agents"
+            for agent in ("codex", "pi", "grok", "claude-code", "bad namespace", ".scratch"):
+                (agents_dir / agent).mkdir(parents=True)
+            agent_home = agents_dir / "codex"
+            trace_dir = agent_home / "traces"
+            trace_dir.mkdir(parents=True)
+
+            counts = {"codex": 4, "pi": 8, "grok": 3, "claude-code": 0}
+            with patch.object(mcp_server.Path, "home", return_value=Path(tmp_dir)), patch.object(
+                mcp_server, "_current_titan_home", return_value=agent_home
+            ), patch.object(
+                mcp_server,
+                "_count_agent_namespace_memories",
+                side_effect=lambda agent, shared_home=None: counts.get(agent, 0),
+            ), patch.object(
+                mcp_server, "get_memory_count", return_value=4
+            ), patch.object(mcp_server, "get_memory_repository"), patch.object(
+                mcp_server, "get_lnn_state_repository", return_value=None
+            ), patch.dict(
+                mcp_server.os.environ,
+                {
+                    "TITAN_AGENT_NAME": "codex",
+                    "TITAN_SPOOL_DIR": str(trace_dir),
+                    "TITAN_SHARED_HOME": str(titan_root),
+                },
+                clear=False,
+            ):
+                payload = await mcp_server.doctor()
+
+        self.assertEqual(payload["cross_agent_memory"]["discovered_agents"], ["claude-code", "codex", "grok", "pi"])
+        self.assertEqual(
+            payload["cross_agent_memory"]["other_agents_with_memories"],
+            [{"agent": "grok", "memory_count": 3}, {"agent": "pi", "memory_count": 8}],
+        )
+        self.assertEqual(payload["active_write_workspace"]["agent"], "codex")
+        self.assertEqual(payload["active_write_workspace"]["home"], str(agent_home))
+        self.assertEqual(payload["default_recall"]["scope"], "federated")
+        self.assertEqual(payload["default_recall"]["sources"], ["codex", "claude-code", "grok", "pi"])
 
 
 if __name__ == "__main__":

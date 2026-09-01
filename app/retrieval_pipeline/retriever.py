@@ -13,7 +13,7 @@ from app.embedding.embedder import embed
 from app.save_pipeline.extraction.extractor import is_hidden_metadata_memory
 from app.graph.similarity import cosine_similarity
 from app.storage.memories import query_memory_candidates, query_memory_candidates_with_text, unpack_embedding
-from app.storage.repository import CandidateFilters, MemoryStore
+from app.storage.repository import CandidateFilters, MemoryStore, get_lnn_state_store
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1224,6 +1224,8 @@ def _ode_rerank_hits(
     embedding_by_id: Dict[str, np.ndarray],
     lnn_config: Dict[str, Any],
     query_vector: Optional[np.ndarray] = None,
+    repository: Optional[MemoryStore] = None,
+    persist_lnn_state: bool = True,
 ) -> List[Dict[str, Any]]:
     n = len(hits)
     if n == 0:
@@ -1246,11 +1248,12 @@ def _ode_rerank_hits(
                                             persisted_weights=persisted_weights, query_vector=query_vector)
 
     tau_boost = float(lnn_config.get("tau_boost", 0.05))
-    repo = get_memory_repository()
+    repo = repository or get_memory_repository()
+    state_store = get_lnn_state_store(repo)
     # JSON remains a compatibility MemoryStore, not an LNN state store. Keep
     # retrieval usable on JSON while preventing the reranker from mutating
     # unsupported activation/weight fields.
-    if getattr(repo, "supports_lnn", True) is False:
+    if persist_lnn_state and state_store is None:
         return hits
     weight_delta_pairs: List[Tuple[str, str, float]] = []
 
@@ -1269,14 +1272,15 @@ def _ode_rerank_hits(
 
         mem_id = memory_ids[i]
         new_tau = min(0.95, tau_values[i] + tau_boost)
-        repo.update_lnn_state(mem_id, tau=new_tau)
+        if persist_lnn_state and state_store is not None:
+            state_store.update_lnn_state(mem_id, tau=new_tau)
 
         if mem_id in hebbian_deltas:
             for target_id, delta in hebbian_deltas[mem_id].items():
                 weight_delta_pairs.append((mem_id, target_id, delta))
 
-    if weight_delta_pairs:
-        repo.batch_update_weights(weight_delta_pairs)
+    if persist_lnn_state and state_store is not None and weight_delta_pairs:
+        state_store.batch_update_weights(weight_delta_pairs)
 
     rescored.sort(
         key=lambda item: (
@@ -1295,6 +1299,8 @@ def _expanding_ode_rerank_hits(
     lnn_config: Dict[str, Any],
     filters: Optional[CandidateFilters] = None,
     query_vector: Optional[np.ndarray] = None,
+    repository: Optional[MemoryStore] = None,
+    persist_lnn_state: bool = True,
 ) -> List[Dict[str, Any]]:
     n = len(hits)
     if n == 0:
@@ -1302,8 +1308,9 @@ def _expanding_ode_rerank_hits(
 
     from app.storage.memories import get_memory_repository
 
-    repo = get_memory_repository()
-    if getattr(repo, "supports_lnn", True) is False:
+    repo = repository or get_memory_repository()
+    state_store = get_lnn_state_store(repo)
+    if persist_lnn_state and state_store is None:
         return hits
 
     base_scores = np.array([float(h.get("base_score") or h.get("score") or 0.0) for h in hits], dtype=np.float32)
@@ -1507,10 +1514,11 @@ def _expanding_ode_rerank_hits(
 
         rescored.append(entry)
         new_tau = min(0.95, tau_val + tau_boost)
-        repo.update_lnn_state(mid, tau=new_tau)
+        if persist_lnn_state and state_store is not None:
+            state_store.update_lnn_state(mid, tau=new_tau)
 
-    if weight_delta_pairs:
-        repo.batch_update_weights(weight_delta_pairs)
+    if persist_lnn_state and state_store is not None and weight_delta_pairs:
+        state_store.batch_update_weights(weight_delta_pairs)
 
     rescored.sort(
         key=lambda item: (
@@ -1531,6 +1539,8 @@ def _step2_1_rerank(
     lnn_config: Optional[Dict[str, Any]] = None,
     filters: Optional[CandidateFilters] = None,
     query_vector: Optional[np.ndarray] = None,
+    repository: Optional[MemoryStore] = None,
+    persist_lnn_state: bool = True,
 ) -> List[Dict[str, Any]]:
     if not hits or alpha <= 0.0:
         return hits
@@ -1539,8 +1549,15 @@ def _step2_1_rerank(
         lnn_config = {}
     if lnn_config.get("enabled") and lnn_config.get("use_ode_rerank"):
         if lnn_config.get("expanding_activation"):
-            return _expanding_ode_rerank_hits(hits, query, embedding_by_id, lnn_config, filters=filters, query_vector=query_vector)
-        return _ode_rerank_hits(hits, query, embedding_by_id, lnn_config, query_vector=query_vector)
+            return _expanding_ode_rerank_hits(
+                hits, query, embedding_by_id, lnn_config, filters=filters,
+                query_vector=query_vector, repository=repository,
+                persist_lnn_state=persist_lnn_state,
+            )
+        return _ode_rerank_hits(
+            hits, query, embedding_by_id, lnn_config, query_vector=query_vector,
+            repository=repository, persist_lnn_state=persist_lnn_state,
+        )
 
     query_terms = _content_tokens(query)
     if not query_terms:
@@ -2235,6 +2252,7 @@ def retrieve_memories(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     repository: Optional[MemoryStore] = None,
+    persist_lnn_state: bool = True,
 ) -> List[Dict[str, Any]]:
     """Compatibility entrypoint preserving Titan's ten-parameter contract."""
 
@@ -2250,11 +2268,12 @@ def retrieve_memories(
         date_from=date_from,
         date_to=date_to,
     )
-    if repository is None:
+    if repository is None and persist_lnn_state:
         return RetrievalEngine(_retrieve_memories_impl).retrieve(request)
     return _retrieve_memories_impl(
         query,
         repository=repository,
+        persist_lnn_state=persist_lnn_state,
         **request.runner_kwargs(),
     )
 
@@ -2271,6 +2290,7 @@ def _retrieve_memories_impl(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     repository: Optional[MemoryStore] = None,
+    persist_lnn_state: bool = True,
 ) -> List[Dict[str, Any]]:
     from .config import load_settings
     settings = load_settings()
@@ -2614,7 +2634,8 @@ def _retrieve_memories_impl(
         if rerank.get("use_step2_1"):
             candidate_hits = _step2_1_rerank(candidate_hits, query, embedding_by_id, rerank["alpha"],
                                              rerank["step2_config"], lnn_config=lnn_config, filters=filters,
-                                             query_vector=direct_aspect_vectors[0])
+                                             query_vector=direct_aspect_vectors[0], repository=repository,
+                                             persist_lnn_state=persist_lnn_state)
         else:
             candidate_hits = _cross_memory_rerank(candidate_hits, query, embedding_by_id, rerank["alpha"])
 

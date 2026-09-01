@@ -119,7 +119,13 @@ function directoryDigest(root, ignored = new Set()) {
   const hash = crypto.createHash('sha256');
   function visit(current, relative) {
     for (const entry of fs.readdirSync(current).sort()) {
-      if (ignored.has(entry)) continue;
+      if (ignored.has(entry)
+        || entry === '__pycache__'
+        || entry === '.pytest_cache'
+        || entry === '.mypy_cache'
+        || entry === '.DS_Store'
+        || entry.endsWith('.pyc')
+        || entry.endsWith('.pyo')) continue;
       const source = path.join(current, entry);
       const childRelative = relative ? path.join(relative, entry) : entry;
       const stat = fs.statSync(source);

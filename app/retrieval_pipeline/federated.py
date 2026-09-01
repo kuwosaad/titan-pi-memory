@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
@@ -19,6 +20,7 @@ from app.storage.scenes import JsonSceneRepository, SceneRepository, SqliteScene
 
 
 _AGENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+LOGGER = logging.getLogger(__name__)
 
 
 def _validate_agent_name(agent_name: str) -> str:
@@ -42,6 +44,22 @@ def namespace_memory_db_path(agent_name: str, titan_home: Optional[Path] = None)
 
 def namespace_memories_json_path(agent_name: str, titan_home: Optional[Path] = None) -> Path:
     return namespace_memory_db_path(agent_name, titan_home).with_name("memories.json")
+
+
+def discover_agent_namespaces(titan_home: Optional[Path] = None) -> list[str]:
+    """Return valid agent workspaces from the shared Titan home."""
+
+    agents_dir = (titan_home or (Path.home() / ".titan")) / "agents"
+    if not agents_dir.is_dir():
+        return []
+    try:
+        return [
+            path.name
+            for path in sorted(agents_dir.iterdir())
+            if path.is_dir() and _AGENT_NAME_RE.fullmatch(path.name)
+        ]
+    except OSError:
+        return []
 
 
 def _scene_json_path_for_db(db_path: Path) -> Path:
@@ -68,7 +86,7 @@ def _scene_repository_for_path(path: Path) -> Optional[SceneRepository]:
 
 def _source_list(active_agent: str, sources: Optional[Sequence[str] | str]) -> list[str]:
     if sources is None:
-        selected = [active_agent, "pi"] if active_agent == "codex" else [active_agent]
+        selected = [active_agent]
     elif isinstance(sources, str):
         raw = sources.strip()
         if raw.startswith("["):
@@ -111,6 +129,7 @@ class FederatedRecall:
         memory_paths: Optional[Mapping[str, Path]] = None,
         scene_paths: Optional[Mapping[str, Path]] = None,
         titan_home: Optional[Path] = None,
+        federation_root: Optional[Path] = None,
         include_active_buffer: Optional[bool] = None,
     ) -> None:
         self.active_agent = str(active_agent or "codex")
@@ -119,10 +138,25 @@ class FederatedRecall:
         self._memory_paths = {str(key): Path(value) for key, value in (memory_paths or {}).items()}
         self._scene_paths = {str(key): Path(value) for key, value in (scene_paths or {}).items()}
         self._titan_home = titan_home
+        self._federation_root = federation_root or titan_home
         self._include_active_buffer = include_active_buffer
 
     def sources(self, sources: Optional[Sequence[str] | str] = None) -> list[str]:
         selected = _source_list(self.active_agent, sources)
+        if sources is None:
+            known_sources = (
+                list(self._memory_repositories)
+                + list(self._scene_repositories)
+                + list(self._memory_paths)
+                + list(self._scene_paths)
+            )
+            agents_dir = (self._federation_root or (Path.home() / ".titan")) / "agents"
+            discovered_sources: list[str] = []
+            if not known_sources:
+                discovered_sources = discover_agent_namespaces(self._federation_root)
+            for source in known_sources + discovered_sources:
+                if source not in selected:
+                    selected.append(source)
         for source in selected:
             _validate_agent_name(source)
         return selected
@@ -140,7 +174,7 @@ class FederatedRecall:
         # global repository (which may create or touch its live store).
         if source_agent == self.active_agent and self._titan_home is None:
             return get_memory_repository()
-        return _memory_repository_for_path(namespace_memory_db_path(source_agent, self._titan_home))
+        return _memory_repository_for_path(namespace_memory_db_path(source_agent, self._federation_root))
 
     def _scene_repository(self, source_agent: str) -> Optional[SceneRepository]:
         if source_agent in self._scene_repositories:
@@ -152,7 +186,7 @@ class FederatedRecall:
             return repository
         if source_agent == self.active_agent and self._titan_home is None:
             return get_scene_repository()
-        return _scene_repository_for_path(namespace_memory_db_path(source_agent, self._titan_home))
+        return _scene_repository_for_path(namespace_memory_db_path(source_agent, self._federation_root))
 
     def get_recent_memories(
         self,
@@ -164,10 +198,17 @@ class FederatedRecall:
         selected = self.sources(sources)
         records: list[dict[str, Any]] = []
         for source_agent in selected:
-            repository = self._memory_repository(source_agent)
-            if repository is None:
+            try:
+                repository = self._memory_repository(source_agent)
+                if repository is None:
+                    continue
+                source_records = repository.get_recent_memories(limit=limit, session_id=session_id)
+            except Exception as exc:
+                if source_agent == self.active_agent:
+                    raise
+                LOGGER.warning("Skipping unreadable Titan namespace %s: %s", source_agent, exc)
                 continue
-            for record in repository.get_recent_memories(limit=limit, session_id=session_id):
+            for record in source_records:
                 item = dict(record)
                 item["source_agent"] = source_agent
                 records.append(item)
@@ -240,17 +281,24 @@ class FederatedRecall:
         selected = self.sources(sources)
         hits: list[dict[str, Any]] = []
         for source_agent in selected:
-            repository = self._memory_repository(source_agent)
-            if repository is None:
+            try:
+                repository = self._memory_repository(source_agent)
+                if repository is None:
+                    continue
+                source_hits = retrieve_memories(
+                    query=query,
+                    session_id=session_id,
+                    top_k=limit,
+                    mode=mode or "both",
+                    repository=repository,
+                    persist_lnn_state=(source_agent == self.active_agent),
+                    **kwargs,
+                )
+            except Exception as exc:
+                if source_agent == self.active_agent:
+                    raise
+                LOGGER.warning("Skipping unreadable Titan namespace %s: %s", source_agent, exc)
                 continue
-            source_hits = retrieve_memories(
-                query=query,
-                session_id=session_id,
-                top_k=limit,
-                mode=mode or "both",
-                repository=repository,
-                **kwargs,
-            )
             for hit in source_hits:
                 annotated = dict(hit)
                 memory = dict(hit.get("memory") or {})
@@ -354,4 +402,13 @@ class FederatedRecall:
 
 
 def get_federated_recall(**kwargs: Any) -> FederatedRecall:
+    if "active_agent" not in kwargs or "federation_root" not in kwargs:
+        from app.runtime.context import get_runtime_context
+
+        context = get_runtime_context()
+        kwargs.setdefault("active_agent", context.agent_name)
+        shared_home = getattr(context, "shared_home", None)
+        if not isinstance(shared_home, (str, Path)):
+            shared_home = Path.home() / ".titan"
+        kwargs.setdefault("federation_root", Path(shared_home))
     return FederatedRecall(**kwargs)

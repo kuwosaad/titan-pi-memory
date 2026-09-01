@@ -59,6 +59,29 @@ def _freeze(value: Any) -> Any:
     return value
 
 
+def _deep_merge(base: Mapping[str, object], override: Mapping[str, object]) -> dict[str, object]:
+    """Merge an agent settings override without discarding nested defaults."""
+
+    merged: dict[str, object] = dict(base)
+    for key, value in override.items():
+        current = merged.get(str(key))
+        if isinstance(current, Mapping) and isinstance(value, Mapping):
+            merged[str(key)] = _deep_merge(current, value)
+        else:
+            merged[str(key)] = value
+    return merged
+
+
+def _load_yaml_mapping(path: Path) -> dict[str, object]:
+    if yaml is None:
+        return {}
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return {}
+    return dict(loaded) if isinstance(loaded, dict) else {}
+
+
 @dataclass(frozen=True)
 class RuntimeContext:
     """Resolved paths and settings for one Titan process.
@@ -69,6 +92,7 @@ class RuntimeContext:
 
     agent_name: str
     titan_home: Path
+    shared_home: Path
     base_dir: Path
     trace_dir: Path
     settings_path: Path
@@ -134,19 +158,29 @@ class RuntimeContext:
         resolved_agent = str(merged.get("TITAN_AGENT_NAME") or agent or "default")
         titan_home = Path(merged.get("TITAN_HOME", str(provisional_home))).expanduser().resolve()
         base_dir = Path(merged.get("TITAN_BASE_DIR", str(titan_home))).expanduser().resolve()
+        configured_shared_home = str(merged.get("TITAN_SHARED_HOME") or "").strip()
+        if configured_shared_home:
+            shared_home = Path(configured_shared_home).expanduser().resolve()
+        else:
+            shared_home = titan_home
+            for candidate in (base_dir, titan_home):
+                if candidate.name == resolved_agent and candidate.parent.name == "agents":
+                    shared_home = candidate.parent.parent.resolve()
+                    break
         trace_dir = Path(merged.get("TITAN_SPOOL_DIR", str(base_dir / "traces"))).expanduser().resolve()
-        settings_path = Path(
-            merged.get("TITAN_SETTINGS_PATH", str(root / "config" / "settings.yaml"))
-        ).expanduser().resolve()
-
-        raw_settings: dict[str, object] = {}
-        if yaml is not None:
-            try:
-                loaded = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    raw_settings = dict(loaded)
-            except (OSError, yaml.YAMLError):
-                raw_settings = {}
+        explicit_settings = str(merged.get("TITAN_SETTINGS_PATH") or "").strip()
+        bundled_settings_path = (root / "config" / "settings.yaml").resolve()
+        local_settings_path = (base_dir / "config" / "settings.yaml").resolve()
+        if explicit_settings:
+            settings_path = Path(explicit_settings).expanduser().resolve()
+            raw_settings = _load_yaml_mapping(settings_path)
+        else:
+            raw_settings = _load_yaml_mapping(bundled_settings_path)
+            if local_settings_path != bundled_settings_path and local_settings_path.exists():
+                raw_settings = _deep_merge(raw_settings, _load_yaml_mapping(local_settings_path))
+                settings_path = local_settings_path
+            else:
+                settings_path = bundled_settings_path
 
         backend = str(merged.get("TITAN_MEMORY_BACKEND") or raw_settings.get("memory_store_backend", "sqlite")).strip().lower() or "sqlite"
         fallback = str(merged.get("TITAN_MEMORY_READ_FALLBACK") or raw_settings.get("memory_store_read_fallback", "json")).strip().lower() or "json"
@@ -167,6 +201,7 @@ class RuntimeContext:
         return cls(
             agent_name=resolved_agent,
             titan_home=titan_home,
+            shared_home=shared_home,
             base_dir=base_dir,
             trace_dir=trace_dir,
             settings_path=settings_path,
@@ -242,7 +277,9 @@ def get_runtime_context(**kwargs: object) -> RuntimeContext:
     key = (str(_default_root()), signature)
     context = _CACHE.get(key)
     if context is None:
-        context = RuntimeContext.from_environment()
+        context = RuntimeContext.from_environment(
+            adapter_defaults=adapter_defaults_from_environment(),
+        )
         _CACHE[key] = context
     return context
 

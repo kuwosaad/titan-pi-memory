@@ -1909,27 +1909,27 @@ def retrieve_memory_brief(
         active_agent = get_runtime_context().agent_name
     except Exception:
         active_agent = "default"
-    if sources is not None or active_agent == "codex":
-        from app.retrieval_pipeline.federated import FederatedRecall
+    from app.retrieval_pipeline.federated import get_federated_recall
 
-        recall = FederatedRecall(active_agent=active_agent)
-        federated_hits = recall.query_hits(
-            safe_query,
-            session_id=session_id,
-            limit=selected_limit,
-            mode=selected_mode,
-            sources=sources,
-            intent=selected_intent,
-            date_from=date_from,
-            date_to=date_to,
-        )
-        hits = federated_hits
-    else:
+    recall = get_federated_recall(active_agent=active_agent)
+    selected_sources = recall.sources(sources)
+    if selected_sources == [active_agent]:
         hits = retrieve_memories(
             safe_query,
             session_id=session_id,
             top_k=selected_limit,
             mode=selected_mode,
+            intent=selected_intent,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    else:
+        hits = recall.query_hits(
+            safe_query,
+            session_id=session_id,
+            limit=selected_limit,
+            mode=selected_mode,
+            sources=sources,
             intent=selected_intent,
             date_from=date_from,
             date_to=date_to,
@@ -1969,10 +1969,10 @@ def retrieve_memory_brief(
         "route": route,
     }
 
-    if sources is not None or active_agent == "codex":
-        scene_refs = FederatedRecall(active_agent=active_agent).scene_references(retrieved_memories, sources=sources)
-    else:
+    if selected_sources == [active_agent]:
         scene_refs = scene_references_from_memories(retrieved_memories)
+    else:
+        scene_refs = recall.scene_references(retrieved_memories, sources=sources)
     response["scene_refs"] = scene_refs
     if include_scenes:
         response["scenes"] = scene_refs
@@ -1988,19 +1988,19 @@ def get_scene_context(scene_id: str, source_agent: Optional[str] = None) -> Dict
     if not normalized_scene_id:
         return {"error": "scene_id is required", "scene_id": normalized_scene_id}
 
+    if source_agent is None:
+        scene = get_scene(normalized_scene_id)
+        if not scene:
+            return {"error": "scene not found", "scene_id": normalized_scene_id}
+        return {"scene": scene.model_dump()}
+
     try:
         from app.runtime.context import get_runtime_context
         active_agent = get_runtime_context().agent_name
     except Exception:
         active_agent = "default"
-    if source_agent is not None or active_agent == "codex":
-        from app.retrieval_pipeline.federated import FederatedRecall
+    from app.retrieval_pipeline.federated import get_federated_recall
 
-        return FederatedRecall(active_agent=active_agent).get_scene_context(
-            normalized_scene_id, source_agent=source_agent
-        )
-
-    scene = get_scene(normalized_scene_id)
-    if not scene:
-        return {"error": "scene not found", "scene_id": normalized_scene_id}
-    return {"scene": scene.model_dump()}
+    return get_federated_recall(active_agent=active_agent).get_scene_context(
+        normalized_scene_id, source_agent=source_agent
+    )

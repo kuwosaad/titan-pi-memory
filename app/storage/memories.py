@@ -1038,70 +1038,43 @@ def get_recent_memories(
     session_id: Optional[str] = None,
     sources: Optional[list[str] | tuple[str, ...] | str] = None,
 ) -> List[Memory]:
-    # Codex recall is federated by default, while Pi and other agents retain
-    # their namespace-local default.  This call stays read-only and passes
-    # explicit repositories into the federation seam.
+    # Recall is federated by default for every agent. This call stays read-only
+    # and passes explicit repositories into the federation seam.
     try:
         from app.runtime.context import get_runtime_context
         active_agent = get_runtime_context().agent_name
     except Exception:
         active_agent = "default"
-    if sources is not None or active_agent == "codex":
-        from app.retrieval_pipeline.federated import FederatedRecall
+    # Resolve the active repository here so dependency overrides and test
+    # doubles on this module remain authoritative. Foreign-only selections do
+    # not need (or create) the active store.
+    from app.retrieval_pipeline.federated import get_federated_recall
 
-        # Resolve the active repository here so dependency overrides and
-        # test doubles on this module remain authoritative.  Foreign-only
-        # source selections do not need (or create) the active store.
-        source_probe = FederatedRecall(active_agent=active_agent)
-        selected_sources = source_probe.sources(sources)
-        active_repositories = {}
-        storage_repository_is_default = get_memory_repository is _REAL_GET_MEMORY_REPOSITORY
-        effective_sources = sources
-        if sources is None and not storage_repository_is_default:
-            # A caller-provided repository is an explicit local dependency;
-            # do not silently mix it with ambient Pi state.  Callers that
-            # want federation can still request sources explicitly.
-            selected_sources = [active_agent]
-            effective_sources = selected_sources
-        if active_agent in selected_sources:
-            active_repositories[active_agent] = get_memory_repository()
-        recall = FederatedRecall(
-            active_agent=active_agent,
-            memory_repositories=active_repositories,
-            # A patched/overridden storage resolver must be fully isolated
-            # from the process-global buffer.  The stable sentinel remains
-            # true for the ordinary production resolver, preserving Codex's
-            # pending-memory behavior across import orderings.
-            include_active_buffer=(
-                active_agent in selected_sources
-                and storage_repository_is_default
-            ),
-        )
-        records = recall.get_recent_memories(
-            limit=limit, session_id=session_id, sources=effective_sources
-        )
-        return [Memory(**_normalize_memory(record)) for record in records]
-
+    source_probe = get_federated_recall(active_agent=active_agent)
+    selected_sources = source_probe.sources(sources)
+    active_repositories = {}
     storage_repository_is_default = get_memory_repository is _REAL_GET_MEMORY_REPOSITORY
-    memories = get_memory_repository().get_recent_memories(limit=limit, session_id=session_id)
-
-    if storage_repository_is_default:
-        try:
-            from app.save_pipeline.dedup_buffer import peek_dedup_buffer
-            buf_limit = max((limit // 2) if limit is not None else 100, 2)
-            buffer_entries = peek_dedup_buffer(limit=buf_limit, session_id=session_id)
-            seen_ids = {mem.get("id") for mem in memories}
-            for buf in buffer_entries:
-                entry = dict(buf)
-                entry.pop("_buffer_ts", None)
-                if entry.get("id") not in seen_ids:
-                    memories.append(entry)
-                    seen_ids.add(entry.get("id"))
-        except Exception:
-            pass
-
-    memories.sort(key=lambda m: m.get("ts", ""), reverse=True)
-    return [Memory(**_normalize_memory(mem)) for mem in (memories if limit is None else memories[:limit])]
+    effective_sources = selected_sources if sources is None else sources
+    if sources is None and not storage_repository_is_default:
+        # An injected repository is an explicit local dependency. Keep tests
+        # and isolated callers away from ambient agent workspaces unless they
+        # request federation explicitly.
+        selected_sources = [active_agent]
+        effective_sources = selected_sources
+    if active_agent in selected_sources:
+        active_repositories[active_agent] = get_memory_repository()
+    recall = get_federated_recall(
+        active_agent=active_agent,
+        memory_repositories=active_repositories,
+        include_active_buffer=(
+            active_agent in selected_sources
+            and storage_repository_is_default
+        ),
+    )
+    records = recall.get_recent_memories(
+        limit=limit, session_id=session_id, sources=effective_sources
+    )
+    return [Memory(**_normalize_memory(record)) for record in records]
 
 
 def get_memory_count(session_id: Optional[str] = None) -> int:

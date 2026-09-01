@@ -2,7 +2,7 @@
 
 Your Codex agent should remember.
 
-Titan Memory gives Codex durable project memory: prior decisions, scene recovery, recent work, graph inspection, pattern workflows, and passive session capture. It runs locally through MCP and stores Codex memory under your own `~/.titan/agents/codex` directory.
+Titan Memory gives Codex durable project memory: prior decisions, scene recovery, recent work, graph inspection, pattern workflows, and passive session capture. It runs locally through MCP and writes Codex data under your own `~/.titan/agents/codex` directory. Recall is read-only and federated across all discovered agent namespaces.
 
 ## Install
 
@@ -68,7 +68,8 @@ Use Titan patterns workflow to inspect candidate patterns.
 
 ## Privacy and local storage
 
-Titan Memory is local-first. Codex memory lives under:
+Titan Memory is local-first. Codex writes memory and operational state only
+under:
 
 ```text
 ~/.titan/agents/codex
@@ -82,14 +83,19 @@ Passive capture writes hook traces under:
 
 Passive capture only starts after you trust hooks in `/hooks`. If you do not trust hooks, active MCP tools can still work, but passive session capture will not run.
 
-## Cross-agent memory
+## Federated recall
 
-Codex memory is isolated from Pi, Claude Code, Aider, and OpenCode by default. This avoids mixing namespaces unexpectedly.
+By default, `query_memories` and other recall tools search every discovered
+agent namespace under `~/.titan/agents` through a read-only federation. A
+missing or invalid namespace is skipped. Every result keeps its `source_agent`
+provenance; when a result belongs to another agent, pass that value to
+`get_scene_context` to recover the correct foreign scene.
 
-If Codex memory is empty but you have useful Pi or Claude history, ask explicitly:
+Codex never writes into another agent's namespace. Traces, pending/spool state,
+and pattern workspaces remain local to Codex. Cross-agent import is a separate
+operation when you need a copied record, not a prerequisite for recall:
 
 ```text
-Search Pi memories too.
 Use memory-sync to import Claude Code history into Codex memory.
 ```
 

@@ -27,11 +27,12 @@ Codex writes to its own local namespace, normally:
 ```
 
 Pi uses `~/.titan/agents/pi`. Codex does not write Pi data. Its default recall
-path is a read-only federation over `codex` and `pi`; an absent namespace is
-skipped and other agent namespaces require explicit source selection. Codex
-continues writing only to `codex`, while cross-agent imports remain explicit.
-This is the live Codex MCP behavior: recall tools query the federation by
-default, but write tools and passive hook capture stay in the Codex namespace.
+path is a read-only federation over every valid agent namespace discovered
+under the shared Titan root; absent, invalid, or unreadable namespaces are
+skipped. Codex continues writing only to `codex`, while cross-agent imports
+remain explicit. This is the live Codex MCP behavior: recall tools query the
+federation by default, but write tools, passive hook capture, settings, neural
+state, patterns, and graphs stay in the Codex namespace.
 
 The supported local setup and repair entrypoints are:
 

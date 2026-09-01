@@ -63,11 +63,11 @@ Passive hook traces are stored under:
 ```
 
 Codex writes only to its `codex` namespace. Its default recall path is a
-read-only federation over `codex` plus `pi`; missing namespaces are skipped.
-Claude Code, Aider, and OpenCode remain opt-in sources, and cross-agent imports
-remain explicit operations. Codex retains write isolation even when it reads
-Pi memories. In a live Codex session, the MCP recall tools use this federation
-by default; writes and passive hook traces remain Codex-only.
+read-only federation over every valid namespace discovered under the shared
+Titan root; missing, invalid, and unreadable namespaces are skipped. Codex
+retains write isolation even when it reads another agent's memories. In a live
+Codex session, the MCP recall tools use this federation by default; writes,
+settings, neural state, and passive hook traces remain Codex-only.
 
 ## Useful commands
 

@@ -106,6 +106,35 @@ class NpmTitanMemoryCliPackageTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stderr)
             self.assertEqual(json.loads(previous.read_text(encoding="utf-8")), legacy)
 
+    def test_runtime_cache_files_do_not_trigger_reinstallation(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            runtime_home = root / "runtime"
+            env = os.environ.copy()
+            env.update({
+                "HOME": str(root / "home"),
+                "CODEX_HOME": str(root / "codex"),
+                "TITAN_RUNTIME_HOME": str(runtime_home),
+                "TITAN_NPM_NO_VENV": "1",
+                "PYTHON": "/opt/miniconda3/bin/python3",
+            })
+            command = ["node", str(PACKAGE_DIR / "bin" / "titan.js"), "--help"]
+            first = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
+            self.assertEqual(first.returncode, 0, first.stderr)
+
+            version_dir = runtime_home / "versions" / "0.1.3"
+            sentinel = version_dir / ".venv" / "preserved"
+            sentinel.parent.mkdir(parents=True)
+            sentinel.write_text("keep", encoding="utf-8")
+            cache = version_dir / "app" / "__pycache__" / "generated.pyc"
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_bytes(b"cache")
+
+            second = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
+
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertTrue(sentinel.exists())
+
     def test_marketplace_refreshes_when_plugin_script_changes(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             env = os.environ.copy()

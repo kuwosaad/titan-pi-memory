@@ -124,13 +124,14 @@ Full guide: [`integrations/grok_titan_plugin/README.md`](integrations/grok_titan
 - Codex: [`integrations/codex_titan_plugin/`](integrations/codex_titan_plugin/)
 - Claude Code: [`integrations/claude_titan_plugin/`](integrations/claude_titan_plugin/)
 
-Codex writes durable data only to its own local namespace:
-`~/.titan/agents/codex` (including `traces/`). Its default recall path is a
-read-only federation over `codex` plus `pi`; an absent or empty Pi namespace is
-simply skipped. Codex never writes into Pi. Other agents remain opt-in sources,
-and cross-agent imports remain explicit operations. In a live Codex session,
-the MCP recall tools use that federation by default; write tools and passive
-hooks continue to target only the Codex namespace.
+Each agent writes durable data only to its own local namespace, such as
+`~/.titan/agents/codex` or `~/.titan/agents/claude-code`. Default recall is a
+read-only federation over every discovered namespace under
+`~/.titan/agents`; absent or invalid namespaces are skipped. Recall results
+retain `source_agent`, and retrieving a scene from another agent must pass that
+value to `get_scene_context`. No agent writes into another agent's namespace.
+Traces, pending/spool events, and pattern workspaces remain local, and this
+federation introduces no new adapters or coordination layer.
 
 ---
 

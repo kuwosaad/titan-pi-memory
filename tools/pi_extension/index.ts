@@ -521,8 +521,15 @@ interface TitanMemory {
   type: string;
   session_id?: string;
   scene_id?: string;
+  /** Agent namespace that owns this memory (for federated recall). */
+  source_agent?: string;
   ts?: string;
   [key: string]: unknown;
+}
+
+/** Add federated provenance to human-readable memory result lines. */
+function memorySourceRef(memory: TitanMemory): string {
+  return memory.source_agent ? ` [source: ${memory.source_agent}]` : "";
 }
 
 interface TitanScene {
@@ -729,8 +736,15 @@ async function apiRetrieve(
   return (await safeJson(res)) as unknown as TitanRetrieveResponse;
 }
 
-async function apiGetScene(sceneId: string): Promise<Record<string, unknown>> {
-  const res = await fetch(`${TITAN_API_BASE}/api/scenes/${encodeURIComponent(sceneId)}`);
+async function apiGetScene(
+  sceneId: string,
+  source_agent?: string,
+): Promise<Record<string, unknown>> {
+  const params = new URLSearchParams();
+  if (source_agent) params.set("source_agent", source_agent);
+  const query = params.toString();
+  const url = `${TITAN_API_BASE}/api/scenes/${encodeURIComponent(sceneId)}${query ? `?${query}` : ""}`;
+  const res = await fetch(url);
   return safeJson(res);
 }
 
@@ -1343,6 +1357,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       date_from: Type.Optional(Type.String({ description: "Start date/time filter for query_memories, ISO 8601." })),
       date_to: Type.Optional(Type.String({ description: "End date/time filter for query_memories, ISO 8601." })),
       scene_id: Type.Optional(Type.String({ description: "Scene ID for get_scene_context." })),
+      source_agent: Type.Optional(Type.String({ description: "Optional owning agent namespace for federated scene recall." })),
       goal: Type.Optional(Type.String({ description: "Goal for store_trace_packet." })),
       thoughts: Type.Optional(Type.String({ description: "Optional thoughts/decisions for store_trace_packet." })),
       outcome: Type.Optional(Type.String({ description: "Optional outcome for store_trace_packet." })),
@@ -1421,7 +1436,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         }
         const lines = memories.map((m, i) => {
           const sceneRef = m.scene_id ? ` [scene: ${m.scene_id}]` : "";
-          return `${i + 1}. ${m.text}${sceneRef}`;
+          return `${i + 1}. ${m.text}${sceneRef}${memorySourceRef(m)}`;
         });
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
@@ -1433,7 +1448,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         if (!params.scene_id) {
           return { content: [{ type: "text" as const, text: "scene_id is required for get_scene_context." }] };
         }
-        const data = await apiGetScene(params.scene_id);
+        const data = await apiGetScene(params.scene_id, params.source_agent);
         if ("error" in data) {
           return { content: [{ type: "text" as const, text: String(data.error) }] };
         }
@@ -1469,7 +1484,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         }
         const lines = memories.map((m, i) => {
           const sceneRef = m.scene_id ? ` [scene: ${m.scene_id}]` : "";
-          return `${i + 1}. ${m.text}${sceneRef}`;
+          return `${i + 1}. ${m.text}${sceneRef}${memorySourceRef(m)}`;
         });
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
@@ -1570,7 +1585,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
 
       const lines = memories.map((m, i) => {
         const sceneRef = m.scene_id ? ` [scene: ${m.scene_id}]` : "";
-        return `${i + 1}. ${m.text}${sceneRef}`;
+        return `${i + 1}. ${m.text}${sceneRef}${memorySourceRef(m)}`;
       });
 
       return {
@@ -1590,6 +1605,9 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       scene_id: Type.String({
         description: "The scene ID to retrieve (shown in memory results)",
       }),
+      source_agent: Type.Optional(Type.String({
+        description: "Optional owning agent namespace for federated scene recall",
+      })),
     }),
     async execute(_toolCallId, params) {
       if (!(await isServerHealthy())) {
@@ -1599,7 +1617,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
           ],
         };
       }
-      const data = await apiGetScene(params.scene_id);
+      const data = await apiGetScene(params.scene_id, params.source_agent);
       if ("error" in data) {
         return {
           content: [{ type: "text" as const, text: String(data.error) }],
@@ -1692,7 +1710,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       }
       const lines = memories.map((m, i) => {
         const sceneRef = m.scene_id ? ` [scene: ${m.scene_id}]` : "";
-        return `${i + 1}. ${m.text}${sceneRef}`;
+        return `${i + 1}. ${m.text}${sceneRef}${memorySourceRef(m)}`;
       });
       return {
         content: [{ type: "text" as const, text: lines.join("\n") }],
@@ -2376,7 +2394,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
           return;
         }
         const lines = memories.map(
-          (m, i) => `${i + 1}. ${m.text}` + (m.scene_id ? ` [scene: ${m.scene_id}]` : ""),
+          (m, i) => `${i + 1}. ${m.text}` + (m.scene_id ? ` [scene: ${m.scene_id}]` : "") + memorySourceRef(m),
         );
         ctx.ui.notify(`Memory results:\n${lines.join("\n")}`, "info");
       } catch (err) {
@@ -2400,7 +2418,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
           return;
         }
         const lines = memories.map(
-          (m, i) => `${i + 1}. ${m.text}` + (m.scene_id ? ` [scene: ${m.scene_id}]` : ""),
+          (m, i) => `${i + 1}. ${m.text}` + (m.scene_id ? ` [scene: ${m.scene_id}]` : "") + memorySourceRef(m),
         );
         ctx.ui.notify(`Recent memories:\n${lines.join("\n")}`, "info");
       } catch (err) {

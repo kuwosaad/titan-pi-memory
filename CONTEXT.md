@@ -55,16 +55,27 @@ An **Agent Namespace** is the isolated filesystem and configuration scope for
 one agent identity. It includes the resolved agent name, Titan home, base
 directory, trace/spool directory, settings and model configuration paths, and
 the Memory database path. Adapters (Pi, Codex, Claude, CLI, HTTP, and MCP)
-may choose different defaults, but they must resolve the same layout contract
-and must never accidentally read another agent's pending state or traces.
+may choose different defaults, but they must resolve the same layout contract.
 
-Codex's default write namespace is `~/.titan/agents/codex`; Pi's is
-`~/.titan/agents/pi`. Codex writes only to `codex`. Its default recall path is
-the read-only federation over `codex` and `pi`, while other agent namespaces
-require explicit source selection. Missing namespaces are skipped; writes
-remain isolated. The live Codex MCP recall tools use this federation by
-default; write tools and passive capture remain Codex-only. Cross-agent
-imports are separate explicit operations.
+Every agent writes only to its own namespace, for example
+`~/.titan/agents/codex` or `~/.titan/agents/pi`. Default memory recall is a
+read-only federation over all discovered agent namespaces under
+`~/.titan/agents`; missing or invalid namespaces are skipped. Recall results
+preserve their `source_agent` provenance, and callers must pass that
+`source_agent` when retrieving a scene from a foreign namespace. Operational
+state remains local: traces, pending/spool events, settings, and pattern
+workspaces are never federated or written across namespaces. Federation adds
+no new adapters or coordination protocol; it is a read path over existing
+agent stores.
+
+`TITAN_SHARED_HOME` may select a non-default federation root without changing
+the established meaning of `TITAN_HOME` or `TITAN_BASE_DIR`. When absent, the
+runtime derives the shared root from a conventional `<root>/agents/<agent>`
+workspace and otherwise preserves legacy isolated homes. Bundled settings are
+immutable defaults; an optional `<agent>/config/settings.yaml` deeply overrides
+them for that agent only. An explicit `TITAN_SETTINGS_PATH` remains a full
+replacement. Local recall may evolve the active namespace's LNN state, but
+foreign recall never persists activation, tau, or weight changes.
 
 ## Compatibility rule
 

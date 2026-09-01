@@ -206,14 +206,14 @@ async def query_memories(
         for mem in records
     )
     if sources is not None or has_provenance:
-        from app.retrieval_pipeline.federated import FederatedRecall
+        from app.retrieval_pipeline.federated import get_federated_recall
 
         scene_inputs = [
             mem if isinstance(mem, dict) else mem.model_dump()
             for mem in records
         ]
         scene_refs = await asyncio.to_thread(
-            FederatedRecall(active_agent=_RUNTIME_CONTEXT.agent_name).scene_references,
+            get_federated_recall(active_agent=_RUNTIME_CONTEXT.agent_name).scene_references,
             scene_inputs,
             sources=sources,
         )
@@ -269,8 +269,8 @@ def _load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def _count_agent_namespace_memories(agent_name: str) -> int:
-    namespace = Path.home() / ".titan" / "agents" / agent_name
+def _count_agent_namespace_memories(agent_name: str, shared_home: Optional[Path] = None) -> int:
+    namespace = (shared_home or (Path.home() / ".titan")) / "agents" / agent_name
     # Agent stores live below ``out/memories``; the older sibling path caused
     # doctor to report an empty namespace even when recall could read it.
     memories_dir = namespace / "out" / "memories"
@@ -293,12 +293,37 @@ def _count_agent_namespace_memories(agent_name: str) -> int:
     return 0
 
 
-def _cross_agent_memory_status(agent_name: str, current_memory_count: int) -> dict:
+def _discover_agent_namespaces(shared_home: Optional[Path] = None) -> list[str]:
+    """Return valid agent namespace names present in the shared Titan home."""
+
+    from app.retrieval_pipeline.federated import discover_agent_namespaces
+
+    return discover_agent_namespaces(shared_home)
+
+
+def _default_recall_sources(agent_name: str, shared_home: Optional[Path] = None) -> list[str]:
+    """Use the real federation seam so Doctor cannot drift from recall."""
+
+    from app.retrieval_pipeline.federated import get_federated_recall
+
+    return get_federated_recall(
+        active_agent=agent_name,
+        federation_root=shared_home or (Path.home() / ".titan"),
+    ).sources()
+
+
+def _cross_agent_memory_status(
+    agent_name: str,
+    current_memory_count: int,
+    shared_home: Optional[Path] = None,
+) -> dict:
+    discovered_agents = _discover_agent_namespaces(shared_home)
+    recall_sources = _default_recall_sources(agent_name, shared_home)
     other_agents = []
-    for other_agent in ("pi", "claude-code", "aider", "opencode"):
+    for other_agent in discovered_agents:
         if other_agent == agent_name:
             continue
-        count = _count_agent_namespace_memories(other_agent)
+        count = _count_agent_namespace_memories(other_agent, shared_home)
         if count > 0:
             other_agents.append({"agent": other_agent, "memory_count": count})
 
@@ -313,6 +338,8 @@ def _cross_agent_memory_status(agent_name: str, current_memory_count: int) -> di
 
     return {
         "default_scope": agent_name,
+        "default_sources": recall_sources,
+        "discovered_agents": discovered_agents,
         "other_agents_with_memories": other_agents,
         "note": note,
     }
@@ -359,7 +386,7 @@ def _provider_key_status(agent_home: Path) -> dict:
 async def doctor() -> dict:
     agent_name = os.getenv("TITAN_AGENT_NAME", "codex")
     agent_home = _current_titan_home()
-    titan_home = Path.home() / ".titan"
+    shared_home = Path(os.getenv("TITAN_SHARED_HOME", str(_RUNTIME_CONTEXT.shared_home))).expanduser().resolve()
     spool_dir_env = os.getenv("TITAN_SPOOL_DIR")
     if spool_dir_env:
         trace_dir = Path(spool_dir_env).expanduser()
@@ -369,21 +396,50 @@ async def doctor() -> dict:
     tools = await server.list_tools()
     ingest_interval = float(os.getenv("TITAN_AUTO_INGEST_INTERVAL_SECONDS", "3"))
     config_files = {
-        "settings": ROOT_DIR / "config" / "settings.yaml",
-        "extraction_models": ROOT_DIR / "config" / "extraction_models.yaml",
-        "embedding_models": ROOT_DIR / "config" / "embedding_models.yaml",
+        "settings": _RUNTIME_CONTEXT.settings_path,
+        "extraction_models": _RUNTIME_CONTEXT.extraction_config_path,
+        "embedding_models": _RUNTIME_CONTEXT.embedding_config_path,
     }
-    required_config_files = {name: path.exists() for name, path in config_files.items()}
+    required_config_files = {name: bool(path and path.exists()) for name, path in config_files.items()}
     provider_keys = _provider_key_status(agent_home)
     memory_count = get_memory_count()
     memory_repository = get_memory_repository()
     lnn_supported = get_lnn_state_repository() is not None
+    agent_namespace = agent_home
+    default_recall_sources = _default_recall_sources(agent_name, shared_home)
+    # Recall always goes through the read-only federation seam.  Its source
+    # list may contain only the active agent when no sibling namespace exists.
+    default_recall_scope = "federated"
+    cross_agent_memory = _cross_agent_memory_status(agent_name, memory_count, shared_home)
+    active_write_workspace = {
+        "agent": agent_name,
+        "home": str(agent_home),
+        "path": str(agent_home),
+        "namespace": str(agent_namespace),
+        "base_dir": str(_RUNTIME_CONTEXT.base_dir),
+        "trace_dir": str(trace_dir),
+        "memory_db": str(_RUNTIME_CONTEXT.memory_db_path),
+    }
 
     return {
         "agent_name": agent_name,
         "agent_home": str(agent_home),
-        "agent_namespace": str(Path.home() / ".titan" / "agents" / agent_name),
-        "titan_home": str(titan_home),
+        "agent_namespace": str(agent_namespace),
+        "titan_home": str(shared_home),
+        "shared_home": str(shared_home),
+        "active_write_workspace": active_write_workspace,
+        "write_workspace": str(agent_home),
+        "default_recall": {
+            "scope": default_recall_scope,
+            "sources": default_recall_sources,
+            "read_only": True,
+        },
+        # Flat aliases make the new fields easy to consume while preserving
+        # the established nested report shape for existing clients.
+        "default_recall_scope": default_recall_scope,
+        "default_recall_sources": default_recall_sources,
+        "recall_scope": default_recall_scope,
+        "recall_sources": default_recall_sources,
         "trace_dir": str(trace_dir),
         "trace_dir_exists": trace_dir.exists(),
         "trace_file_count": len(trace_files),
@@ -395,7 +451,7 @@ async def doctor() -> dict:
             "lnn_status": "enabled" if lnn_supported else "unsupported for selected backend",
             "adapter": memory_repository.__class__.__name__,
         },
-        "cross_agent_memory": _cross_agent_memory_status(agent_name, memory_count),
+        "cross_agent_memory": cross_agent_memory,
         "mcp_tool_count": len(tools),
         "mcp_tools": [tool.name for tool in tools],
         "auto_ingest": {
@@ -404,6 +460,10 @@ async def doctor() -> dict:
             "interval_seconds": ingest_interval,
         },
         "required_config_files": required_config_files,
+        "settings_scope": {
+            "effective_path": str(_RUNTIME_CONTEXT.settings_path),
+            "agent_local": _RUNTIME_CONTEXT.settings_path.is_relative_to(_RUNTIME_CONTEXT.base_dir),
+        },
         "provider_keys": provider_keys,
         "recent_trace_files_exist": len(trace_files) > 0,
         "recent_trace_files": [path.name for path in trace_files[-5:]],
