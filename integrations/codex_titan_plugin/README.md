@@ -12,7 +12,7 @@ Run one command:
 npx -y titan-memory-cli@latest setup codex
 ```
 
-That command prepares Titan, creates the Codex memory folder, asks which extraction model to use, configures the required `nomic-embed-text:v1.5` embedding model, installs this plugin, patches Codex MCP config, and runs a health check.
+That command prepares Titan, creates the Codex memory folder, asks which extraction model to use, configures the required `nomic-embed-text:v1.5` embedding model, installs this plugin, patches Codex MCP config, materializes the stable marketplace under `~/.titan/codex-marketplace`, and runs a health check.
 
 Then do the one manual safety step Codex requires:
 
@@ -26,7 +26,7 @@ Advanced manual install, only if you are debugging the plugin itself:
 
 ```bash
 npm install -g titan-memory-cli
-npx codex-marketplace add kuwosaad/titan-memory-codex --plugin --global
+npx codex-marketplace add kuwosaad/titan-pi-memory --plugin --global
 titan setup codex
 ```
 
@@ -36,7 +36,7 @@ Codex requires manual hook trust. Titan will not bypass that safety gate.
 
 Inside Codex:
 
-1. run `/hooks` and trust `python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py`
+1. run `/hooks` and trust exactly `python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py`
 2. run `/mcp` and confirm `titan-memory`
 3. run `/plugins` and confirm Titan Memory is installed
 

@@ -1,12 +1,13 @@
 {
   "mcpServers": {
     "titan-memory": {
-      "command": "npx",
-      "args": ["-y", "titan-memory-cli@latest", "mcp", "--agent", "codex"],
+      "command": "python3",
+      "args": ["./scripts/titan_mcp_launcher.py", "--agent", "codex"],
+      "cwd": ".",
       "env": {
         "TITAN_AGENT_NAME": "codex"
       },
-      "startup_timeout_sec": 20,
+      "startup_timeout_sec": 120,
       "tool_timeout_sec": 120
     }
   }

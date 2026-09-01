@@ -82,6 +82,9 @@ class PatternApplication(BaseModel):
     query: str
     task_id: Optional[str] = None
     retrieved_at: str = Field(default_factory=now_iso)
+    shown_at: Optional[str] = None
+    used_at: Optional[str] = None
+    outcome_observed_at: Optional[str] = None
     was_used: Optional[bool] = None
     outcome: Optional[str] = None
     feedback: Optional[str] = None

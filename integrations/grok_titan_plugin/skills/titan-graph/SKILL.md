@@ -9,14 +9,8 @@ Show the local Titan graph for agent `grok`.
 
 ## Steps
 
-1. Tell the user to run:
-
-```bash
-titan graph --agent grok --open
-```
-
-2. If the user asks you to run it, use the shell to launch that command.
-3. Optionally call `inspect_clusters` for a text-side summary of related memory clusters before or after opening the UI.
+1. Run `titan-grok graph --open` (or `titan graph --agent grok --open`).
+2. Optionally `titan-grok clusters` for a text map first.
 
 ## Notes
 

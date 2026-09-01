@@ -5,5 +5,5 @@ pyyaml
 numpy
 networkx
 pydantic
-mcp
+mcp>=1.5.0,<2
 rich

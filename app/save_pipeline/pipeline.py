@@ -49,7 +49,7 @@ from app.storage.memories import (
 from app.storage.models import IngestResult, Scene, SceneMessage, SceneReference, TraceEvent, TracePacketRequest
 from app.storage.notes import append_memory_notes
 from app.storage.scenes import append_scene, get_scene, get_scene_references, get_scenes, get_session_scenes  # compatibility for retrieval test patches
-from app.storage.sessions import BASE_DIR, ensure_dirs
+from app.storage.sessions import BASE_DIR, ensure_dirs, interprocess_lock
 from app.storage.traces import (
     append_retry_entry,
     append_event,
@@ -1537,6 +1537,15 @@ def _ingest_trace_event_impl(event: TraceEvent, process_new: bool = True) -> Dic
 
 
 def _ingest_spool_session_impl(session_id: str, spool_dir: str = ".opencode/titan/traces") -> Dict[str, Any]:
+    """Serialize a complete spool ingest across duplicate MCP processes."""
+
+    spool_path = Path(spool_dir).expanduser()
+    lock_path = spool_path / ".titan-ingest.lock"
+    with interprocess_lock(lock_path):
+        return _ingest_spool_session_unlocked(session_id=session_id, spool_dir=spool_dir)
+
+
+def _ingest_spool_session_unlocked(session_id: str, spool_dir: str = ".opencode/titan/traces") -> Dict[str, Any]:
     ensure_dirs()
     spool_path = Path(spool_dir)
     ingest_counts = ingest_spool_file(session_id, spool_path)
@@ -1843,6 +1852,7 @@ _PUBLIC_MEMORY_FIELDS = (
     "memory_kind",
     "ts",
     "source_event_ids",
+    "source_agent",
 )
 
 
@@ -1870,6 +1880,7 @@ def retrieve_memory_brief(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     include_scenes: bool = False,
+    sources: Optional[list[str] | tuple[str, ...] | str] = None,
 ) -> Dict[str, Any]:
     from app.retrieval_pipeline.retriever import retrieve_memories
     from app.retrieval_pipeline.config import load_settings
@@ -1893,15 +1904,36 @@ def retrieve_memory_brief(
     selected_mode = mode or str(route.get("mode") or "both")
     selected_limit = limit if limit is not None else int(route.get("top_k") or 8)
     selected_intent = str(route.get("intent") or "balanced")
-    hits = retrieve_memories(
-        safe_query,
-        session_id=session_id,
-        top_k=selected_limit,
-        mode=selected_mode,
-        intent=selected_intent,
-        date_from=date_from,
-        date_to=date_to,
-    )
+    try:
+        from app.runtime.context import get_runtime_context
+        active_agent = get_runtime_context().agent_name
+    except Exception:
+        active_agent = "default"
+    if sources is not None or active_agent == "codex":
+        from app.retrieval_pipeline.federated import FederatedRecall
+
+        recall = FederatedRecall(active_agent=active_agent)
+        federated_hits = recall.query_hits(
+            safe_query,
+            session_id=session_id,
+            limit=selected_limit,
+            mode=selected_mode,
+            sources=sources,
+            intent=selected_intent,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        hits = federated_hits
+    else:
+        hits = retrieve_memories(
+            safe_query,
+            session_id=session_id,
+            top_k=selected_limit,
+            mode=selected_mode,
+            intent=selected_intent,
+            date_from=date_from,
+            date_to=date_to,
+        )
     memory_brief = build_memory_notes(
         hits, max_items=max_items, max_chars=max_chars,
         cluster_mode=settings.get("step2", {}).get("cluster_compression_enabled", False),
@@ -1937,7 +1969,10 @@ def retrieve_memory_brief(
         "route": route,
     }
 
-    scene_refs = scene_references_from_memories(retrieved_memories)
+    if sources is not None or active_agent == "codex":
+        scene_refs = FederatedRecall(active_agent=active_agent).scene_references(retrieved_memories, sources=sources)
+    else:
+        scene_refs = scene_references_from_memories(retrieved_memories)
     response["scene_refs"] = scene_refs
     if include_scenes:
         response["scenes"] = scene_refs
@@ -1948,13 +1983,24 @@ def retrieve_memory_brief(
     return response
 
 
-def get_scene_context(scene_id: str) -> Dict[str, Any]:
+def get_scene_context(scene_id: str, source_agent: Optional[str] = None) -> Dict[str, Any]:
     normalized_scene_id = str(scene_id or "").strip()
     if not normalized_scene_id:
         return {"error": "scene_id is required", "scene_id": normalized_scene_id}
 
+    try:
+        from app.runtime.context import get_runtime_context
+        active_agent = get_runtime_context().agent_name
+    except Exception:
+        active_agent = "default"
+    if source_agent is not None or active_agent == "codex":
+        from app.retrieval_pipeline.federated import FederatedRecall
+
+        return FederatedRecall(active_agent=active_agent).get_scene_context(
+            normalized_scene_id, source_agent=source_agent
+        )
+
     scene = get_scene(normalized_scene_id)
     if not scene:
         return {"error": "scene not found", "scene_id": normalized_scene_id}
-
     return {"scene": scene.model_dump()}

@@ -171,10 +171,21 @@ def resolve_trace_dir(env: dict[str, str] | None = None) -> Path:
 
 def append_trace_events(trace_dir: Path, session_id: str, records: list[dict[str, Any]]) -> Path:
     trace_dir.mkdir(parents=True, exist_ok=True)
+    # Hook payloads can contain private conversation text. Keep the spool
+    # private even when the parent ~/.titan directory was created by another
+    # tool with permissive defaults.
+    try:
+        trace_dir.chmod(0o700)
+    except OSError:
+        pass
     path = trace_dir / f"{_safe_session_id(session_id)}.jsonl"
     with path.open("a", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
     return path
 
 

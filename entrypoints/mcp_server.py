@@ -180,31 +180,62 @@ async def query_memories(
     limit: int = 20,
     query: Optional[str] = None,
     mode: Optional[str] = None,
+    sources: Optional[list[str] | str] = None,
 ) -> dict:
     if query:
-        payload = await asyncio.to_thread(
-            retrieve_memory_brief,
-            query=query,
-            session_id=session_id,
-            mode=mode,
-            limit=limit,
-            include_scenes=False,
-        )
+        kwargs = {
+            "query": query,
+            "session_id": session_id,
+            "mode": mode,
+            "limit": limit,
+            "include_scenes": False,
+        }
+        if sources is not None:
+            kwargs["sources"] = sources
+        payload = await asyncio.to_thread(retrieve_memory_brief, **kwargs)
         payload["memories"] = [_serialize_memory(mem) for mem in payload.get("memories", [])]
         return payload
 
-    records = await asyncio.to_thread(load_recent_memories, limit=limit, session_id=session_id)
+    kwargs = {"limit": limit, "session_id": session_id}
+    if sources is not None:
+        kwargs["sources"] = sources
+    records = await asyncio.to_thread(load_recent_memories, **kwargs)
     memories = [_serialize_memory(mem) for mem in records]
+    has_provenance = any(
+        (mem.get("source_agent") if isinstance(mem, dict) else getattr(mem, "source_agent", None))
+        for mem in records
+    )
+    if sources is not None or has_provenance:
+        from app.retrieval_pipeline.federated import FederatedRecall
+
+        scene_inputs = [
+            mem if isinstance(mem, dict) else mem.model_dump()
+            for mem in records
+        ]
+        scene_refs = await asyncio.to_thread(
+            FederatedRecall(active_agent=_RUNTIME_CONTEXT.agent_name).scene_references,
+            scene_inputs,
+            sources=sources,
+        )
+    else:
+        scene_refs = await asyncio.to_thread(scene_references_from_memories, memories)
     return {
         "count": len(memories),
         "memories": memories,
-        "scene_refs": await asyncio.to_thread(scene_references_from_memories, memories),
+        "scene_refs": scene_refs,
     }
 
 
 @server.tool()
-async def get_recent_memories(session_id: Optional[str] = None, limit: int = 20) -> dict:
-    records = load_recent_memories(limit=limit, session_id=session_id)
+async def get_recent_memories(
+    session_id: Optional[str] = None,
+    limit: int = 20,
+    sources: Optional[list[str] | str] = None,
+) -> dict:
+    kwargs = {"limit": limit, "session_id": session_id}
+    if sources is not None:
+        kwargs["sources"] = sources
+    records = load_recent_memories(**kwargs)
     memories = [_serialize_memory(mem) for mem in records]
     return {"count": len(memories), "memories": memories}
 
@@ -240,7 +271,9 @@ def _load_yaml(path: Path) -> dict:
 
 def _count_agent_namespace_memories(agent_name: str) -> int:
     namespace = Path.home() / ".titan" / "agents" / agent_name
-    memories_dir = namespace / "memories"
+    # Agent stores live below ``out/memories``; the older sibling path caused
+    # doctor to report an empty namespace even when recall could read it.
+    memories_dir = namespace / "out" / "memories"
     sqlite_path = memories_dir / "memory_store.db"
     if sqlite_path.exists():
         try:
@@ -275,7 +308,7 @@ def _cross_agent_memory_status(agent_name: str, current_memory_count: int) -> di
         if pi_count:
             note = (
                 "Codex memory is empty, but Pi has Titan memories. "
-                "Default recall remains scoped to Codex; ask explicitly to search Pi memories or run memory-sync."
+                "Default Codex recall also searches Pi memories when available."
             )
 
     return {
@@ -560,8 +593,10 @@ async def patterns_import_bundle(path: str, overwrite: bool = False, mark_progre
     return import_pattern_bundle(bundle, overwrite=overwrite, import_progress=mark_progress)
 
 
-async def get_scene_context(scene_id: str) -> dict:
-    return build_scene_context(scene_id)
+async def get_scene_context(scene_id: str, source_agent: Optional[str] = None) -> dict:
+    if source_agent is None:
+        return build_scene_context(scene_id)
+    return build_scene_context(scene_id, source_agent=source_agent)
 
 
 server.tool()(get_scene_context)

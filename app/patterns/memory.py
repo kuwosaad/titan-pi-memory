@@ -15,9 +15,8 @@ from typing import Any, Optional, Sequence
 from .errors import PatternNotFound, PatternStorageUnavailable, PatternValidation
 from .models import Pattern, PatternApplication, PatternEvidence
 from .processing import PatternProcessingLedger
-from .store import PatternStore, PatternValidationError
+from .store import PatternStore, PatternValidationError, _UNSET
 from .storage import resolve_pattern_db_path
-
 
 class PatternMemory:
     """Durable pattern-card and processing lifecycle service."""
@@ -63,6 +62,8 @@ class PatternMemory:
         validate_memory_ids: bool = True,
         min_support_evidence: int = 1,
     ) -> Pattern:
+        if pattern.status != "candidate":
+            raise PatternValidation("New patterns must be created with candidate status")
         try:
             return self.store.create_pattern(
                 pattern,
@@ -85,6 +86,16 @@ class PatternMemory:
         except (OSError, sqlite3.Error) as exc:
             raise PatternStorageUnavailable(str(exc)) from exc
 
+    def restore_pattern(self, pattern_id: str) -> Pattern:
+        try:
+            return self.store.restore_pattern(pattern_id)
+        except KeyError as exc:
+            raise PatternNotFound(pattern_id) from exc
+        except PatternValidationError as exc:
+            raise PatternValidation(str(exc)) from exc
+        except (OSError, sqlite3.Error) as exc:
+            raise PatternStorageUnavailable(str(exc)) from exc
+
     def evidence(self, pattern_id: str, *, role: Optional[str] = None) -> list[PatternEvidence]:
         try:
             return self.store.list_evidence(pattern_id, role=role)
@@ -96,6 +107,51 @@ class PatternMemory:
     def record_application(self, application: PatternApplication) -> PatternApplication:
         try:
             return self.store.record_application(application)
+        except PatternValidationError as exc:
+            raise PatternValidation(str(exc)) from exc
+        except (OSError, sqlite3.Error) as exc:
+            raise PatternStorageUnavailable(str(exc)) from exc
+
+    def update_application_outcome(
+        self,
+        application_id: str,
+        *,
+        shown_at: Optional[str] | object = _UNSET,
+        used_at: Optional[str] | object = _UNSET,
+        outcome_observed_at: Optional[str] | object = _UNSET,
+        was_used: Optional[bool] | object = _UNSET,
+        outcome: Optional[str] | object = _UNSET,
+        feedback: Optional[str] | object = _UNSET,
+    ) -> PatternApplication:
+        try:
+            return self.store.update_application(
+                application_id,
+                shown_at=shown_at,
+                used_at=used_at,
+                outcome_observed_at=outcome_observed_at,
+                was_used=was_used,
+                outcome=outcome,
+                feedback=feedback,
+            )
+        except KeyError as exc:
+            raise PatternNotFound(application_id) from exc
+        except PatternValidationError as exc:
+            raise PatternValidation(str(exc)) from exc
+        except (OSError, sqlite3.Error) as exc:
+            raise PatternStorageUnavailable(str(exc)) from exc
+
+    # Additive compatibility alias for callers that use the shorter verb.
+    def update_application(self, application_id: str, **kwargs: Any) -> PatternApplication:
+        return self.update_application_outcome(application_id, **kwargs)
+
+    def list_applications(
+        self,
+        *,
+        pattern_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[PatternApplication]:
+        try:
+            return self.store.list_applications(pattern_id=pattern_id, limit=limit)
         except PatternValidationError as exc:
             raise PatternValidation(str(exc)) from exc
         except (OSError, sqlite3.Error) as exc:

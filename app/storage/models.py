@@ -21,6 +21,7 @@ class Memory(BaseModel):
     scene_id: Optional[str] = Field(None, description="Parent scene ID for the interaction that produced this memory")
     provenance: Dict[str, str] = Field(..., description="Original user/assistant messages")
     source_event_ids: List[str] = Field(default_factory=list, description="Trace event lineage")
+    source_agent: Optional[str] = Field(None, description="Agent namespace that owns this memory")
     source_type: str = Field("unknown", description="Source: user|assistant|code|mixed")
     source_reliability: float = Field(0.5, description="Reliability score 0.0-1.0")
     verification_status: str = Field("unverified", description="unverified|verified|rejected")

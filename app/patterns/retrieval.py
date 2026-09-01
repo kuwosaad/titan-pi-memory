@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from app.retrieval_pipeline.config import load_settings
-from .models import Pattern, PatternApplication
+from .models import Pattern, PatternApplication, now_iso
 from .storage import resolve_pattern_db_path as _resolve_pattern_db_path
 from .store import PatternStore, PatternValidationError
 
@@ -91,7 +91,15 @@ def retrieve_accepted_patterns(
     selected = hits[:safe_limit]
     for hit in selected:
         try:
-            store.record_application(PatternApplication(pattern_id=hit["pattern"]["id"], query=safe_query))
+            retrieved_at = now_iso()
+            store.record_application(
+                PatternApplication(
+                    pattern_id=hit["pattern"]["id"],
+                    query=safe_query,
+                    retrieved_at=retrieved_at,
+                    shown_at=retrieved_at,
+                )
+            )
         except Exception:
             # Retrieval guidance should never fail the main memory response.
             pass

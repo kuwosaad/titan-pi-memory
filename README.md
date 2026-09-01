@@ -1,8 +1,14 @@
 # titan-pi-memory
 
-> **Persistent evolutionary memory for the Pi coding agent.**
+> **Persistent evolutionary memory for coding agents.**
 > Titan remembers across sessions — decisions, bugs, architecture,
 > preferences. Conversations become knowledge. Nothing is lost.
+
+> **Canonical source of truth.** This repository owns the Titan engine, agent
+> adapters (including Pi and Codex), Codex plugin, CLI packaging, tests, and
+> release configuration. Pi is one adapter and npm package, not the ownership
+> boundary. The older `titan-karu` checkout and separate Codex/CLI repositories
+> are compatibility distributions; they are not authoritative.
 
 ```bash
 pi install npm:titan-pi-memory
@@ -80,6 +86,51 @@ Every conversation from now on gets remembered.
 ```
 
 Come back tomorrow — Pi will know what you were working on.
+
+---
+
+## Other agents
+
+Titan is one engine. Each agent gets its own room under `~/.titan/agents/<name>/`.
+Adapters live in this repository under `integrations/` (with the Pi adapter
+distributed through this package).
+
+### Grok
+
+```bash
+./integrations/grok_titan_plugin/scripts/install_grok.sh
+```
+
+That prepares `~/.titan/agents/grok`, symlinks the plugin into `~/.grok/plugins/titan-memory`, and puts `titan-grok` on your PATH.
+
+Enable it in `~/.grok/config.toml` if needed:
+
+```toml
+[plugins]
+enabled = ["titan-memory"]
+```
+
+Then restart Grok (or press `r` in `/plugins`) and try:
+
+```bash
+titan-grok doctor
+titan-grok query "what did we decide about Titan"
+```
+
+Full guide: [`integrations/grok_titan_plugin/README.md`](integrations/grok_titan_plugin/README.md).
+
+### Codex and Claude Code
+
+- Codex: [`integrations/codex_titan_plugin/`](integrations/codex_titan_plugin/)
+- Claude Code: [`integrations/claude_titan_plugin/`](integrations/claude_titan_plugin/)
+
+Codex writes durable data only to its own local namespace:
+`~/.titan/agents/codex` (including `traces/`). Its default recall path is a
+read-only federation over `codex` plus `pi`; an absent or empty Pi namespace is
+simply skipped. Codex never writes into Pi. Other agents remain opt-in sources,
+and cross-agent imports remain explicit operations. In a live Codex session,
+the MCP recall tools use that federation by default; write tools and passive
+hooks continue to target only the Codex namespace.
 
 ---
 
@@ -174,6 +225,24 @@ Default is **Ollama + nomic-embed-text** (runs locally, needs Ollama running).
 
 Edit `~/.titan/agents/pi/config/embedding_models.yaml` to switch.
 
+### Codex setup, repair, and hook trust
+
+The canonical install/repair entrypoint is the CLI shipped from this
+repository:
+
+```bash
+titan setup codex
+titan codex verify
+titan codex reinstall-plugin
+```
+
+`setup` prepares the local Codex namespace and configuration; `verify` checks
+the installation; and `reinstall-plugin` repairs the local plugin registration.
+Codex hook trust remains a manual safety decision: open Codex, inspect `/hooks`,
+and trust the Titan hook only if you want passive capture. A successful CLI
+check does not claim that a live Codex session has loaded MCP tools or trusted
+hooks; confirm those separately with `/mcp` and `/hooks`.
+
 ---
 
 ## Development
@@ -194,7 +263,7 @@ npx tsc --noEmit tools/pi_extension/index.ts
 ## Links
 
 - **npm:** [npmjs.com/package/titan-pi-memory](https://www.npmjs.com/package/titan-pi-memory)
-- **Repository:** [github.com/kuwosaad/titan-karu](https://github.com/kuwosaad/titan-karu)
+- **Repository:** [github.com/kuwosaad/titan-pi-memory](https://github.com/kuwosaad/titan-pi-memory)
 - **Pi packages:** [pi.dev/packages](https://pi.dev/packages)
 
 ---
@@ -203,6 +272,7 @@ npx tsc --noEmit tools/pi_extension/index.ts
 
 ```
 app/             → Memory engine (save pipeline, retrieval, graph, storage, API)
+integrations/    → Agent adapters (Pi lives in tools/; Grok, Codex, Claude Code here)
 tools/           → Pi extension (pi_extension/), CLI, benchmarks
 entrypoints/     → HTTP server and MCP server
 config/          → Model and runtime configuration
@@ -284,7 +354,7 @@ If installed via pip, use `titan`. Otherwise: `python3 tools/cli/titan.py`
 ### Project Structure
 
 ```
-titan-karu/
+titan-pi-memory/
 ├── app/
 │   ├── save_pipeline/      # Save flow: ingest → extract → embed → store
 │   │   └── extraction/     # LLM-based memory extraction

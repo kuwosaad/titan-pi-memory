@@ -12,6 +12,9 @@ from app.patterns.models import Pattern
 from app.patterns.store import PatternStore
 from tools.cli.titan import (
     CODEX_REQUIRED_MCP_TOOLS,
+    codex_mcp_stdio_handshake,
+    load_codex_effective_mcp_transport,
+    load_codex_mcp_contract,
     _select_graph_port,
     _setup_codex_model_config,
     bootstrap_agent_home,
@@ -23,8 +26,11 @@ from tools.cli.titan import (
     main,
     patch_codex_config,
     patch_opencode_config,
+    ensure_codex_marketplace_snapshot,
+    resolve_codex_marketplace_plugin_source,
     resolve_agent_trace_dir,
     run_codex_reinstall_plugin,
+    run_codex_verify,
     run_doctor,
     run_connected_loop_test,
     run_graph,
@@ -37,10 +43,114 @@ from tools.cli.titan import (
     run_share,
     run_import_bundle,
     upsert_env_keys,
+    validate_codex_marketplace,
 )
 
 
 class TitanCliTests(unittest.TestCase):
+    def test_codex_effective_mcp_transport_parses_codex_json_contract(self):
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"name": "titan-memory", "transport": {
+                "type": "stdio",
+                "command": "python3",
+                "args": ["./scripts/titan_mcp_launcher.py", "--agent", "codex"],
+                "cwd": "/tmp/titan-cache/.",
+                "env": {"TITAN_AGENT_NAME": "codex", "TITAN_CONTRACT_TEST": "yes"},
+            }}),
+            stderr="",
+        )
+        calls = []
+
+        def run_fn(command, **kwargs):
+            calls.append(command)
+            return completed
+
+        transport = load_codex_effective_mcp_transport(run_fn=run_fn)
+
+        self.assertEqual(transport["command"], "python3")
+        self.assertEqual(transport["args"], ["./scripts/titan_mcp_launcher.py", "--agent", "codex"])
+        self.assertEqual(transport["cwd"], "/tmp/titan-cache/.")
+        self.assertEqual(transport["env"]["TITAN_CONTRACT_TEST"], "yes")
+        # The injected runner receives Codex's exact MCP lookup command.
+        self.assertEqual(calls[0], ["codex", "mcp", "get", "titan-memory", "--json"])
+
+    def test_codex_effective_mcp_transport_rejects_legacy_placeholder(self):
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"transport": {
+                "type": "stdio",
+                "command": "python3",
+                "args": ["${PLUGIN_ROOT}/scripts/titan_mcp_launcher.py"],
+                "cwd": "/tmp/titan-cache/.",
+                "env": {},
+            }}),
+            stderr="",
+        )
+        with patch("tools.cli.titan.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(ValueError, "unsupported.*PLUGIN_ROOT"):
+                load_codex_effective_mcp_transport(run_fn=lambda *args, **kwargs: completed)
+
+    def test_codex_mcp_contract_rejects_legacy_plugin_root_placeholder(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_root = Path(tmp_dir)
+            (plugin_root / ".mcp.json").write_text(
+                json.dumps({"mcpServers": {"titan-memory": {
+                    "command": "python3",
+                    "args": ["${PLUGIN_ROOT}/scripts/titan_mcp_launcher.py"],
+                }}}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "unsupported.*PLUGIN_ROOT"):
+                load_codex_mcp_contract(plugin_root=plugin_root)
+
+    def test_codex_mcp_handshake_executes_materialized_contract_from_plugin_root(self):
+        class FakeProcess:
+            def __init__(self):
+                self.stdin = io.StringIO()
+                self.stdout = io.StringIO(
+                    '{"jsonrpc":"2.0","id":1,"result":{}}\n'
+                    '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"doctor"}]}}\n'
+                )
+                self.stderr = io.StringIO()
+
+            def terminate(self):
+                return None
+
+            def wait(self, timeout=None):
+                return 0
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_root = Path(tmp_dir) / "plugin"
+            plugin_root.mkdir()
+            (plugin_root / ".mcp.json").write_text(
+                json.dumps({"mcpServers": {"titan-memory": {
+                    "command": "python3",
+                    "args": ["./scripts/titan_mcp_launcher.py", "--agent", "codex"],
+                    "cwd": ".",
+                    "env": {"TITAN_CONTRACT_TEST": "yes"},
+                }}}),
+                encoding="utf-8",
+            )
+            calls = []
+            process = FakeProcess()
+
+            def popen(command, **kwargs):
+                calls.append((command, kwargs))
+                return process
+
+            ok, tools, detail = codex_mcp_stdio_handshake(
+                plugin_root=plugin_root,
+                timeout_sec=1,
+                popen_fn=popen,
+            )
+
+        self.assertTrue(ok, detail)
+        self.assertEqual(tools, ["doctor"])
+        self.assertEqual(calls[0][0], ["python3", "./scripts/titan_mcp_launcher.py", "--agent", "codex"])
+        self.assertEqual(calls[0][1]["cwd"], str(plugin_root.resolve()))
+        self.assertEqual(calls[0][1]["env"]["TITAN_CONTRACT_TEST"], "yes")
+
     def test_upsert_env_keys_preserves_existing_order_and_comments(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             env_path = Path(tmp_dir) / ".env"
@@ -359,6 +469,91 @@ class TitanCliTests(unittest.TestCase):
             self.assertIn("enabled = true", text)
             self.assertIn('default_tools_approval_mode = "prompt"', text)
 
+    def test_patch_codex_config_dedupes_all_legacy_and_canonical_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.toml"
+            config_path.write_text(
+                '[plugins."titan-memory@titan-local".mcp_servers."titan-memory"]\n'
+                "enabled = false\n\n"
+                '[plugins."titan-memory@titan-pi-memory".mcp_servers."titan-memory"]\n'
+                "enabled = true\n\n"
+                '[plugins."other"]\nvalue = 1\n',
+                encoding="utf-8",
+            )
+            result = patch_codex_config(config_path=config_path)
+            text = config_path.read_text(encoding="utf-8")
+            self.assertTrue(result["ok"])
+            self.assertEqual(text.count('mcp_servers."titan-memory"]'), 1)
+            self.assertIn('[plugins."other"]', text)
+
+    def test_codex_verify_rejects_orphan_legacy_mcp_block(self):
+        stdout = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            marketplace_root = tmp_path / "codex-marketplace"
+            ok, detail = ensure_codex_marketplace_snapshot(target=marketplace_root)
+            self.assertTrue(ok, detail)
+            config_path = tmp_path / "config.toml"
+            config_path.write_text(
+                generate_codex_mcp_enable_block()
+                + "\n"
+                + '[plugins."titan-memory@titan-local".mcp_servers."titan-memory"]\n'
+                + "enabled = true\n",
+                encoding="utf-8",
+            )
+            trace_dir = tmp_path / "traces"
+            trace_dir.mkdir()
+            with patch("sys.stdout", stdout), patch("tools.cli.titan.CODEX_MARKETPLACE_DIR", marketplace_root), patch(
+                "tools.cli.titan.shutil.which", return_value="/usr/local/bin/codex"
+            ), patch("tools.cli.titan._codex_plugin_files_ok", return_value=(True, [])), patch(
+                "tools.cli.titan.resolve_effective_spool_dir", return_value=trace_dir
+            ), patch(
+                "tools.cli.titan.codex_mcp_stdio_handshake",
+                return_value=(True, CODEX_REQUIRED_MCP_TOOLS, "ok"),
+            ) as handshake_mock:
+                result = run_codex_verify(config_path=config_path)
+
+        self.assertEqual(result, 1)
+        self.assertIn("legacy Titan MCP blocks", stdout.getvalue())
+        handshake_mock.assert_called_once_with(agent="codex")
+
+    def test_codex_marketplace_snapshot_is_a_resolvable_official_tree(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            marketplace_root = Path(tmp_dir) / "codex-marketplace"
+            ok, detail = ensure_codex_marketplace_snapshot(target=marketplace_root)
+            self.assertTrue(ok, detail)
+            self.assertEqual(resolve_codex_marketplace_plugin_source(marketplace_root=marketplace_root), marketplace_root.resolve())
+            self.assertTrue((marketplace_root / ".agents/plugins/marketplace.json").exists())
+            self.assertTrue((marketplace_root / ".codex-plugin/plugin.json").exists())
+
+    def test_codex_marketplace_snapshot_refreshes_when_script_changes(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            marketplace_root = Path(tmp_dir) / "codex-marketplace"
+            ok, detail = ensure_codex_marketplace_snapshot(target=marketplace_root)
+            self.assertTrue(ok, detail)
+            script = marketplace_root / "scripts" / "titan_mcp_launcher.py"
+            original = script.read_text(encoding="utf-8")
+            script.write_text("stale launcher\n", encoding="utf-8")
+
+            ok, detail = ensure_codex_marketplace_snapshot(target=marketplace_root)
+
+            self.assertTrue(ok, detail)
+            self.assertEqual(script.read_text(encoding="utf-8"), original)
+
+    def test_codex_marketplace_rejects_source_escape(self):
+        payload = {
+            "name": "titan-pi-memory",
+            "interface": {"displayName": "Titan"},
+            "plugins": [{
+                "name": "titan-memory",
+                "source": {"source": "local", "path": "../outside"},
+                "policy": {"installation": "AVAILABLE"},
+            }],
+        }
+        valid, reason = validate_codex_marketplace(payload)
+        self.assertFalse(valid)
+        self.assertIn("inside the marketplace root", reason)
+
     def test_main_codex_commands_route_to_helpers(self):
         with patch("tools.cli.titan.run_codex_doctor", return_value=0) as doctor_mock:
             self.assertEqual(main(["codex", "doctor"]), 0)
@@ -421,17 +616,16 @@ class TitanCliTests(unittest.TestCase):
         self.assertIn("TITAN_EXTRACTION_CONFIG_PATH=", agent_env)
         self.assertIn("TITAN_EMBEDDING_CONFIG_PATH=", agent_env)
 
-    def test_run_setup_codex_patches_config_and_verifies_tools(self):
+    def test_run_setup_codex_patches_config_without_mcp_introspection(self):
         stdout = io.StringIO()
         with tempfile.TemporaryDirectory() as tmp_dir, patch("sys.stdout", stdout), patch(
             "tools.cli.titan.TITAN_HOME", Path(tmp_dir) / "titan-home"
         ), patch(
+            "tools.cli.titan.CODEX_MARKETPLACE_DIR", Path(tmp_dir) / "codex-marketplace"
+        ), patch(
             "tools.cli.titan._setup_codex_model_config",
             return_value={},
-        ) as model_setup_mock, patch(
-            "tools.cli.titan.list_titan_mcp_tools_for_agent",
-            return_value=list(CODEX_REQUIRED_MCP_TOOLS),
-        ):
+        ) as model_setup_mock:
             config_path = Path(tmp_dir) / "config.toml"
             exit_code = run_setup_codex(config_path=config_path, skip_plugin_install=True)
             config_text = config_path.read_text(encoding="utf-8")
@@ -440,7 +634,21 @@ class TitanCliTests(unittest.TestCase):
         model_setup_mock.assert_called_once()
         self.assertIn(generate_codex_mcp_enable_block().strip(), config_text)
         self.assertTrue(trace_dir_exists)
-        self.assertIn("Titan MCP exports", stdout.getvalue())
+        self.assertIn("exact MCP launcher", stdout.getvalue())
+
+    def test_run_setup_codex_passes_custom_config_to_post_install_repair(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            config_path = tmp_path / "custom-config.toml"
+            with patch("tools.cli.titan.TITAN_HOME", tmp_path / "titan-home"), patch(
+                "tools.cli.titan.CODEX_MARKETPLACE_DIR", tmp_path / "codex-marketplace"
+            ), patch("tools.cli.titan._setup_codex_model_config", return_value={}), patch(
+                "tools.cli.titan.run_codex_reinstall_plugin", return_value=0
+            ) as reinstall_mock, patch("tools.cli.titan.patch_codex_config") as patch_config_mock:
+                self.assertEqual(run_setup_codex(config_path=config_path), 0)
+
+        reinstall_mock.assert_called_once_with(config_path=config_path)
+        patch_config_mock.assert_not_called()
 
     def test_run_codex_reinstall_plugin_dry_run_prints_commands(self):
         stdout = io.StringIO()
@@ -448,7 +656,56 @@ class TitanCliTests(unittest.TestCase):
             exit_code = run_codex_reinstall_plugin(dry_run=True)
         self.assertEqual(exit_code, 0)
         self.assertIn("codex plugin remove titan-memory@titan-local --json", stdout.getvalue())
-        self.assertIn("codex plugin add titan-memory@titan-local --json", stdout.getvalue())
+        self.assertIn("codex plugin add titan-memory@titan-pi-memory --json", stdout.getvalue())
+        self.assertIn("after final plugin add: patch Codex config", stdout.getvalue())
+
+    def test_run_codex_reinstall_plugin_cleans_legacy_marketplaces_after_canonical_add(self):
+        calls = []
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        def run(command, **kwargs):
+            calls.append(command)
+            return completed
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.toml"
+            with patch("tools.cli.titan.ensure_codex_marketplace_snapshot", return_value=(True, "ok")), patch(
+                "tools.cli.titan.shutil.which", return_value="/usr/local/bin/codex"
+            ), patch("tools.cli.titan.subprocess.run", side_effect=run):
+                self.assertEqual(run_codex_reinstall_plugin(config_path=config_path), 0)
+
+            self.assertIn(generate_codex_mcp_enable_block().strip(), config_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(calls[0][0:4], ["codex", "plugin", "marketplace", "add"])
+        self.assertEqual(calls[1][0:5], ["codex", "plugin", "marketplace", "remove", "titan-karu-lab"])
+        self.assertEqual(calls[-1][0:4], ["codex", "plugin", "add", "titan-memory@titan-pi-memory"])
+
+    def test_codex_verify_rejects_legacy_plugin_registration(self):
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"installed": [
+                {"pluginId": "titan-memory@titan-pi-memory", "installed": True, "enabled": True},
+                {"pluginId": "titan-memory@titan-local", "installed": True, "enabled": True},
+            ]}),
+            stderr="",
+        )
+        with patch("tools.cli.titan.subprocess.run", return_value=completed), patch(
+            "tools.cli.titan.shutil.which", return_value="/usr/local/bin/codex"
+        ):
+            from tools.cli.titan import _codex_plugin_registration_status
+            ok, detail = _codex_plugin_registration_status()
+        self.assertFalse(ok)
+        self.assertIn("legacy Titan plugin registrations remain", detail)
+
+    def test_codex_verify_rejects_missing_canonical_plugin_registration(self):
+        completed = SimpleNamespace(returncode=0, stdout=json.dumps({"installed": []}), stderr="")
+        with patch("tools.cli.titan.subprocess.run", return_value=completed), patch(
+            "tools.cli.titan.shutil.which", return_value="/usr/local/bin/codex"
+        ):
+            from tools.cli.titan import _codex_plugin_registration_status
+            ok, detail = _codex_plugin_registration_status()
+        self.assertFalse(ok)
+        self.assertIn("not installed and enabled", detail)
 
     def test_main_doctor_defaults_to_opencode(self):
         with patch("tools.cli.titan.run_doctor", return_value=0) as doctor_mock:

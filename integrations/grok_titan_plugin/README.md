@@ -8,7 +8,14 @@ This plugin does **not** invent a new memory engine. Grok talks to the existing 
 
 ## Local dogfood install
 
-From the `titan-karu` repo:
+From this repo (`titan-pi-memory`):
+
+```bash
+# one-shot: prepare ~/.titan/agents/grok, symlink the plugin, put titan-grok on PATH
+./integrations/grok_titan_plugin/scripts/install_grok.sh
+```
+
+Or do the same steps by hand:
 
 ```bash
 # prepare agent home + print first-run steps
@@ -17,6 +24,10 @@ python3 integrations/grok_titan_plugin/scripts/titan_first_run.py --prepare
 # copy or symlink the plugin into Grok's user plugin dir
 mkdir -p ~/.grok/plugins
 ln -sfn "$(pwd)/integrations/grok_titan_plugin" ~/.grok/plugins/titan-memory
+
+# Pi-parity CLI so this Grok session can use Titan before MCP reloads
+mkdir -p ~/.local/bin
+ln -sfn "$(pwd)/integrations/grok_titan_plugin/scripts/titan-grok" ~/.local/bin/titan-grok
 ```
 
 Then enable the plugin if needed in `~/.grok/config.toml`:
@@ -37,6 +48,14 @@ Inside Grok:
 1. `/plugins` — confirm `titan-memory` is enabled
 2. `/mcps` — confirm `titan-memory` MCP is connected
 3. Try `/titan-status`, `/titan-query`, `/titan-save`, `/titan-recent`
+
+From any shell (or from Grok, without waiting for MCP):
+
+```bash
+titan-grok doctor
+titan-grok query "what did we decide about Titan"
+titan-grok recent
+```
 
 You can reprint the onboarding checklist:
 
@@ -73,11 +92,32 @@ Exposed by the `titan-memory` server (call via `use_tool` as `titan-memory__<too
 | `/titan-graph` | Open the local graph UI |
 | `/titan-setup` | Create/verify agent home and wiring |
 | `/titan-clusters` | Inspect / analyze clusters |
+| `/titan-cortex` | Cortex / bridge analysis |
+| `/titan-patterns` | Pattern status / list |
+| `/titan-key` | Set extraction API key |
+| `/titan-dashboard` | Open the graph UI |
 | `titan-grok-memory` | Pi-style operating manual (query, scenes, temporal, save) |
 | `/memory-sync` | Import Pi / Claude / Codex / Grok history into Grok Titan |
 | `titan-memory-workflow` | Archaeology / graph-shaped synthesis |
 | `titan-doctor-workflow` | Auto-routed diagnostics |
 | `titan-patterns-workflow` | Optional pattern review workflow |
+
+### CLI (`titan-grok`)
+
+Grok cannot register native tools the way Pi does. `titan-grok` is the equivalent surface:
+
+```bash
+titan-grok query "what did we decide about X"
+titan-grok query "" --from 2026-08-13 --to 2026-08-14
+titan-grok recent
+titan-grok scene <scene_id>
+titan-grok save --goal "..." --outcome "..."
+titan-grok doctor
+titan-grok clusters
+titan-grok cortex 1,2 --question "how do these relate"
+titan-grok patterns status
+titan-grok graph --open
+```
 
 ### Passive capture
 

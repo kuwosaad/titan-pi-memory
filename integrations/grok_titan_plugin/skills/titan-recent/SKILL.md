@@ -9,7 +9,7 @@ Browse recent memories in the Grok namespace (`~/.titan/agents/grok`).
 
 ## Steps
 
-1. Call `get_recent_memories` via `use_tool` with `titan-memory__get_recent_memories` (or the listed `titan-memory` tool).
+1. Run `titan-grok recent`. MCP equivalent: `titan-memory__get_recent_memories`.
 2. Summarize the newest useful items with timestamps when present.
 3. Offer to expand a specific scene with `get_scene_context` or deepen with `query_memories`.
 

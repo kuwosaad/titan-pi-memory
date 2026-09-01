@@ -13,7 +13,7 @@ from app.embedding.embedder import embed
 from app.save_pipeline.extraction.extractor import is_hidden_metadata_memory
 from app.graph.similarity import cosine_similarity
 from app.storage.memories import query_memory_candidates, query_memory_candidates_with_text, unpack_embedding
-from app.storage.repository import CandidateFilters
+from app.storage.repository import CandidateFilters, MemoryStore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -2234,6 +2234,7 @@ def retrieve_memories(
     intent: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    repository: Optional[MemoryStore] = None,
 ) -> List[Dict[str, Any]]:
     """Compatibility entrypoint preserving Titan's ten-parameter contract."""
 
@@ -2249,7 +2250,13 @@ def retrieve_memories(
         date_from=date_from,
         date_to=date_to,
     )
-    return RetrievalEngine(_retrieve_memories_impl).retrieve(request)
+    if repository is None:
+        return RetrievalEngine(_retrieve_memories_impl).retrieve(request)
+    return _retrieve_memories_impl(
+        query,
+        repository=repository,
+        **request.runner_kwargs(),
+    )
 
 
 def _retrieve_memories_impl(
@@ -2263,6 +2270,7 @@ def _retrieve_memories_impl(
     intent: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    repository: Optional[MemoryStore] = None,
 ) -> List[Dict[str, Any]]:
     from .config import load_settings
     settings = load_settings()
@@ -2308,14 +2316,22 @@ def _retrieve_memories_impl(
 
     fts_query = _build_fts_query(query)
     if fts_query:
-        lexical_candidates = query_memory_candidates_with_text(fts_query, filters)
+        lexical_candidates = (
+            repository.query_candidates_with_text(fts_query, filters)
+            if repository is not None
+            else query_memory_candidates_with_text(fts_query, filters)
+        )
         if selection_enabled and bool(selection_config.get("hybrid_candidates_enabled", True)):
-            semantic_candidates = query_memory_candidates(filters)
+            semantic_candidates = (
+                repository.query_candidates(filters)
+                if repository is not None
+                else query_memory_candidates(filters)
+            )
             filtered = _merge_candidate_lanes(lexical_candidates, semantic_candidates)
         else:
             filtered = lexical_candidates
     else:
-        filtered = query_memory_candidates(filters)
+        filtered = repository.query_candidates(filters) if repository is not None else query_memory_candidates(filters)
     filtered = apply_hidden_metadata_filter(filtered)
     filtered = _dedupe_prefer_latest(filtered)
 

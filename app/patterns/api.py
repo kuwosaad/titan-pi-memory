@@ -3,18 +3,20 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.retrieval_pipeline.config import load_settings
 from app.storage.memories import _resolve_sqlite_path
 
 from .miner import build_evidence_packet
 from .memory import PatternMemory
-from .models import Pattern, PatternEvidence
+from .models import Pattern, PatternApplication, PatternEvidence, now_iso
 from .processing import PatternProcessingLedger
 from .errors import PatternDisabled, PatternNotFound, PatternStorageUnavailable, PatternValidation
 from .storage import connect_pattern_db
@@ -22,6 +24,7 @@ from .store import PatternStore
 
 
 logger = logging.getLogger(__name__)
+_RFC3339_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 
 
 DEFAULT_PATTERN_CONFIG = {
@@ -89,6 +92,49 @@ class PatternEvidencePacketRequest(BaseModel):
     packet_type: Optional[str] = None
     processor_version: Optional[str] = None
     processor_config_hash: Optional[str] = None
+    from_ts: Optional[str] = None
+    to_ts: Optional[str] = None
+    snapshot_cutoff: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_time_window(self) -> "PatternEvidencePacketRequest":
+        parsed: dict[str, datetime] = {}
+        for field_name in ("from_ts", "to_ts", "snapshot_cutoff"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            if not _RFC3339_RE.fullmatch(value):
+                raise ValueError(f"{field_name} must be an RFC3339 timestamp with timezone")
+            try:
+                parsed[field_name] = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError(f"{field_name} must be a valid RFC3339 timestamp") from exc
+        from_value = parsed.get("from_ts")
+        to_value = parsed.get("to_ts")
+        cutoff_value = parsed.get("snapshot_cutoff")
+        if from_value and to_value and from_value > to_value:
+            raise ValueError("from_ts must be earlier than or equal to to_ts")
+        if from_value and cutoff_value and from_value > cutoff_value:
+            raise ValueError("from_ts must be earlier than or equal to snapshot_cutoff")
+        return self
+
+
+class PatternApplicationCreateRequest(BaseModel):
+    query: str
+    task_id: Optional[str] = None
+    retrieved_at: Optional[str] = None
+    was_used: Optional[bool] = None
+    outcome: Optional[str] = None
+    feedback: Optional[str] = None
+    shown_at: Optional[str] = None
+    used_at: Optional[str] = None
+    outcome_observed_at: Optional[str] = None
+
+
+class PatternApplicationOutcomeRequest(BaseModel):
+    was_used: Optional[bool] = None
+    outcome: Optional[str] = None
+    feedback: Optional[str] = None
 
 
 class PatternMarkProcessedRequest(BaseModel):
@@ -106,6 +152,19 @@ def pattern_config() -> dict:
     settings = load_settings()
     configured = settings.get("patterns") if isinstance(settings.get("patterns"), dict) else {}
     return {**DEFAULT_PATTERN_CONFIG, **configured}
+
+
+def get_pattern_capabilities() -> dict:
+    """Return the stable capability handshake for framework adapters."""
+
+    return {
+        "capability_version": "zenkai-v1",
+        "bounded_packets": True,
+        "processor_isolation": True,
+        "candidate_only_creation": True,
+        "application_outcomes": True,
+        "candidate_restore": True,
+    }
 
 
 def processor_identity() -> tuple[str, str]:
@@ -157,15 +216,22 @@ def get_evidence_packet(req: PatternEvidencePacketRequest) -> dict:
         raise PatternDisabled({"error": "patterns are disabled"})
     default_version, default_hash = processor_identity()
     try:
+        packet_kwargs = {
+            "processor_version": req.processor_version or default_version,
+            "processor_config_hash": req.processor_config_hash or default_hash,
+            "db_path": resolve_pattern_db_path(),
+            "batch_size": int(req.batch_size or config.get("batch_size", 100)),
+            "context_limit": int(req.context_limit or config.get("context_limit", 300)),
+            "session_id": req.session_id,
+            "mode": req.mode or str(config.get("packet_mode") or "adaptive"),
+            "packet_type": req.packet_type,
+        }
+        for key in ("from_ts", "to_ts", "snapshot_cutoff"):
+            value = getattr(req, key)
+            if value is not None:
+                packet_kwargs[key] = value
         return build_evidence_packet(
-            processor_version=req.processor_version or default_version,
-            processor_config_hash=req.processor_config_hash or default_hash,
-            db_path=resolve_pattern_db_path(),
-            batch_size=int(req.batch_size or config.get("batch_size", 100)),
-            context_limit=int(req.context_limit or config.get("context_limit", 300)),
-            session_id=req.session_id,
-            mode=req.mode or str(config.get("packet_mode") or "adaptive"),
-            packet_type=req.packet_type,
+            **packet_kwargs,
         )
     except (OSError, sqlite3.Error) as exc:
         raise PatternStorageUnavailable({"error": "Pattern evidence storage is unavailable"}) from exc
@@ -267,6 +333,8 @@ def create_pattern(req: PatternCreateRequest) -> dict:
     config = pattern_config()
     if not bool(config.get("enabled", True)):
         raise PatternDisabled({"error": "patterns are disabled"})
+    if req.status != "candidate":
+        raise PatternValidation({"error": "New patterns must be created with candidate status"})
 
     try:
         pattern = Pattern(
@@ -322,6 +390,46 @@ def accept_pattern(pattern_id: str) -> dict:
 def reject_pattern(pattern_id: str) -> dict:
     pattern = pattern_memory().set_status(pattern_id, "rejected")
     return {"pattern": _dump_model(pattern)}
+
+
+def restore_pattern(pattern_id: str) -> dict:
+    pattern = pattern_memory().restore_pattern(pattern_id)
+    return {"pattern": _dump_model(pattern)}
+
+
+def record_pattern_application(pattern_id: str, req: PatternApplicationCreateRequest) -> dict:
+    try:
+        application = PatternApplication(
+            pattern_id=pattern_id,
+            query=req.query,
+            task_id=req.task_id,
+            retrieved_at=req.retrieved_at or now_iso(),
+            was_used=req.was_used,
+            outcome=req.outcome,
+            feedback=req.feedback,
+            shown_at=req.shown_at,
+            used_at=req.used_at,
+            outcome_observed_at=req.outcome_observed_at,
+        )
+    except ValidationError as exc:
+        raise PatternValidation({"error": str(exc)}) from exc
+    created = pattern_memory().record_application(application)
+    return {"application": _dump_model(created)}
+
+
+def update_pattern_application(application_id: str, req: PatternApplicationOutcomeRequest) -> dict:
+    fields = req.model_fields_set if hasattr(req, "model_fields_set") else req.__fields_set__
+    kwargs = {name: getattr(req, name) for name in fields}
+    updated = pattern_memory().update_application_outcome(application_id, **kwargs)
+    return {"application": _dump_model(updated)}
+
+
+def list_pattern_applications(
+    pattern_id: Optional[str] = None,
+    limit: int = 50,
+) -> dict:
+    applications = pattern_memory().list_applications(pattern_id=pattern_id, limit=limit)
+    return {"applications": [_dump_model(item) for item in applications], "count": len(applications)}
 
 
 def mark_processed(req: PatternMarkProcessedRequest) -> dict:

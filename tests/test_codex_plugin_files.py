@@ -85,10 +85,9 @@ class CodexPluginFileTests(unittest.TestCase):
         payload = json.loads((PLUGIN_DIR / ".mcp.json").read_text(encoding="utf-8"))
         server = payload["mcpServers"]["titan-memory"]
 
-        # The plugin must not require a globally installed `titan` binary.
-        # Codex launches Titan through npm so the one-command setup remains enough.
-        self.assertEqual(server["command"], "npx")
-        self.assertEqual(server["args"], ["-y", "titan-memory-cli@latest", "mcp", "--agent", "codex"])
+        self.assertEqual(server["command"], "python3")
+        self.assertEqual(server["args"], ["./scripts/titan_mcp_launcher.py", "--agent", "codex"])
+        self.assertEqual(server["cwd"], ".")
         self.assertEqual(server["env"]["TITAN_AGENT_NAME"], "codex")
         self.assertTrue((PLUGIN_DIR / "scripts" / "titan_mcp_launcher.py").exists())
         self.assertTrue((PLUGIN_DIR / "scripts" / "titan_first_run.py").exists())
@@ -162,7 +161,7 @@ class CodexPluginFileTests(unittest.TestCase):
 
         payload = json.loads((PLUGIN_DIR / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8"))
         plugin = payload["plugins"][0]
-        self.assertEqual(payload["name"], "titan-memory-codex")
+        self.assertEqual(payload["name"], "titan-pi-memory")
         self.assertEqual(payload["interface"]["displayName"], "Titan Memory for Codex")
         self.assertEqual(plugin["name"], "titan-memory")
         self.assertEqual(plugin["source"], {"source": "local", "path": "./"})

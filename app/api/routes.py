@@ -27,6 +27,8 @@ from app.patterns.bundle import export_pattern_bundle, import_pattern_bundle
 from app.patterns.graph import build_pattern_graph, build_pattern_graph_data
 from app.patterns.api import (
     PatternCreateRequest,
+    PatternApplicationCreateRequest,
+    PatternApplicationOutcomeRequest,
     PatternEvidencePacketRequest,
     PatternMarkProcessedRequest,
     accept_pattern as accept_pattern_impl,
@@ -34,9 +36,14 @@ from app.patterns.api import (
     get_evidence_packet as get_evidence_packet_impl,
     get_pattern as get_pattern_impl,
     get_pattern_status as get_pattern_status_impl,
+    get_pattern_capabilities as get_pattern_capabilities_impl,
     list_patterns as list_patterns_impl,
     mark_processed as mark_pattern_processed_impl,
     reject_pattern as reject_pattern_impl,
+    restore_pattern as restore_pattern_impl,
+    record_pattern_application as record_pattern_application_impl,
+    update_pattern_application as update_pattern_application_impl,
+    list_pattern_applications as list_pattern_applications_impl,
 )
 
 
@@ -184,6 +191,12 @@ def patterns_graph_data(limit: int = 500) -> dict:
     return build_pattern_graph_data(limit=limit)
 
 
+@router.get("/api/patterns/capabilities")
+def patterns_capabilities() -> dict:
+    ensure_dirs()
+    return get_pattern_capabilities_impl()
+
+
 @router.post("/api/patterns/bundle/export")
 def patterns_bundle_export(req: PatternBundleExportRequest) -> dict:
     ensure_dirs()
@@ -242,6 +255,36 @@ def pattern_accept(pattern_id: str) -> dict:
 def pattern_reject(pattern_id: str) -> dict:
     ensure_dirs()
     return reject_pattern_impl(pattern_id)
+
+
+@router.post("/api/patterns/{pattern_id}/restore")
+def pattern_restore(pattern_id: str) -> dict:
+    ensure_dirs()
+    return restore_pattern_impl(pattern_id)
+
+
+@router.post("/api/patterns/{pattern_id}/applications")
+def pattern_application_create(pattern_id: str, req: PatternApplicationCreateRequest) -> dict:
+    ensure_dirs()
+    return record_pattern_application_impl(pattern_id, req)
+
+
+@router.get("/api/patterns/{pattern_id}/applications")
+def pattern_applications_list(pattern_id: str, limit: int = 50) -> dict:
+    ensure_dirs()
+    return list_pattern_applications_impl(pattern_id=pattern_id, limit=limit)
+
+
+@router.get("/api/pattern-applications")
+def pattern_applications_list_all(pattern_id: Optional[str] = None, limit: int = 50) -> dict:
+    ensure_dirs()
+    return list_pattern_applications_impl(pattern_id=pattern_id, limit=limit)
+
+
+@router.patch("/api/pattern-applications/{application_id}")
+def pattern_application_update(application_id: str, req: PatternApplicationOutcomeRequest) -> dict:
+    ensure_dirs()
+    return update_pattern_application_impl(application_id, req)
 
 
 @router.post("/api/patterns/mark-processed")

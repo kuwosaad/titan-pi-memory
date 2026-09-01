@@ -19,6 +19,10 @@ REQUIRED_SKILLS = {
     "titan-graph",
     "titan-setup",
     "titan-clusters",
+    "titan-cortex",
+    "titan-patterns",
+    "titan-key",
+    "titan-dashboard",
 }
 
 EXPECTED_HOOK_EVENTS = {
@@ -134,8 +138,15 @@ class GrokPluginFileTests(unittest.TestCase):
     def test_launcher_and_first_run_scripts_exist(self):
         launcher = PLUGIN_ROOT / "scripts" / "titan_mcp_launcher.py"
         first_run = PLUGIN_ROOT / "scripts" / "titan_first_run.py"
+        cli = PLUGIN_ROOT / "scripts" / "titan-grok"
+        tools = PLUGIN_ROOT / "scripts" / "titan_grok_tools.py"
+        installer = PLUGIN_ROOT / "scripts" / "install_grok.sh"
         self.assertTrue(launcher.exists())
         self.assertTrue(first_run.exists())
+        self.assertTrue(cli.exists(), "titan-grok wrapper must ship in the public plugin")
+        self.assertTrue(tools.exists(), "titan_grok_tools.py must ship in the public plugin")
+        self.assertTrue(installer.exists())
+        self.assertIn("titan-grok", installer.read_text(encoding="utf-8"))
 
         launcher_text = launcher.read_text(encoding="utf-8")
         self.assertIn('DEFAULT_AGENT = "grok"', launcher_text)

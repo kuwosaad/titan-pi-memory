@@ -160,25 +160,87 @@ class PatternProcessingLedger:
         processor_version: str,
         processor_config_hash: str,
         limit: int = 100,
+        session_id: Optional[str] = None,
+        from_ts: Optional[str] = None,
+        to_ts: Optional[str] = None,
+        snapshot_cutoff: Optional[str] = None,
     ) -> List[str]:
         with self._lock, self._connect() as conn:
             if not self._table_exists(conn, "memories"):
                 return []
+            clauses = ["p.memory_id IS NULL"]
+            params: list[object] = [processor_version, processor_config_hash]
+            if session_id:
+                clauses.append("m.session_id = ?")
+                params.append(session_id)
+            if from_ts:
+                clauses.append("m.ts >= ?")
+                params.append(from_ts)
+            if to_ts:
+                clauses.append("m.ts <= ?")
+                params.append(to_ts)
+            if snapshot_cutoff:
+                clauses.append("m.ts <= ?")
+                params.append(snapshot_cutoff)
+            params.append(int(limit))
             rows = conn.execute(
-                """
+                f"""
                 SELECT m.id
                 FROM memories m
                 LEFT JOIN pattern_memory_processing p
                     ON p.memory_id = m.id
                     AND p.processor_version = ?
                     AND p.processor_config_hash = ?
-                WHERE p.memory_id IS NULL
+                WHERE {' AND '.join(clauses)}
                 ORDER BY m.ts ASC, m.id ASC
                 LIMIT ?
                 """,
-                (processor_version, processor_config_hash, int(limit)),
+                tuple(params),
             ).fetchall()
         return [row["id"] for row in rows]
+
+    def count_unprocessed_memory_ids(
+        self,
+        *,
+        processor_version: str,
+        processor_config_hash: str,
+        session_id: Optional[str] = None,
+        from_ts: Optional[str] = None,
+        to_ts: Optional[str] = None,
+        snapshot_cutoff: Optional[str] = None,
+    ) -> int:
+        """Count eligible unprocessed memories using the same window as listing."""
+
+        with self._lock, self._connect() as conn:
+            if not self._table_exists(conn, "memories"):
+                return 0
+            clauses = ["p.memory_id IS NULL"]
+            params: list[object] = [processor_version, processor_config_hash]
+            if session_id:
+                clauses.append("m.session_id = ?")
+                params.append(session_id)
+            if from_ts:
+                clauses.append("m.ts >= ?")
+                params.append(from_ts)
+            if to_ts:
+                clauses.append("m.ts <= ?")
+                params.append(to_ts)
+            if snapshot_cutoff:
+                clauses.append("m.ts <= ?")
+                params.append(snapshot_cutoff)
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS count
+                FROM memories m
+                LEFT JOIN pattern_memory_processing p
+                    ON p.memory_id = m.id
+                    AND p.processor_version = ?
+                    AND p.processor_config_hash = ?
+                WHERE {' AND '.join(clauses)}
+                """,
+                tuple(params),
+            ).fetchone()
+        return int(row["count"] if row else 0)
 
     def status(self, *, processor_version: str, processor_config_hash: str) -> PatternMiningStatus:
         with self._lock, self._connect() as conn:

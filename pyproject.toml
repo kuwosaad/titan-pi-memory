@@ -29,17 +29,17 @@ dependencies = [
   "numpy",
   "networkx",
   "pydantic",
-  "mcp",
+  "mcp>=1.5.0,<2",
 ]
 
 [project.scripts]
 titan = "tools.cli.titan:main"
 
 [project.urls]
-Homepage = "https://github.com/kuwosaad/titan-karu"
-Repository = "https://github.com/kuwosaad/titan-karu"
-"Codex Plugin" = "https://github.com/kuwosaad/titan-memory-codex"
-Issues = "https://github.com/kuwosaad/titan-karu/issues"
+Homepage = "https://github.com/kuwosaad/titan-pi-memory"
+Repository = "https://github.com/kuwosaad/titan-pi-memory"
+"Codex Plugin" = "https://github.com/kuwosaad/titan-pi-memory/tree/main/integrations/codex_titan_plugin"
+Issues = "https://github.com/kuwosaad/titan-pi-memory/issues"
 
 [tool.setuptools.packages.find]
 include = ["app*", "tools*", "entrypoints*", "config*", "integrations*"]

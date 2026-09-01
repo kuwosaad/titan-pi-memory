@@ -33,6 +33,13 @@ class PiExtensionContractTests(unittest.TestCase):
         self.assertIn('ctx.ui.setStatus("titan-memory", "TITAN UNCONFIGURED")', self.source)
         self.assertIn('ctx.ui.setStatus("titan-memory", "TITAN OFFLINE")', self.source)
 
+    def test_server_selects_a_compatible_python_instead_of_first_path_match(self):
+        self.assertIn("function pythonCandidates()", self.source)
+        self.assertIn("process.env.TITAN_PYTHON", self.source)
+        self.assertIn("assert sys.version_info >= (3, 10)", self.source)
+        self.assertIn("const proc = spawn(pythonCommand, [serverScript]", self.source)
+        self.assertNotIn('spawn("python3", [serverScript]', self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

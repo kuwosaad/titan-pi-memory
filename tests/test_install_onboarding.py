@@ -87,7 +87,7 @@ def test_python_package_exposes_the_current_pypi_cli_contract():
 
     assert project["name"] == "titan-memory-cli"
     assert project["readme"] == "docs/pypi_titan_memory_cli.md"
-    assert "mcp" in project["dependencies"]
+    assert "mcp>=1.5.0,<2" in project["dependencies"]
     assert project["scripts"]["titan"] == "tools.cli.titan:main"
     assert "integrations*" in pyproject["tool"]["setuptools"]["packages"]["find"]["include"]
 

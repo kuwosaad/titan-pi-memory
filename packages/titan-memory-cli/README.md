@@ -37,11 +37,16 @@ titan --help
 titan codex list-tools
 ```
 
-On first run, the wrapper creates a Python virtual environment at:
+On first run, the wrapper copies the bundled runtime to a versioned stable location and creates its Python virtual environment at:
 
 ```text
-~/.titan/npm-python
+~/.titan/runtime/versions/<version>/.venv
 ```
+
+The active runtime pointer is `~/.titan/runtime/current.json`; the previous
+pointer is retained at `~/.titan/runtime/previous.json` for rollback. The
+bundled Codex marketplace is kept at `~/.titan/codex-marketplace` so MCP does
+not depend on an npm cache.
 
 and installs Titan's Python dependencies there.
 
@@ -57,12 +62,12 @@ Codex memory is isolated by default under:
 
 ## Environment variables
 
-- `TITAN_NPM_VENV`: override the Python venv path
 - `TITAN_NPM_NO_VENV=1`: run with system Python instead of the managed venv
+- `TITAN_RUNTIME_HOME`: override the managed runtime directory
 - `PYTHON`: choose the Python executable used to create the venv
 
 ## Links
 
-- Codex plugin: https://github.com/kuwosaad/titan-memory-codex
-- CLI source: https://github.com/kuwosaad/titan-memory-cli
+- Canonical source: https://github.com/kuwosaad/titan-pi-memory
+- Codex plugin: https://github.com/kuwosaad/titan-pi-memory/tree/main/integrations/codex_titan_plugin
 - License: Apache-2.0

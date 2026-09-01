@@ -85,6 +85,38 @@ def _pattern() -> Pattern:
 
 
 class PatternStoreTests(unittest.TestCase):
+    def test_old_application_table_migrates_and_retains_compatibility_fields(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            with sqlite3.connect(sqlite_file) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE pattern_applications (
+                        id TEXT PRIMARY KEY,
+                        pattern_id TEXT NOT NULL,
+                        query TEXT NOT NULL,
+                        task_id TEXT,
+                        retrieved_at TEXT NOT NULL,
+                        was_used INTEGER,
+                        outcome TEXT,
+                        feedback TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    "INSERT INTO pattern_applications VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("app-old", "pattern-old", "old query", None, "2026-06-01T00:00:00+00:00", 1, "worked", "legacy"),
+                )
+
+            store = PatternStore(sqlite_file)
+            applications = store.list_applications()
+
+            self.assertEqual(len(applications), 1)
+            self.assertEqual(applications[0].id, "app-old")
+            self.assertIsNone(applications[0].shown_at)
+            self.assertIsNone(applications[0].used_at)
+            self.assertIsNone(applications[0].outcome_observed_at)
+
     def test_pattern_tables_are_created_idempotently(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             sqlite_file = Path(tmp_dir) / "memory_store.db"

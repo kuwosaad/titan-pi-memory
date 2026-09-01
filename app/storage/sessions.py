@@ -1,14 +1,21 @@
 import json
 import os
 import shutil
+import tempfile
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .models import Session, Message
 from app.runtime.context import get_runtime_context
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no POSIX flock
+    fcntl = None
 
 
 _RUNTIME_CONTEXT = get_runtime_context()
@@ -22,6 +29,28 @@ GRAPHS_DIR = OUT_DIR / "graphs"
 _FILE_LOCK = threading.RLock()
 _CONTEXT_BASE_DIR = BASE_DIR
 _CONTEXT_TRACE_DIR = TRACES_DIR
+
+
+@contextmanager
+def interprocess_lock(path: Path):
+    """Serialize read-modify-write transactions shared by agent processes."""
+
+    if fcntl is None:
+        yield
+        return
+
+    lock_path = Path(path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as handle:
+        try:
+            lock_path.chmod(0o600)
+        except OSError:
+            pass
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def refresh_runtime_paths() -> None:
@@ -61,17 +90,35 @@ def read_json(path: Path, default: Any = None) -> Any:
             return default
 
 
-def write_json(path: Path, data: Any) -> None:
-    serialized = json.dumps(data, indent=2, default=str)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+def atomic_write_text(path: Path, serialized: str) -> None:
+    """Replace a file atomically without sharing a temp name across processes."""
 
-    with _FILE_LOCK:
-        with tmp_path.open("w", encoding="utf-8") as handle:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Optional[Path] = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            tmp_path = Path(handle.name)
             handle.write(serialized)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+
+def write_json(path: Path, data: Any) -> None:
+    serialized = json.dumps(data, indent=2, default=str)
+    with _FILE_LOCK:
+        atomic_write_text(path, serialized)
 
 
 def session_path(session_id: str) -> Path:
@@ -119,15 +166,23 @@ def _migrate_legacy_trace_files() -> None:
         target = TRACES_DIR / name
         if source == target or not source.exists() or target.exists():
             continue
-        temporary = target.with_suffix(f"{target.suffix}.migration.tmp")
+        temporary: Optional[Path] = None
         try:
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=f".{name}.",
+                suffix=".migration.tmp",
+                dir=target.parent,
+            )
+            os.close(fd)
+            temporary = Path(temporary_name)
             shutil.copyfile(source, temporary)
             os.replace(temporary, target)
         except OSError:
             # A read-only or concurrently removed legacy file can be retried
             # on the next invocation without taking down the active store.
             try:
-                temporary.unlink(missing_ok=True)
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
             except OSError:
                 pass
             continue

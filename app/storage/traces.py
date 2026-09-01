@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from .sessions import TRACES_DIR, ensure_dirs, read_json, write_json
+from .sessions import TRACES_DIR, atomic_write_text, ensure_dirs, interprocess_lock, read_json, write_json
 
 
 LOGGER = logging.getLogger(__name__)
@@ -412,7 +412,7 @@ def set_pending_user_message(session_id: str, content: str, *, seq: int = 0, eve
     content = str(content or "").strip()
     if not content:
         return
-    with _LOCK:
+    with _LOCK, interprocess_lock(PENDING_USER_MESSAGES_FILE.with_name(f".{PENDING_USER_MESSAGES_FILE.name}.lock")):
         pending = load_pending_user_messages()
         record = pending.get(session_id)
         if not isinstance(record, dict):
@@ -432,7 +432,7 @@ def set_pending_user_message(session_id: str, content: str, *, seq: int = 0, eve
 def set_pending_scene_events(session_id: str, events: List[Dict[str, Any]]) -> None:
     """Atomically replace one session's durable evidence assembly."""
 
-    with _LOCK:
+    with _LOCK, interprocess_lock(PENDING_USER_MESSAGES_FILE.with_name(f".{PENDING_USER_MESSAGES_FILE.name}.lock")):
         pending = load_pending_user_messages()
         record = pending.get(session_id)
         if not isinstance(record, dict):
@@ -449,7 +449,7 @@ def set_pending_scene_events(session_id: str, events: List[Dict[str, Any]]) -> N
 
 
 def clear_pending_user_message(session_id: str) -> None:
-    with _LOCK:
+    with _LOCK, interprocess_lock(PENDING_USER_MESSAGES_FILE.with_name(f".{PENDING_USER_MESSAGES_FILE.name}.lock")):
         pending = load_pending_user_messages()
         if session_id not in pending:
             return
@@ -698,13 +698,10 @@ def prune_committed_events(session_ids: List[str]) -> Dict[str, int]:
 
         if removed:
             EVENT_LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = EVENT_LEDGER_FILE.with_suffix(".jsonl.tmp")
-            with tmp_path.open("w", encoding="utf-8") as handle:
-                for event in kept:
-                    handle.write(json.dumps(event, default=str) + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(tmp_path, EVENT_LEDGER_FILE)
+            atomic_write_text(
+                EVENT_LEDGER_FILE,
+                "".join(json.dumps(event, default=str) + "\n" for event in kept),
+            )
 
     return {"before": len(events), "after": len(kept), "removed": removed}
 
@@ -900,13 +897,10 @@ def remove_retry_entries(session_id: str, event_ids: Set[str]) -> int:
         if removed == 0:
             return 0
 
-        tmp_path = RETRY_QUEUE_FILE.with_suffix(".jsonl.tmp")
-        with tmp_path.open("w", encoding="utf-8") as handle:
-            for row in kept:
-                handle.write(json.dumps(row, default=str) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, RETRY_QUEUE_FILE)
+        atomic_write_text(
+            RETRY_QUEUE_FILE,
+            "".join(json.dumps(row, default=str) + "\n" for row in kept),
+        )
         return removed
 
 
@@ -916,13 +910,7 @@ def get_retry_queue_size(session_id: Optional[str] = None) -> int:
 
 def _atomic_write_json(path: Path, data: Any) -> None:
     serialized = json.dumps(data, indent=2, default=str)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
-    with tmp_path.open("w", encoding="utf-8") as handle:
-        handle.write(serialized)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp_path, path)
+    atomic_write_text(path, serialized)
 
 
 def load_spool_cursors() -> Dict[str, Dict[str, Any]]:

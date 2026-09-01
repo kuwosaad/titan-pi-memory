@@ -391,6 +391,66 @@ def _contradiction_records() -> list[dict]:
 
 
 class PatternMinerTests(unittest.TestCase):
+    def test_packet_reports_unprocessed_remaining_for_processor_and_window(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_records())
+
+            packet = build_evidence_packet(
+                processor_version=PROCESSOR_VERSION,
+                processor_config_hash=CONFIG_HASH,
+                db_path=sqlite_file,
+                batch_size=2,
+                context_limit=0,
+                from_ts="2026-06-02T00:00:00+00:00",
+                to_ts="2026-06-06T23:59:59+00:00",
+                snapshot_cutoff="2026-06-06T23:59:59+00:00",
+                mode="chronological",
+            )
+
+            self.assertEqual(packet["unprocessed_memory_ids"], ["old2:1:0", "old3:1:0"])
+            self.assertEqual(packet["unprocessed_remaining"], 3)
+    def test_date_bounds_filter_unprocessed_seeds_before_limit_but_keep_older_context(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_records())
+
+            packet = build_evidence_packet(
+                processor_version=PROCESSOR_VERSION,
+                processor_config_hash=CONFIG_HASH,
+                db_path=sqlite_file,
+                batch_size=1,
+                context_limit=3,
+                from_ts="2026-06-04T00:00:00+00:00",
+                to_ts="2026-06-05T23:59:59+00:00",
+                snapshot_cutoff="2026-06-05T23:59:59+00:00",
+                mode="chronological",
+            )
+
+            self.assertEqual(packet["unprocessed_memory_ids"], ["new1:1:0"])
+            self.assertIn("old1:1:0", packet["related_old_memory_ids"])
+
+    def test_serialized_evidence_preserves_memory_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_records()[:1])
+
+            packet = build_evidence_packet(
+                processor_version=PROCESSOR_VERSION,
+                processor_config_hash=CONFIG_HASH,
+                db_path=sqlite_file,
+                batch_size=1,
+                context_limit=0,
+                mode="chronological",
+            )
+
+            evidence = packet["memories"]["unprocessed"][0]
+            self.assertEqual(evidence["provenance"], {"user": "u", "assistant": "a"})
+            self.assertEqual(evidence["source_event_ids"], [])
+            self.assertEqual(evidence["source_type"], "mixed")
+            self.assertEqual(evidence["source_reliability"], 0.9)
+            self.assertEqual(evidence["verification_status"], "unverified")
+
     def test_build_evidence_packet_from_unprocessed_memories_with_related_context(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             sqlite_file = Path(tmp_dir) / "memory_store.db"

@@ -18,7 +18,7 @@
 import type { ExtensionAPI, ExtensionCommandContext, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { delimiter, dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, existsSync, copyFileSync, writeFileSync, readFileSync } from "node:fs";
 import { spawn, type ChildProcess, type SpawnOptionsWithoutStdio } from "node:child_process";
@@ -155,15 +155,51 @@ const REQUIRED_PYTHON_IMPORTS = [
   "pydantic",
 ];
 
-async function hasPythonDependencies(): Promise<boolean> {
-  const script = REQUIRED_PYTHON_IMPORTS.map((name) => `import ${name}`).join("; ");
-  const result = await runProcess("python3", ["-c", script], { cwd: REPO_ROOT });
+let titanPythonCommand: string | null = null;
+
+function pythonCandidates(): string[] {
+  const executableNames = process.platform === "win32"
+    ? ["python.exe", "python3.exe"]
+    : ["python3", "python"];
+  const fromPath = (process.env.PATH || "")
+    .split(delimiter)
+    .filter(Boolean)
+    .flatMap((directory) => executableNames.map((name) => resolve(directory, name)))
+    .filter((candidate) => existsSync(candidate));
+  return Array.from(new Set([
+    process.env.TITAN_PYTHON || "",
+    ...fromPath,
+    ...executableNames,
+  ].filter(Boolean)));
+}
+
+async function pythonIsCompatible(command: string, requireDependencies: boolean): Promise<boolean> {
+  const imports = requireDependencies
+    ? REQUIRED_PYTHON_IMPORTS.map((name) => `import ${name}`).join("; ")
+    : "import pip";
+  const script = `import sys; assert sys.version_info >= (3, 10); ${imports}`;
+  const result = await runProcess(command, ["-c", script], { cwd: REPO_ROOT });
   return result.code === 0;
 }
 
+async function resolveTitanPython(): Promise<string | null> {
+  if (titanPythonCommand && await pythonIsCompatible(titanPythonCommand, true)) {
+    return titanPythonCommand;
+  }
+  for (const candidate of pythonCandidates()) {
+    if (await pythonIsCompatible(candidate, true)) {
+      titanPythonCommand = candidate;
+      return candidate;
+    }
+  }
+  titanPythonCommand = null;
+  return null;
+}
+
 async function ensurePythonDependencies(): Promise<{ ok: boolean; message: string }> {
-  if (await hasPythonDependencies()) {
-    return { ok: true, message: "already installed" };
+  const existing = await resolveTitanPython();
+  if (existing) {
+    return { ok: true, message: `already installed (${existing})` };
   }
 
   const requirementsPath = resolve(REPO_ROOT, "requirements.txt");
@@ -174,25 +210,38 @@ async function ensurePythonDependencies(): Promise<{ ok: boolean; message: strin
     };
   }
 
+  let installPython: string | null = null;
+  for (const candidate of pythonCandidates()) {
+    if (await pythonIsCompatible(candidate, false)) {
+      installPython = candidate;
+      break;
+    }
+  }
+  if (!installPython) {
+    return { ok: false, message: "Python 3.10+ with pip was not found" };
+  }
+
   const result = await runProcess(
-    "python3",
+    installPython,
     ["-m", "pip", "install", "-r", requirementsPath],
     { cwd: REPO_ROOT, env: process.env },
   );
 
-  if (await hasPythonDependencies()) {
-    return { ok: true, message: result.code === 0 ? "installed" : "core deps installed" };
+  if (await pythonIsCompatible(installPython, true)) {
+    titanPythonCommand = installPython;
+    return { ok: true, message: `installed (${installPython})` };
   }
 
   // Some Python installs reject system-wide package writes. Try user scope next.
   const userResult = await runProcess(
-    "python3",
+    installPython,
     ["-m", "pip", "install", "--user", "-r", requirementsPath],
     { cwd: REPO_ROOT, env: process.env },
   );
 
-  if (await hasPythonDependencies()) {
-    return { ok: true, message: userResult.code === 0 ? "installed with --user" : "core deps installed" };
+  if (await pythonIsCompatible(installPython, true)) {
+    titanPythonCommand = installPython;
+    return { ok: true, message: `installed with --user (${installPython})` };
   }
 
   const excerpt = (userResult.stderr || userResult.stdout || result.stderr || result.stdout || "unknown error")
@@ -363,8 +412,14 @@ async function ensureServerRunning(): Promise<boolean> {
     return false;
   }
 
+  const pythonCommand = await resolveTitanPython();
+  if (!pythonCommand) {
+    console.warn("[titan] Python 3.10+ with Titan dependencies was not found. Run /titan-setup.");
+    return false;
+  }
+
   return new Promise((resolvePromise) => {
-    const proc = spawn("python3", [serverScript], {
+    const proc = spawn(pythonCommand, [serverScript], {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
@@ -2381,12 +2436,17 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         return;
       }
 
+      const pythonCommand = await resolveTitanPython();
+      if (!pythonCommand) {
+        ctx.ui.notify("Python 3.10+ with Titan dependencies was not found. Run /titan-setup.", "error");
+        return;
+      }
+
       // Check rich is installed
-      const richCheck = await runProcess("python3", ["-c", "import rich"], { cwd: REPO_ROOT });
+      const richCheck = await runProcess(pythonCommand, ["-c", "import rich"], { cwd: REPO_ROOT });
       if (richCheck.code !== 0) {
         ctx.ui.notify("Installing dashboard dependency (rich)...", "info");
-        // macOS Homebrew Python needs --break-system-packages
-        await runProcess("python3", ["-m", "pip", "install", "--break-system-packages", "rich"], { cwd: REPO_ROOT });
+        await runProcess(pythonCommand, ["-m", "pip", "install", "rich"], { cwd: REPO_ROOT });
       }
 
       const sessionArg = args?.trim() || "";
@@ -2394,7 +2454,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         ? [dashboardScript, "--session-id", sessionArg]
         : [dashboardScript];
 
-      const result = await runProcess("python3", scriptArgs, {
+      const result = await runProcess(pythonCommand, scriptArgs, {
         cwd: REPO_ROOT,
         env: { ...process.env, TITAN_PI_API_URL: TITAN_API_BASE },
       });

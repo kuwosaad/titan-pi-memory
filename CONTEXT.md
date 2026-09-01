@@ -4,6 +4,20 @@ This file is the small, stable vocabulary used when changing Titan. It describes
 the contracts that cross module and process boundaries; implementation details
 belong in the code and in the design records under `docs/adr/`.
 
+## Repository ownership
+
+`titan-pi-memory` is Titan's canonical source of truth. It owns the engine,
+storage and retrieval contracts, agent adapters, Codex plugin, CLI packaging,
+tests, and release configuration. Pi is one adapter and npm distribution
+package; it is not the boundary of engine ownership. The older `titan-karu`
+checkout and separate Codex/CLI repositories are compatibility distributions
+that may be archived later, so production changes must be made here first and
+verified with the canonical test suite.
+
+Compatibility distributions must preserve the same public contracts, but they
+must not become a second source of truth. When a compatibility fix is needed,
+graduate the change into this repository with tests before distributing it.
+
 ## Memory
 
 A **Memory** is a durable, addressable record of information extracted from a
@@ -43,6 +57,14 @@ directory, trace/spool directory, settings and model configuration paths, and
 the Memory database path. Adapters (Pi, Codex, Claude, CLI, HTTP, and MCP)
 may choose different defaults, but they must resolve the same layout contract
 and must never accidentally read another agent's pending state or traces.
+
+Codex's default write namespace is `~/.titan/agents/codex`; Pi's is
+`~/.titan/agents/pi`. Codex writes only to `codex`. Its default recall path is
+the read-only federation over `codex` and `pi`, while other agent namespaces
+require explicit source selection. Missing namespaces are skipped; writes
+remain isolated. The live Codex MCP recall tools use this federation by
+default; write tools and passive capture remain Codex-only. Cross-agent
+imports are separate explicit operations.
 
 ## Compatibility rule
 

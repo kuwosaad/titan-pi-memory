@@ -4,7 +4,7 @@ import json
 import threading
 import sqlite3
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 from app.storage.sqlite_schema import ensure_pattern_tables
 
@@ -16,6 +16,7 @@ _PATTERN_KINDS = {"codebase", "workflow", "failure", "preference", "product", "d
 _PATTERN_SCOPES = {"user", "repo", "team", "agent", "global"}
 _PATTERN_STATUSES = {"candidate", "accepted", "rejected", "superseded"}
 _EVIDENCE_ROLES = {"support", "contradict", "bridge", "central"}
+_UNSET = object()
 
 
 class PatternValidationError(PatternValidation):
@@ -116,6 +117,27 @@ class PatternStore:
             raise KeyError(f"Pattern not found: {pattern_id}")
         return pattern
 
+    def restore_pattern(self, pattern_id: str) -> Pattern:
+        """Move an accepted pattern back to candidate for revalidation."""
+
+        updated_at = now_iso()
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE patterns SET status = ?, updated_at = ? WHERE id = ? AND status = 'accepted'",
+                ("candidate", updated_at, pattern_id),
+            )
+            if cur.rowcount == 0:
+                row = conn.execute("SELECT status FROM patterns WHERE id = ?", (pattern_id,)).fetchone()
+                if row is None:
+                    raise KeyError(f"Pattern not found: {pattern_id}")
+                raise PatternValidationError("Only accepted patterns can be restored to candidate")
+            row = conn.execute("SELECT * FROM patterns WHERE id = ?", (pattern_id,)).fetchone()
+            conn.commit()
+        pattern = self._row_to_pattern(row) if row else None
+        if pattern is None:
+            raise KeyError(f"Pattern not found: {pattern_id}")
+        return pattern
+
     def list_evidence(self, pattern_id: str, *, role: Optional[str] = None) -> List[PatternEvidence]:
         params: list[object] = [pattern_id]
         where = "pattern_id = ?"
@@ -132,14 +154,22 @@ class PatternStore:
         return [self._row_to_evidence(row) for row in rows]
 
     def record_application(self, application: PatternApplication) -> PatternApplication:
+        shown_at = application.shown_at or application.retrieved_at
+        used_at = application.used_at
+        if application.was_used and not used_at:
+            used_at = now_iso()
+        outcome_observed_at = application.outcome_observed_at
+        if (application.outcome is not None or application.feedback is not None) and not outcome_observed_at:
+            outcome_observed_at = now_iso()
         with self._lock, self._connect() as conn:
             if not self._pattern_exists(conn, application.pattern_id):
                 raise PatternValidationError(f"Pattern does not exist: {application.pattern_id}")
             conn.execute(
                 """
                 INSERT INTO pattern_applications (
-                    id, pattern_id, query, task_id, retrieved_at, was_used, outcome, feedback
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    id, pattern_id, query, task_id, retrieved_at, shown_at, used_at,
+                    outcome_observed_at, was_used, outcome, feedback
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     application.id,
@@ -147,6 +177,9 @@ class PatternStore:
                     application.query,
                     application.task_id,
                     application.retrieved_at,
+                    shown_at,
+                    used_at,
+                    outcome_observed_at,
                     None if application.was_used is None else int(bool(application.was_used)),
                     application.outcome,
                     application.feedback,
@@ -157,7 +190,88 @@ class PatternStore:
                 (application.retrieved_at, now_iso(), application.pattern_id),
             )
             conn.commit()
-        return application
+        updates = {
+            "shown_at": shown_at,
+            "used_at": used_at,
+            "outcome_observed_at": outcome_observed_at,
+        }
+        if hasattr(application, "model_copy"):
+            return application.model_copy(update=updates)
+        return application.copy(update=updates)
+
+    def update_application(
+        self,
+        application_id: str,
+        *,
+        shown_at: Optional[str] | object = _UNSET,
+        used_at: Optional[str] | object = _UNSET,
+        outcome_observed_at: Optional[str] | object = _UNSET,
+        was_used: Optional[bool] | object = _UNSET,
+        outcome: Optional[str] | object = _UNSET,
+        feedback: Optional[str] | object = _UNSET,
+    ) -> PatternApplication:
+        """Update the observed outcome of a previously recorded application."""
+
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM pattern_applications WHERE id = ?", (application_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Pattern application not found: {application_id}")
+            next_was_used = row["was_used"] if was_used is _UNSET else (None if was_used is None else int(bool(was_used)))
+            next_outcome = row["outcome"] if outcome is _UNSET else outcome
+            next_feedback = row["feedback"] if feedback is _UNSET else feedback
+            next_shown_at = row["shown_at"] if shown_at is _UNSET else shown_at
+            next_used_at = row["used_at"] if used_at is _UNSET else used_at
+            next_outcome_observed_at = row["outcome_observed_at"] if outcome_observed_at is _UNSET else outcome_observed_at
+            if was_used is not _UNSET and was_used and not next_used_at:
+                next_used_at = now_iso()
+            if (outcome is not _UNSET or feedback is not _UNSET) and not next_outcome_observed_at:
+                next_outcome_observed_at = now_iso()
+            conn.execute(
+                """
+                UPDATE pattern_applications
+                SET shown_at = ?, used_at = ?, outcome_observed_at = ?,
+                    was_used = ?, outcome = ?, feedback = ?
+                WHERE id = ?
+                """,
+                (
+                    next_shown_at,
+                    next_used_at,
+                    next_outcome_observed_at,
+                    next_was_used,
+                    next_outcome,
+                    next_feedback,
+                    application_id,
+                ),
+            )
+            updated = conn.execute(
+                "SELECT * FROM pattern_applications WHERE id = ?", (application_id,)
+            ).fetchone()
+            conn.commit()
+        if updated is None:
+            raise KeyError(f"Pattern application not found: {application_id}")
+        return self._row_to_application(updated)
+
+    def list_applications(
+        self,
+        *,
+        pattern_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[PatternApplication]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if pattern_id:
+            clauses.append("pattern_id = ?")
+            params.append(pattern_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, int(limit)))
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM pattern_applications {where} ORDER BY retrieved_at DESC, id DESC LIMIT ?",
+                tuple(params),
+            ).fetchall()
+        return [self._row_to_application(row) for row in rows]
 
     def _insert_pattern(self, conn: sqlite3.Connection, pattern: Pattern) -> None:
         conn.execute(
@@ -298,4 +412,19 @@ class PatternStore:
             scene_id=row["scene_id"],
             role=row["role"],
             score=float(row["score"]),
+        )
+
+    def _row_to_application(self, row: sqlite3.Row) -> PatternApplication:
+        return PatternApplication(
+            id=row["id"],
+            pattern_id=row["pattern_id"],
+            query=row["query"],
+            task_id=row["task_id"],
+            retrieved_at=row["retrieved_at"],
+            shown_at=row["shown_at"] if "shown_at" in row.keys() else None,
+            used_at=row["used_at"] if "used_at" in row.keys() else None,
+            outcome_observed_at=row["outcome_observed_at"] if "outcome_observed_at" in row.keys() else None,
+            was_used=None if row["was_used"] is None else bool(row["was_used"]),
+            outcome=row["outcome"],
+            feedback=row["feedback"],
         )

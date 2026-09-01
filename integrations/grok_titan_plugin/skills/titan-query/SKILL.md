@@ -7,13 +7,15 @@ description: Semantic recall from Titan Memory for Grok. Use when the user runs 
 
 Search Titan Memory for the Grok agent namespace (`~/.titan/agents/grok`).
 
+Prefer the Pi-parity CLI. It works in every Grok session, including ones that started before MCP attached.
+
 ## Steps
 
-1. Call `query_memories` via `use_tool` with qualified name `titan-memory__query_memories` (or the listed `titan-memory` tool).
-2. Pass the user's question as `query`.
-3. If the user names a date or range, also pass `date_from` and/or `date_to` (ISO 8601) when the tool supports them.
-4. Summarize the strongest matches. Expand important `scene_id` values with `get_scene_context` before treating a memory as solid.
-5. Verify repo facts when the answer depends on current code. Label what came from memory vs verification.
+1. Run `titan-grok query "<question>"`.
+2. Date range: `titan-grok query "" --from 2026-08-13 --to 2026-08-14` (empty query = all memories in the bracket).
+3. If a hit has `[scene: ...]`, run `titan-grok scene <scene_id>`.
+4. If MCP is connected, `titan-memory__query_memories` is an equivalent.
+5. Verify repo facts when the answer depends on current code.
 
 ## Rules
 

@@ -184,9 +184,18 @@ class SceneRepository(Protocol):
 
 
 class JsonSceneRepository:
+    def __init__(self, scenes_file: Optional[Path] = None) -> None:
+        # Optional explicit paths make namespace reads testable without
+        # changing process-wide runtime context.
+        self.scenes_file = scenes_file
+
+    @property
+    def _path(self) -> Path:
+        return self.scenes_file or SCENES_FILE
+
     def load_all_scenes(self) -> List[Dict[str, Any]]:
         with _SCENES_LOCK:
-            return [_normalize_scene(scene) for scene in read_json(SCENES_FILE, [])]
+            return [_normalize_scene(scene) for scene in read_json(self._path, [])]
 
     def append_scenes(self, scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not scenes:
@@ -195,7 +204,7 @@ class JsonSceneRepository:
         with _SCENES_LOCK:
             existing = {
                 str(item.get("scene_id") or ""): _normalize_scene(item)
-                for item in read_json(SCENES_FILE, [])
+                for item in read_json(self._path, [])
                 if isinstance(item, dict)
             }
             for normalized in normalized_scenes:
@@ -204,7 +213,7 @@ class JsonSceneRepository:
                     continue
                 existing[normalized["scene_id"]] = normalized
             ordered = sorted(existing.values(), key=lambda item: str(item.get("ts") or ""))
-            write_json(SCENES_FILE, ordered)
+            write_json(self._path, ordered)
         return scenes
 
     def get_scene(self, scene_id: str) -> Optional[Dict[str, Any]]:
@@ -246,14 +255,19 @@ class JsonSceneRepository:
 
 
 class SqliteSceneRepository:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, initialize: bool = True) -> None:
         self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # ``initialize=False`` is the federation read path; construction must
+        # not create directories for a namespace that is not present.
+        if initialize:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._read_only = not initialize
         self._lock = threading.RLock()
-        self._init_schema()
+        if initialize:
+            self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        return connect_sqlite(self.db_path)
+        return connect_sqlite(self.db_path, read_only=self._read_only)
 
     def _init_schema(self) -> None:
         ddl = """

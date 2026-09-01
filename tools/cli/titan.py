@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import getpass
 import importlib.util
 import json
@@ -12,6 +13,8 @@ import socket
 import subprocess
 import sqlite3
 import sys
+import selectors
+import time
 import webbrowser
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
@@ -27,8 +30,21 @@ if str(ROOT_DIR) not in sys.path:
 
 DEFAULT_AGENT_NAME = "opencode"
 CODEX_AGENT_NAME = "codex"
-CODEX_PLUGIN_ID = "titan-memory@titan-local"
+CODEX_PLUGIN_ID = "titan-memory@titan-pi-memory"
+CODEX_LEGACY_PLUGIN_IDS = (
+    "titan-memory@titan-local",
+    "titan-memory@titan-memory-codex",
+    "titan-memory@titan-karu-lab",
+)
+CODEX_LEGACY_MARKETPLACE_NAMES = (
+    "titan-karu-lab",
+    "titan-local",
+    "titan-memory-codex",
+)
 CODEX_PLUGIN_DIR = ROOT_DIR / "integrations" / "codex_titan_plugin"
+CODEX_MARKETPLACE_DIR = Path.home() / ".titan" / "codex-marketplace"
+CODEX_MARKETPLACE_PATH = CODEX_MARKETPLACE_DIR / ".agents" / "plugins" / "marketplace.json"
+CODEX_MCP_TIMEOUT_SEC = 120
 DEFAULT_GRAPH_PORT = 8010
 _explicit_titan_home = os.getenv("TITAN_HOME")
 _default_home = Path.home() / ".titan"
@@ -1497,6 +1513,112 @@ def _default_codex_config_path() -> Path:
     return Path.home() / ".codex" / "config.toml"
 
 
+def validate_codex_marketplace(payload: object) -> tuple[bool, str]:
+    """Validate the small official Codex marketplace snapshot we ship."""
+    if not isinstance(payload, dict):
+        return False, "marketplace must be a JSON object"
+    if not isinstance(payload.get("name"), str) or not payload["name"].strip():
+        return False, "marketplace.name is required"
+    interface = payload.get("interface")
+    if not isinstance(interface, dict) or not isinstance(interface.get("displayName"), str):
+        return False, "marketplace.interface.displayName is required"
+    plugins = payload.get("plugins")
+    if not isinstance(plugins, list) or not plugins:
+        return False, "marketplace.plugins must be a non-empty array"
+    for plugin in plugins:
+        if not isinstance(plugin, dict) or not isinstance(plugin.get("name"), str):
+            return False, "every marketplace plugin needs a name"
+        source = plugin.get("source")
+        if not isinstance(source, dict) or source.get("source") not in {"local", "url", "github"}:
+            return False, "every marketplace plugin needs an official source object"
+        source_kind = source["source"]
+        source_field = {"local": "path", "url": "url", "github": "repo"}[source_kind]
+        if not isinstance(source.get(source_field), str) or not source[source_field].strip():
+            return False, f"{source_kind} marketplace source needs {source_field}"
+        if source_kind == "local":
+            local_path = Path(source[source_field])
+            if local_path.is_absolute() or ".." in local_path.parts:
+                return False, "local marketplace source path must stay inside the marketplace root"
+        policy = plugin.get("policy")
+        if not isinstance(policy, dict) or not isinstance(policy.get("installation"), str):
+            return False, "every marketplace plugin needs an installation policy"
+    return True, "ok"
+
+
+def _codex_marketplace_digest(root: Path) -> str:
+    """Hash the complete marketplace payload, not only its manifest."""
+    digest = hashlib.sha256()
+    for path in sorted(path for path in root.rglob("*") if path.is_file()):
+        relative = path.relative_to(root).as_posix()
+        if relative == ".titan-marketplace-digest":
+            continue
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def ensure_codex_marketplace_snapshot(*, target: Optional[Path] = None) -> tuple[bool, str]:
+    """Copy the complete bundled marketplace tree to a stable location."""
+    source_root = CODEX_PLUGIN_DIR
+    source = source_root / ".agents" / "plugins" / "marketplace.json"
+    destination = target or CODEX_MARKETPLACE_DIR
+    if destination.suffix == ".json":
+        destination = destination.parent
+    destination_manifest = destination / ".agents" / "plugins" / "marketplace.json"
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        valid, reason = validate_codex_marketplace(payload)
+        if not valid:
+            return False, f"bundled Codex marketplace is invalid: {reason}"
+        if destination_manifest.exists() and (destination / ".codex-plugin" / "plugin.json").exists():
+            if _codex_marketplace_digest(destination) == _codex_marketplace_digest(source_root):
+                return True, str(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.parent / f".{destination.name}.tmp-{os.getpid()}"
+        if temporary.exists():
+            shutil.rmtree(temporary)
+        shutil.copytree(source_root, temporary)
+        try:
+            temporary.chmod(0o700)
+            for path in temporary.rglob("*"):
+                if path.is_file():
+                    path.chmod(0o600)
+                elif path.is_dir():
+                    path.chmod(0o700)
+        except OSError:
+            pass
+        if destination.exists():
+            backup = destination.with_name(f"{destination.name}.previous-{os.getpid()}")
+            os.replace(destination, backup)
+        os.replace(temporary, destination)
+        return True, str(destination)
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"could not install Codex marketplace snapshot at {destination}: {exc}"
+
+
+def resolve_codex_marketplace_plugin_source(*, marketplace_root: Optional[Path] = None) -> Path:
+    """Resolve the plugin source exactly as `codex plugin marketplace add` does."""
+    root = marketplace_root or CODEX_MARKETPLACE_DIR
+    manifest_path = root / ".agents" / "plugins" / "marketplace.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    valid, reason = validate_codex_marketplace(payload)
+    if not valid:
+        raise ValueError(reason)
+    source = payload["plugins"][0]["source"]
+    if source.get("source") != "local":
+        raise ValueError("Codex connector requires a local marketplace source")
+    resolved = (root / str(source["path"])).resolve()
+    try:
+        resolved.relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValueError("local marketplace source path must stay inside the marketplace root") from exc
+    if not (resolved / ".codex-plugin" / "plugin.json").exists():
+        raise FileNotFoundError(f"marketplace plugin source is missing: {resolved}")
+    return resolved
+
+
 def generate_codex_mcp_enable_block() -> str:
     return "\n".join(
         [
@@ -1513,23 +1635,33 @@ def patch_codex_config(*, config_path: Optional[Path] = None) -> CodexConfigPatc
     target.parent.mkdir(parents=True, exist_ok=True)
     before = target.read_text(encoding="utf-8") if target.exists() else ""
     backup_path: Optional[Path] = None
-    header = f'[plugins."{CODEX_PLUGIN_ID}".mcp_servers."titan-memory"]'
+    headers = [f'[plugins."{plugin_id}".mcp_servers."titan-memory"]' for plugin_id in (CODEX_PLUGIN_ID, *CODEX_LEGACY_PLUGIN_IDS)]
     desired_block = generate_codex_mcp_enable_block().rstrip()
 
     lines = before.splitlines()
-    start_idx = next((idx for idx, line in enumerate(lines) if line.strip() == header), None)
-    if start_idx is None:
+    replacement = desired_block.splitlines()
+    rendered_lines: list[str] = []
+    inserted = False
+    idx = 0
+    while idx < len(lines):
+        if lines[idx].strip() in headers:
+            if not inserted:
+                rendered_lines.extend(replacement)
+                inserted = True
+            idx += 1
+            while idx < len(lines):
+                stripped = lines[idx].strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    break
+                idx += 1
+            continue
+        rendered_lines.append(lines[idx])
+        idx += 1
+    if not inserted:
         rendered = before.rstrip()
         rendered = f"{rendered}\n\n{desired_block}\n" if rendered else f"{desired_block}\n"
     else:
-        end_idx = len(lines)
-        for idx in range(start_idx + 1, len(lines)):
-            stripped = lines[idx].strip()
-            if stripped.startswith("[") and stripped.endswith("]"):
-                end_idx = idx
-                break
-        replacement = desired_block.splitlines()
-        rendered = "\n".join(lines[:start_idx] + replacement + lines[end_idx:]).rstrip() + "\n"
+        rendered = "\n".join(rendered_lines).rstrip() + "\n"
 
     if rendered == before:
         return {
@@ -1570,6 +1702,214 @@ def list_titan_mcp_tools_for_agent(agent: str = CODEX_AGENT_NAME) -> List[str]:
     return asyncio.run(_list_titan_mcp_tools())
 
 
+def _contains_legacy_plugin_root(value: object) -> bool:
+    if isinstance(value, str):
+        return "${PLUGIN_ROOT}" in value
+    if isinstance(value, dict):
+        return any(_contains_legacy_plugin_root(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_legacy_plugin_root(item) for item in value)
+    return False
+
+
+def _validate_codex_mcp_transport(transport: object, *, source: str, plugin_root: Optional[Path] = None) -> dict:
+    if _contains_legacy_plugin_root(transport):
+        raise ValueError(
+            f"Codex MCP config still uses the unsupported ${{PLUGIN_ROOT}} placeholder: {source}"
+        )
+    if not isinstance(transport, dict):
+        raise ValueError(f"Codex MCP transport is not an object: {source}")
+    if transport.get("type", "stdio") != "stdio":
+        raise ValueError(f"Codex MCP transport must be stdio: {source}")
+    command = transport.get("command")
+    args = transport.get("args", [])
+    cwd = transport.get("cwd", ".")
+    env = transport.get("env", {})
+    if not isinstance(command, str) or not command.strip():
+        raise ValueError(f"Codex MCP transport needs a command: {source}")
+    if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
+        raise ValueError(f"Codex MCP transport args must be an array of strings: {source}")
+    if not isinstance(cwd, str) or not cwd:
+        raise ValueError(f"Codex MCP transport cwd must be a path: {source}")
+    cwd_path = Path(cwd)
+    if plugin_root is not None:
+        if cwd_path.is_absolute() or ".." in cwd_path.parts or (cwd != "." and not cwd.startswith("./")):
+            raise ValueError(f"Codex MCP transport cwd must stay inside the plugin root: {source}")
+    elif not cwd_path.is_absolute():
+        raise ValueError(f"Codex MCP effective transport cwd must be absolute: {source}")
+    if not isinstance(env, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in env.items()
+    ):
+        raise ValueError(f"Codex MCP transport env must be an object of strings: {source}")
+    return {
+        "command": command,
+        "args": list(args),
+        "cwd": cwd,
+        "env": dict(env),
+        "plugin_root": plugin_root,
+        "config_path": Path(source),
+    }
+
+
+def load_codex_effective_mcp_transport(
+    *, server_name: str = "titan-memory", run_fn=None
+) -> dict:
+    """Read the transport Codex will actually execute from its effective config."""
+    runner = run_fn or subprocess.run
+    try:
+        result = runner(
+            ["codex", "mcp", "get", server_name, "--json"],
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"could not query Codex MCP server '{server_name}': {exc}") from exc
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"exit code {result.returncode}"
+        raise ValueError(f"Codex MCP server lookup failed: {detail}")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Codex MCP server lookup returned invalid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Codex MCP server lookup returned a non-object")
+    return _validate_codex_mcp_transport(payload.get("transport"), source=f"codex mcp get {server_name}")
+
+
+def load_codex_mcp_contract(*, plugin_root: Path, server_name: str = "titan-memory") -> dict:
+    """Load the plugin-local MCP contract using Codex's materialized paths.
+
+    Codex runs an MCP server with the plugin directory as its working root.
+    It does not expand the old ``${PLUGIN_ROOT}`` placeholder in this file,
+    so accepting that form here would make Doctor report a false green result.
+    """
+    root = plugin_root.expanduser().resolve()
+    config_path = root / ".mcp.json"
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Codex MCP config is unreadable ({config_path}: {exc})") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("mcpServers"), dict):
+        raise ValueError(f"Codex MCP config has no mcpServers object: {config_path}")
+    server = payload["mcpServers"].get(server_name)
+    if not isinstance(server, dict):
+        raise ValueError(f"Codex MCP server '{server_name}' is missing: {config_path}")
+    return _validate_codex_mcp_transport(server, source=str(config_path), plugin_root=root)
+
+
+def codex_mcp_stdio_handshake(
+    *,
+    agent: str = CODEX_AGENT_NAME,
+    timeout_sec: float = CODEX_MCP_TIMEOUT_SEC,
+    popen_fn=subprocess.Popen,
+    plugin_root: Optional[Path] = None,
+) -> tuple[bool, List[str], str]:
+    """Exercise the installed plugin's MCP contract through initialize/tools-list."""
+    try:
+        contract = (
+            load_codex_mcp_contract(plugin_root=plugin_root)
+            if plugin_root is not None
+            else load_codex_effective_mcp_transport()
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return False, [], str(exc)
+    env = dict(os.environ)
+    env.update(contract["env"])
+    env["TITAN_AGENT_NAME"] = _normalize_agent_name(agent)
+    env["TITAN_HOME"] = str(resolve_agent_titan_home(agent))
+    env["TITAN_BASE_DIR"] = env["TITAN_HOME"]
+    command = [contract["command"], *contract["args"]]
+    cwd = (
+        (contract["plugin_root"] / contract["cwd"]).resolve()
+        if contract["plugin_root"] is not None
+        else Path(contract["cwd"]).expanduser().resolve()
+    )
+    try:
+        if contract["plugin_root"] is not None:
+            cwd.relative_to(contract["plugin_root"])
+    except ValueError:
+        return False, [], "Codex MCP server cwd must stay inside the plugin root"
+    process = None
+    selector = selectors.DefaultSelector()
+    try:
+        process = popen_fn(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=env,
+            cwd=str(cwd),
+        )
+        if process.stdin is None or process.stdout is None:
+            return False, [], "Codex MCP launcher did not expose stdio pipes"
+        try:
+            selector.register(process.stdout, selectors.EVENT_READ)
+        except (OSError, ValueError):
+            selector = None
+
+        def request(payload: dict, expected_id: int | None) -> dict:
+            process.stdin.write(json.dumps(payload) + "\n")
+            process.stdin.flush()
+            deadline = time.monotonic() + timeout_sec
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("timed out waiting for Codex MCP response")
+                if selector is not None and not selector.select(remaining):
+                    raise TimeoutError("timed out waiting for Codex MCP response")
+                line = process.stdout.readline()
+                if not line:
+                    raise RuntimeError("Codex MCP launcher exited before responding")
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if expected_id is None or message.get("id") == expected_id:
+                    return message
+
+        initialize = request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "titan-doctor", "version": "1"},
+                },
+            },
+            1,
+        )
+        if "error" in initialize:
+            return False, [], f"Codex MCP initialize failed: {initialize['error']}"
+        process.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}) + "\n")
+        process.stdin.flush()
+        listing = request({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, 2)
+        if "error" in listing:
+            return False, [], f"Codex MCP tools/list failed: {listing['error']}"
+        tools = listing.get("result", {}).get("tools", [])
+        names = [tool.get("name") for tool in tools if isinstance(tool, dict) and isinstance(tool.get("name"), str)]
+        return True, names, f"stdio handshake succeeded ({len(names)} tools)"
+    except Exception as exc:
+        return False, [], f"Codex MCP stdio handshake failed: {exc}"
+    finally:
+        if selector is not None:
+            selector.close()
+        if process is not None:
+            try:
+                process.terminate()
+                process.wait(timeout=2)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+
+
 CODEX_REQUIRED_MCP_TOOLS = [
     "store_trace_packet",
     "store_trace_event",
@@ -1599,6 +1939,7 @@ def _codex_plugin_files_ok() -> tuple[bool, List[str]]:
         CODEX_PLUGIN_DIR / "hooks" / "hooks.json",
         CODEX_PLUGIN_DIR / "scripts" / "titan_codex_hook.py",
         CODEX_PLUGIN_DIR / "scripts" / "titan_first_run.py",
+        CODEX_PLUGIN_DIR / "scripts" / "titan_runtime.py",
         CODEX_PLUGIN_DIR / "README.md",
         CODEX_PLUGIN_DIR / "PRIVACY.md",
         CODEX_PLUGIN_DIR / "TERMS.md",
@@ -1620,16 +1961,30 @@ def run_codex_list_tools(*, json_output: bool = False) -> int:
     return 0
 
 
-def run_codex_reinstall_plugin(*, dry_run: bool = False) -> int:
-    commands = [
-        ["codex", "plugin", "remove", CODEX_PLUGIN_ID, "--json"],
-        ["codex", "plugin", "add", CODEX_PLUGIN_ID, "--json"],
+def run_codex_reinstall_plugin(*, dry_run: bool = False, config_path: Optional[Path] = None) -> int:
+    config_target = config_path or _default_codex_config_path()
+    marketplace_command = ["codex", "plugin", "marketplace", "add", str(CODEX_MARKETPLACE_DIR), "--json"]
+    marketplace_cleanup = [
+        ["codex", "plugin", "marketplace", "remove", name, "--json"]
+        for name in CODEX_LEGACY_MARKETPLACE_NAMES
     ]
+    plugin_cleanup = [
+        ["codex", "plugin", "remove", plugin_id, "--json"]
+        for plugin_id in (CODEX_PLUGIN_ID, *CODEX_LEGACY_PLUGIN_IDS)
+    ]
+    commands = [marketplace_command, *marketplace_cleanup, *plugin_cleanup]
+    commands.append(["codex", "plugin", "add", CODEX_PLUGIN_ID, "--json"])
     if dry_run:
         print("[titan] Codex plugin reinstall plan:")
         for command in commands:
             print("  " + " ".join(command))
+        print(f"  after final plugin add: patch Codex config {config_target}")
         return 0
+
+    marketplace_ok, marketplace_detail = ensure_codex_marketplace_snapshot()
+    if not marketplace_ok:
+        print(f"[titan] {marketplace_detail}")
+        return 1
 
     if shutil.which("codex") is None:
         print("[titan] Codex CLI not found on PATH.")
@@ -1640,15 +1995,63 @@ def run_codex_reinstall_plugin(*, dry_run: bool = False) -> int:
         result = subprocess.run(command, cwd=ROOT_DIR, capture_output=True, text=True, timeout=60)
         if result.returncode != 0:
             if idx == 0:
-                print(f"[titan] Warning: plugin remove exited {result.returncode} — plugin may not have been installed yet.")
+                print(f"[titan] Codex marketplace registration exited {result.returncode}.")
+                if result.stderr.strip():
+                    print(f"  stderr: {result.stderr.strip()}")
+                return result.returncode
+            is_marketplace_cleanup = command[1:4] == ["plugin", "marketplace", "remove"]
+            if is_marketplace_cleanup or idx < len(commands) - 1:
+                print(f"[titan] Warning: cleanup command exited {result.returncode} — the item may not be installed.")
                 if result.stderr.strip():
                     print(f"  stderr: {result.stderr.strip()}")
             else:
                 if result.stderr.strip():
                     print(result.stderr.strip())
                 return result.returncode
+    patch_result = patch_codex_config(config_path=config_target)
+    print(f"[titan] {patch_result['detail']} ({patch_result['path']})")
+    if patch_result["backup_path"]:
+        print(f"[titan] Backup: {patch_result['backup_path']}")
     print(f"[titan] Codex plugin installed: {CODEX_PLUGIN_ID}")
     return 0
+
+
+def _codex_plugin_registration_status() -> tuple[bool, str]:
+    """Confirm Codex has exactly the canonical Titan plugin registration."""
+    try:
+        result = subprocess.run(
+            ["codex", "plugin", "list", "--json"],
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"could not query Codex plugin registrations: {exc}"
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"exit code {result.returncode}"
+        return False, f"could not query Codex plugin registrations: {detail}"
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return False, f"Codex plugin list returned invalid JSON: {exc}"
+    installed = payload.get("installed") if isinstance(payload, dict) else None
+    if not isinstance(installed, list):
+        return False, "Codex plugin list did not contain an installed array"
+    canonical = next(
+        (item for item in installed if isinstance(item, dict) and item.get("pluginId") == CODEX_PLUGIN_ID),
+        None,
+    )
+    if not canonical or canonical.get("installed") is not True or canonical.get("enabled") is not True:
+        return False, f"{CODEX_PLUGIN_ID} is not installed and enabled; run `titan codex reinstall-plugin`"
+    legacy = sorted(
+        str(item.get("pluginId"))
+        for item in installed
+        if isinstance(item, dict) and item.get("pluginId") in CODEX_LEGACY_PLUGIN_IDS
+    )
+    if legacy:
+        return False, "legacy Titan plugin registrations remain: " + ", ".join(legacy)
+    return True, f"{CODEX_PLUGIN_ID} is installed and enabled"
 
 
 def run_codex_verify(*, config_path: Optional[Path] = None) -> int:
@@ -1663,6 +2066,14 @@ def run_codex_verify(*, config_path: Optional[Path] = None) -> int:
         ok = False
         print("[missing] Codex CLI not found on PATH")
 
+    if shutil.which("codex"):
+        registration_ok, registration_detail = _codex_plugin_registration_status()
+        if registration_ok:
+            print(f"[ok] Codex plugin registration: {registration_detail}")
+        else:
+            ok = False
+            print(f"[missing] Codex plugin registration: {registration_detail}")
+
     plugin_ok, missing_plugin_files = _codex_plugin_files_ok()
     if plugin_ok:
         print(f"[ok] Codex plugin files: {CODEX_PLUGIN_DIR}")
@@ -1672,8 +2083,41 @@ def run_codex_verify(*, config_path: Optional[Path] = None) -> int:
         for path in missing_plugin_files:
             print(f"  {path}")
 
-    if config_target.exists() and generate_codex_mcp_enable_block().splitlines()[0] in config_target.read_text(encoding="utf-8"):
+    marketplace_path = CODEX_MARKETPLACE_DIR / ".agents" / "plugins" / "marketplace.json"
+    marketplace_source: Optional[Path] = None
+    if marketplace_path.exists():
+        try:
+            marketplace_payload = json.loads(marketplace_path.read_text(encoding="utf-8"))
+            marketplace_ok, marketplace_reason = validate_codex_marketplace(marketplace_payload)
+        except (OSError, json.JSONDecodeError) as exc:
+            marketplace_ok, marketplace_reason = False, str(exc)
+        if marketplace_ok:
+            try:
+                source_path = resolve_codex_marketplace_plugin_source(marketplace_root=CODEX_MARKETPLACE_DIR)
+                marketplace_source = source_path
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                marketplace_ok, marketplace_reason = False, str(exc)
+            if marketplace_ok:
+                print(f"[ok] Codex marketplace snapshot: {marketplace_path} (source: {source_path})")
+            else:
+                ok = False
+                print(f"[missing] Codex marketplace snapshot: {marketplace_reason}")
+        else:
+            ok = False
+            print(f"[missing] Codex marketplace snapshot: {marketplace_reason}")
+    else:
+        ok = False
+        print(f"[missing] Codex marketplace snapshot: {marketplace_path}")
+
+    config_text = config_target.read_text(encoding="utf-8") if config_target.exists() else ""
+    config_headers = [f'[plugins."{plugin_id}".mcp_servers."titan-memory"]' for plugin_id in (CODEX_PLUGIN_ID, *CODEX_LEGACY_PLUGIN_IDS)]
+    canonical_header = config_headers[0]
+    legacy_headers = [header for header in config_headers[1:] if header in config_text]
+    if canonical_header in config_text and not legacy_headers:
         print(f"[ok] Codex config enables Titan MCP: {config_target}")
+    elif legacy_headers:
+        ok = False
+        print(f"[missing] Codex config contains legacy Titan MCP blocks; rerun setup to remove them: {config_target}")
     else:
         ok = False
         print(f"[missing] Codex config enable block: {config_target}")
@@ -1685,12 +2129,14 @@ def run_codex_verify(*, config_path: Optional[Path] = None) -> int:
         ok = False
         print(f"[missing] Codex trace dir: {trace_dir}")
 
-    try:
-        tools = list_titan_mcp_tools_for_agent(CODEX_AGENT_NAME)
-    except Exception as exc:
+    # Use Codex's effective cache transport. The marketplace source can be
+    # newer than the plugin cache that the current Codex process executes.
+    handshake_ok, tools, handshake_detail = codex_mcp_stdio_handshake(agent=CODEX_AGENT_NAME)
+    if not handshake_ok:
         ok = False
-        print(f"[missing] Titan MCP tool introspection failed: {exc}")
-        tools = []
+        print(f"[missing] Titan MCP launcher: {handshake_detail}")
+    else:
+        print(f"[ok] Titan MCP launcher: {handshake_detail}")
     missing_tools = [tool for tool in CODEX_REQUIRED_MCP_TOOLS if tool not in tools]
     if missing_tools:
         ok = False
@@ -1709,12 +2155,29 @@ def run_codex_doctor(*, config_path: Optional[Path] = None) -> int:
     return run_codex_verify(config_path=config_path)
 
 
-def _setup_codex_model_config(agent_home: Path) -> Dict[str, str]:
+def _setup_codex_model_config(agent_home: Path, *, non_interactive: bool = False) -> Dict[str, str]:
     """Configure Codex model files with a simple public-install wizard."""
     import tools.cli.titan_voice as voice
 
     extraction_cfg = _load_yaml(ROOT_DIR / "config" / "extraction_models.yaml")
     embedding_cfg = _load_yaml(ROOT_DIR / "config" / "embedding_models.yaml")
+
+    if non_interactive:
+        extraction_choice = str(extraction_cfg.get("current") or "openai")
+        extraction_block = extraction_cfg.get(extraction_choice) or {}
+        extraction_model = str(extraction_block.get("model") or "gpt-4o-mini")
+        embedding_choice = str(embedding_cfg.get("current") or "ollama")
+        embedding_block = embedding_cfg.get(embedding_choice) or {}
+        embedding_model = str(embedding_block.get("model") or "nomic-embed-text:v1.5")
+        extraction_cfg = _set_config_backend_model(extraction_cfg, extraction_choice, extraction_model)
+        embedding_cfg = _set_config_backend_model(embedding_cfg, embedding_choice, embedding_model)
+        extraction_path, embedding_path = _write_agent_model_configs(agent_home, extraction_cfg, embedding_cfg)
+        env_updates: Dict[str, str] = {
+            "TITAN_EXTRACTION_CONFIG_PATH": str(extraction_path),
+            "TITAN_EMBEDDING_CONFIG_PATH": str(embedding_path),
+        }
+        _save_env_updates_for_agent(agent_home, env_updates)
+        return env_updates
 
     voice.section(
         "I need a model to read your conversations and decide what to remember.\n"
@@ -1817,6 +2280,7 @@ def run_setup_codex(
     verify: bool = False,
     config_path: Optional[Path] = None,
     skip_plugin_install: bool = False,
+    non_interactive: bool = False,
 ) -> int:
     config_target = config_path or _default_codex_config_path()
     trace_dir = resolve_effective_spool_dir(CODEX_AGENT_NAME)
@@ -1830,17 +2294,28 @@ def run_setup_codex(
         print(f"- Ensure trace dir: {trace_dir}")
         print("- Configure extraction model and nomic embedding model")
         print(f"- Verify plugin files: {CODEX_PLUGIN_DIR}")
-        print(f"- Patch Codex config: {config_target}")
+        print(f"- Materialize official marketplace tree: {CODEX_MARKETPLACE_DIR}")
         if not skip_plugin_install:
             print(f"- Reinstall Codex plugin: {CODEX_PLUGIN_ID}")
+            print(f"- Patch Codex config after final plugin add: {config_target}")
+        else:
+            print(f"- Patch Codex config: {config_target}")
         print("- Smoke-test local Titan MCP tool exports")
         print("- Show first-run guidance: python3 integrations/codex_titan_plugin/scripts/titan_first_run.py")
-        print("- Manual final step: trust Titan hooks inside Codex with /hooks")
+        print("- Manual final step: in Codex run /hooks and trust `python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py`")
         return 0
 
     agent_home = bootstrap_agent_home(CODEX_AGENT_NAME)
     trace_dir.mkdir(parents=True, exist_ok=True)
-    _setup_codex_model_config(agent_home)
+    if non_interactive:
+        _setup_codex_model_config(agent_home, non_interactive=True)
+    else:
+        _setup_codex_model_config(agent_home)
+    marketplace_ok, marketplace_detail = ensure_codex_marketplace_snapshot()
+    if not marketplace_ok:
+        print(f"[titan] Codex marketplace setup failed: {marketplace_detail}")
+        return 1
+    print(f"[titan] Codex marketplace snapshot: {marketplace_detail}")
     plugin_ok, missing_plugin_files = _codex_plugin_files_ok()
     if not plugin_ok:
         print("[titan] Codex plugin files are incomplete:")
@@ -1848,24 +2323,21 @@ def run_setup_codex(
             print(f"  {path}")
         return 1
 
-    patch_result = patch_codex_config(config_path=config_target)
-    print(f"[titan] {patch_result['detail']} ({patch_result['path']})")
-    if patch_result["backup_path"]:
-        print(f"[titan] Backup: {patch_result['backup_path']}")
-
     if not skip_plugin_install:
-        reinstall_code = run_codex_reinstall_plugin()
+        reinstall_code = run_codex_reinstall_plugin(config_path=config_target)
         if reinstall_code != 0:
             return reinstall_code
+    else:
+        patch_result = patch_codex_config(config_path=config_target)
+        print(f"[titan] {patch_result['detail']} ({patch_result['path']})")
+        if patch_result["backup_path"]:
+            print(f"[titan] Backup: {patch_result['backup_path']}")
 
-    tools = list_titan_mcp_tools_for_agent(CODEX_AGENT_NAME)
-    missing_tools = [tool for tool in CODEX_REQUIRED_MCP_TOOLS if tool not in tools]
-    if missing_tools:
-        print(f"[titan] MCP started, but tools are missing: {', '.join(missing_tools)}")
-        return 1
-
-    print(f"[titan] Titan MCP exports {len(tools)} tools for Codex.")
-    print("[titan] Next manual step: open Codex, run /hooks, and trust the Titan hook commands.")
+    print("[titan] Runtime and configuration are installed. Run `titan codex verify` to exercise the exact MCP launcher.")
+    managed_manifest = Path(os.getenv("TITAN_RUNTIME_MANIFEST", str(Path.home() / ".titan" / "runtime" / "current.json"))).expanduser()
+    if not managed_manifest.exists():
+        print("[titan] Managed MCP runtime is not activated yet. Repair it with: npx -y titan-memory-cli@latest setup codex")
+    print("[titan] Next manual step: open Codex, run /hooks, and trust `python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py`.")
     print("[titan] Then run: titan codex verify")
     return 0
 
@@ -2318,12 +2790,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "setup":
         if _normalize_agent_name(args.agent) == CODEX_AGENT_NAME:
-            return run_setup_codex(
-                dry_run=args.dry_run,
-                verify=args.verify,
-                config_path=args.codex_config,
-                skip_plugin_install=args.skip_plugin_install,
-            )
+            codex_setup_kwargs = {
+                "dry_run": args.dry_run,
+                "verify": args.verify,
+                "config_path": args.codex_config,
+                "skip_plugin_install": args.skip_plugin_install,
+            }
+            if args.non_interactive:
+                codex_setup_kwargs["non_interactive"] = True
+            return run_setup_codex(**codex_setup_kwargs)
         return run_setup(
             agent=args.agent,
             scope=args.scope,

@@ -168,6 +168,13 @@ class CodexHookTests(unittest.TestCase):
         self._assert_supported_stdout(stdout.getvalue())
         self.assertIn("capture skipped", stderr.getvalue())
 
+    def test_trace_spool_is_private(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            trace_dir = Path(tmp_dir)
+            self._run_hook({"hook_event_name": "UserPromptSubmit", "session_id": "private", "prompt": "hello"}, trace_dir)
+            self.assertEqual(trace_dir.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((trace_dir / "private.jsonl").stat().st_mode & 0o777, 0o600)
+
 
 if __name__ == "__main__":
     unittest.main()

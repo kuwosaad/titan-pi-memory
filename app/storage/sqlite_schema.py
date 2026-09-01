@@ -106,6 +106,9 @@ def ensure_pattern_tables(conn: sqlite3.Connection) -> None:
             query TEXT NOT NULL,
             task_id TEXT,
             retrieved_at TEXT NOT NULL,
+            shown_at TEXT,
+            used_at TEXT,
+            outcome_observed_at TEXT,
             was_used INTEGER,
             outcome TEXT,
             feedback TEXT,
@@ -147,6 +150,13 @@ def ensure_pattern_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_pattern_memory_processing_processor ON pattern_memory_processing(processor_version, processor_config_hash, processed_at DESC);
         """
     )
+    application_columns = {
+        row["name"] if isinstance(row, sqlite3.Row) else row[1]
+        for row in conn.execute("PRAGMA table_info(pattern_applications)").fetchall()
+    }
+    for column in ("shown_at", "used_at", "outcome_observed_at"):
+        if column not in application_columns:
+            conn.execute(f"ALTER TABLE pattern_applications ADD COLUMN {column} TEXT")
 
 
 def ensure_scene_readable_views(conn: sqlite3.Connection) -> None:

@@ -5,7 +5,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
+from app.patterns.api import PatternEvidencePacketRequest
 from app.patterns.processing import PatternProcessingLedger
 from app.storage.memories import SqliteMemoryRepository
 from entrypoints.main import app
@@ -59,6 +61,58 @@ def _pattern_payload() -> dict:
 
 
 class PatternApiTests(unittest.TestCase):
+    def test_pattern_capabilities_expose_zenkai_handshake(self):
+        client = TestClient(app)
+        response = client.get("/api/patterns/capabilities")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "capability_version": "zenkai-v1",
+                "bounded_packets": True,
+                "processor_isolation": True,
+                "candidate_only_creation": True,
+                "application_outcomes": True,
+                "candidate_restore": True,
+            },
+        )
+
+    def test_evidence_packet_time_window_requires_strict_rfc3339_and_order(self):
+        with self.assertRaises(ValidationError):
+            PatternEvidencePacketRequest(from_ts="2026-06-01 00:00:00+00:00")
+        with self.assertRaises(ValidationError):
+            PatternEvidencePacketRequest(
+                from_ts="2026-06-03T00:00:00+00:00",
+                to_ts="2026-06-02T00:00:00+00:00",
+            )
+        with self.assertRaises(ValidationError):
+            PatternEvidencePacketRequest(
+                from_ts="2026-06-03T00:00:00+00:00",
+                snapshot_cutoff="2026-06-02T23:59:59+00:00",
+            )
+
+        request = PatternEvidencePacketRequest(
+            from_ts="2026-06-01T00:00:00Z",
+            to_ts="2026-06-04T00:00:00+00:00",
+            snapshot_cutoff="2026-06-03T00:00:00+00:00",
+        )
+        self.assertEqual(request.from_ts, "2026-06-01T00:00:00Z")
+
+    def test_pattern_create_rejects_non_candidate_status(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_memory_records())
+            payload = _pattern_payload()
+            payload["status"] = "accepted"
+
+            with patch("app.patterns.api.resolve_pattern_db_path", return_value=sqlite_file):
+                client = TestClient(app, raise_server_exceptions=False)
+                response = client.post("/api/patterns", json=payload)
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("candidate", response.json()["detail"]["error"])
+
     def test_pattern_api_create_list_get_accept_reject(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             sqlite_file = Path(tmp_dir) / "memory_store.db"
@@ -83,6 +137,24 @@ class PatternApiTests(unittest.TestCase):
             self.assertEqual(accept_response.json()["pattern"]["status"], "accepted")
             self.assertEqual(reject_response.status_code, 200)
             self.assertEqual(reject_response.json()["pattern"]["status"], "rejected")
+
+    def test_accepted_pattern_can_be_restored_to_candidate_but_other_statuses_cannot(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_memory_records())
+
+            with patch("app.patterns.api.resolve_pattern_db_path", return_value=sqlite_file):
+                client = TestClient(app, raise_server_exceptions=False)
+                created_response = client.post("/api/patterns", json=_pattern_payload())
+                pattern_id = created_response.json()["pattern"]["id"]
+                client.post(f"/api/patterns/{pattern_id}/accept")
+                restored_response = client.post(f"/api/patterns/{pattern_id}/restore")
+                rejected_response = client.post(f"/api/patterns/{pattern_id}/restore")
+
+            self.assertEqual(restored_response.status_code, 200)
+            self.assertEqual(restored_response.json()["pattern"]["status"], "candidate")
+            self.assertEqual(rejected_response.status_code, 400)
+            self.assertIn("accepted", rejected_response.json()["detail"])
 
     def test_pattern_create_rejects_insufficient_support_evidence(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -173,6 +245,85 @@ class PatternApiTests(unittest.TestCase):
             self.assertIn("cluster_summaries", payload)
             self.assertIn("central_memories", payload)
             self.assertEqual(status.json()["processed_current"], 0)
+
+    def test_evidence_packet_route_applies_date_bounds_and_preserves_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_memory_records())
+
+            with patch("app.patterns.api.resolve_pattern_db_path", return_value=sqlite_file):
+                client = TestClient(app)
+                response = client.post(
+                    "/api/patterns/evidence-packet",
+                    json={
+                        "batch_size": 3,
+                        "context_limit": 0,
+                        "from_ts": "2026-06-03T00:00:00+00:00",
+                        "to_ts": "2026-06-06T23:59:59+00:00",
+                        "snapshot_cutoff": "2026-06-04T23:59:59+00:00",
+                        "mode": "chronological",
+                    },
+                )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["unprocessed_memory_ids"], ["s3:1:0", "s4:1:0"])
+            evidence = payload["memories"]["unprocessed"][0]
+            self.assertEqual(evidence["provenance"], {"user": "u3", "assistant": "a3"})
+            self.assertEqual(evidence["source_event_ids"], ["e3"])
+
+    def test_evidence_packet_route_reports_unprocessed_remaining(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_memory_records())
+
+            with patch("app.patterns.api.resolve_pattern_db_path", return_value=sqlite_file):
+                client = TestClient(app)
+                response = client.post(
+                    "/api/patterns/evidence-packet",
+                    json={
+                        "batch_size": 1,
+                        "context_limit": 0,
+                        "from_ts": "2026-06-02T00:00:00+00:00",
+                        "to_ts": "2026-06-04T23:59:59+00:00",
+                        "snapshot_cutoff": "2026-06-04T23:59:59+00:00",
+                        "mode": "chronological",
+                    },
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["unprocessed_memory_ids"], ["s2:1:0"])
+            self.assertEqual(response.json()["unprocessed_remaining"], 2)
+
+    def test_pattern_application_outcome_can_be_updated_and_listed(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            SqliteMemoryRepository(sqlite_file).append_memories(_memory_records())
+
+            with patch("app.patterns.api.resolve_pattern_db_path", return_value=sqlite_file):
+                client = TestClient(app)
+                created_response = client.post("/api/patterns", json=_pattern_payload())
+                pattern_id = created_response.json()["pattern"]["id"]
+                application_response = client.post(
+                    f"/api/patterns/{pattern_id}/applications",
+                    json={"query": "validate the Pi extension", "task_id": "task-1"},
+                )
+                application_id = application_response.json()["application"]["id"]
+                updated_response = client.patch(
+                    f"/api/pattern-applications/{application_id}",
+                    json={"was_used": True, "outcome": "helped", "feedback": "caught a regression"},
+                )
+                listed_response = client.get(f"/api/patterns/{pattern_id}/applications")
+
+                self.assertEqual(application_response.status_code, 200)
+            self.assertIsNotNone(application_response.json()["application"]["shown_at"])
+            self.assertEqual(updated_response.status_code, 200)
+            self.assertEqual(updated_response.json()["application"]["outcome"], "helped")
+            self.assertIsNotNone(updated_response.json()["application"]["used_at"])
+            self.assertIsNotNone(updated_response.json()["application"]["outcome_observed_at"])
+            self.assertEqual(listed_response.status_code, 200)
+            self.assertEqual(listed_response.json()["count"], 1)
+            self.assertEqual(listed_response.json()["applications"][0]["was_used"], True)
 
     def test_evidence_packet_uses_config_packet_mode_when_request_mode_omitted(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

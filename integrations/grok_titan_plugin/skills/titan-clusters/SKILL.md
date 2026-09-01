@@ -9,11 +9,10 @@ Map related memories in the Grok namespace (`~/.titan/agents/grok`).
 
 ## Steps
 
-1. Call `inspect_clusters` via `use_tool` with `titan-memory__inspect_clusters` (or the listed `titan-memory` tool). Use a full-corpus view unless the user asks for a smaller window.
-2. Identify the most relevant cluster IDs from topics, keywords, representative memories, and counts.
-3. Optionally call `analyze_clusters` with a comma-separated `cluster_ids` string for deeper synthesis (central memories, bridges, tensions).
-4. Expand important `scene_id` values with `get_scene_context` before relying on them.
-5. Verify implementation claims against the repo when the user needs current truth.
+1. Run `titan-grok clusters`. Detail: `titan-grok clusters --id 2`.
+2. Deeper synthesis: `titan-grok cortex 1,2 --question "how do these relate"`.
+3. MCP equivalents: `titan-memory__inspect_clusters` / `titan-memory__analyze_clusters`.
+4. Expand important scenes with `titan-grok scene <id>`.
 
 ## Output
 

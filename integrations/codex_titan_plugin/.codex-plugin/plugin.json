@@ -6,8 +6,8 @@
     "name": "Titan Memory",
     "url": "https://github.com/kuwosaad/titan"
   },
-  "homepage": "https://github.com/kuwosaad/titan-memory-codex",
-  "repository": "https://github.com/kuwosaad/titan-memory-codex",
+  "homepage": "https://github.com/kuwosaad/titan-pi-memory",
+  "repository": "https://github.com/kuwosaad/titan-pi-memory",
   "license": "Apache-2.0",
   "keywords": ["memory", "codex", "mcp", "agent", "recall"],
   "skills": "./skills/",
@@ -20,9 +20,9 @@
     "developerName": "Titan Memory",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
-    "websiteURL": "https://github.com/kuwosaad/titan-memory-codex",
-    "privacyPolicyURL": "https://github.com/kuwosaad/titan-memory-codex/blob/main/PRIVACY.md",
-    "termsOfServiceURL": "https://github.com/kuwosaad/titan-memory-codex/blob/main/TERMS.md",
+    "websiteURL": "https://github.com/kuwosaad/titan-pi-memory",
+    "privacyPolicyURL": "https://github.com/kuwosaad/titan-pi-memory/blob/main/integrations/codex_titan_plugin/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/kuwosaad/titan-pi-memory/blob/main/integrations/codex_titan_plugin/TERMS.md",
     "defaultPrompt": [
       "Use Titan Memory to recover prior decisions about this project.",
       "Use Titan Memory to remember the outcome of this work.",

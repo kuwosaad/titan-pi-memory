@@ -26,14 +26,23 @@ mkdir -p "${HOME}/.titan/agents/grok"/{config,traces,out/memories,out/graphs,out
 mkdir -p "${HOME}/.grok/plugins"
 ln -sfn "${PLUGIN_SRC}" "${PLUGIN_DST}"
 
-# 3. Ensure hook scripts are executable
+# 3. Ensure hook + CLI scripts are executable
 chmod +x "${PLUGIN_SRC}/scripts/titan_grok_hook.py" \
          "${PLUGIN_SRC}/scripts/titan_first_run.py" \
-         "${PLUGIN_SRC}/scripts/titan_mcp_launcher.py" 2>/dev/null || true
+         "${PLUGIN_SRC}/scripts/titan_mcp_launcher.py" \
+         "${PLUGIN_SRC}/scripts/titan_grok_tools.py" \
+         "${PLUGIN_SRC}/scripts/titan-grok" 2>/dev/null || true
+
+# 4. Put titan-grok on PATH so this Grok session can use Titan before MCP reloads
+mkdir -p "${HOME}/.local/bin"
+ln -sfn "${PLUGIN_SRC}/scripts/titan-grok" "${HOME}/.local/bin/titan-grok"
 
 echo
 echo "Symlink:"
 ls -la "${PLUGIN_DST}"
+echo
+echo "CLI:"
+ls -la "${HOME}/.local/bin/titan-grok"
 echo
 echo "Agent home:"
 ls -la "${HOME}/.titan/agents/grok" || true
@@ -49,5 +58,6 @@ echo "MCP is provided by the plugin .mcp.json (launcher + --agent grok)."
 echo "Do not add a manual [mcp_servers.titan-memory] with a machine-local"
 echo "absolute path unless you intentionally override the plugin server."
 echo
+echo "CLI is ~/.local/bin/titan-grok (add ~/.local/bin to PATH if needed)."
 echo "Then restart Grok, or press r in /plugins to reload."
-echo "Confirm with /plugins and /mcps."
+echo "Confirm with /plugins and /mcps, or: titan-grok doctor"

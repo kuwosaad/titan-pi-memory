@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.storage.sessions import MEMORIES_DIR, now_iso
+from app.storage.sessions import MEMORIES_DIR, atomic_write_text, now_iso
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,12 +43,10 @@ def _load_buffer() -> List[Dict[str, Any]]:
 def _save_buffer(entries: List[Dict[str, Any]]) -> None:
     DEDUP_BUFFER_FILE.parent.mkdir(parents=True, exist_ok=True)
     with _LOCK:
-        tmp = DEDUP_BUFFER_FILE.with_suffix(".jsonl.tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            for entry in entries:
-                f.write(json.dumps(entry, default=str) + "\n")
-            f.flush()
-        tmp.replace(DEDUP_BUFFER_FILE)
+        atomic_write_text(
+            DEDUP_BUFFER_FILE,
+            "".join(json.dumps(entry, default=str) + "\n" for entry in entries),
+        )
 
 
 def _drain_buffer() -> List[Dict[str, Any]]:
@@ -75,12 +73,10 @@ def _drain_buffer() -> List[Dict[str, Any]]:
             return []
 
         DEDUP_PROCESSING_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = DEDUP_PROCESSING_FILE.with_suffix(".jsonl.tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            for entry in entries:
-                f.write(json.dumps(entry, default=str) + "\n")
-            f.flush()
-        tmp.replace(DEDUP_PROCESSING_FILE)
+        atomic_write_text(
+            DEDUP_PROCESSING_FILE,
+            "".join(json.dumps(entry, default=str) + "\n" for entry in entries),
+        )
 
         DEDUP_BUFFER_FILE.unlink(missing_ok=True)
         LOGGER.info("dedup_buffer: drained %d entries to processing file", len(entries))

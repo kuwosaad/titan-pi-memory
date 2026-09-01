@@ -48,6 +48,9 @@ def build_evidence_packet(
     session_id: Optional[str] = None,
     mode: str = "adaptive",
     packet_type: Optional[str] = None,
+    from_ts: Optional[str] = None,
+    to_ts: Optional[str] = None,
+    snapshot_cutoff: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Prepare an evidence packet for an agent-authored pattern mining pass.
 
@@ -69,6 +72,18 @@ def build_evidence_packet(
         processor_version=processor_version,
         processor_config_hash=processor_config_hash,
         limit=unprocessed_limit,
+        session_id=session_id,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        snapshot_cutoff=snapshot_cutoff,
+    )
+    unprocessed_total = ledger.count_unprocessed_memory_ids(
+        processor_version=processor_version,
+        processor_config_hash=processor_config_hash,
+        session_id=session_id,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        snapshot_cutoff=snapshot_cutoff,
     )
     by_unprocessed = repo.query_by_ids(unprocessed_ids)
     ordered_unprocessed = [by_unprocessed[mid] for mid in unprocessed_ids if mid in by_unprocessed]
@@ -120,6 +135,10 @@ def build_evidence_packet(
             batch_size=safe_batch_size,
             context_limit=safe_context_limit,
             session_id=session_id,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            snapshot_cutoff=snapshot_cutoff,
+            unprocessed_total=unprocessed_total,
             pattern_db_path=resolved_db_path,
         )
 
@@ -144,6 +163,10 @@ def build_evidence_packet(
         batch_size=safe_batch_size,
         context_limit=safe_context_limit,
         session_id=session_id,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        snapshot_cutoff=snapshot_cutoff,
+        unprocessed_total=unprocessed_total,
         pattern_context=[],
     )
 
@@ -158,6 +181,10 @@ def build_packet_from_plan(
     context_limit: int,
     session_id: Optional[str] = None,
     pattern_db_path: Optional[Path] = None,
+    from_ts: Optional[str] = None,
+    to_ts: Optional[str] = None,
+    snapshot_cutoff: Optional[str] = None,
+    unprocessed_total: Optional[int] = None,
 ) -> Dict[str, Any]:
     by_id = {str(mem.get("id")): mem for mem in all_memories if mem.get("id")}
     batch_memories = [by_id[memory_id] for memory_id in plan.seed_memory_ids if memory_id in by_id]
@@ -180,6 +207,10 @@ def build_packet_from_plan(
         batch_size=batch_size,
         context_limit=context_limit,
         session_id=session_id,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        snapshot_cutoff=snapshot_cutoff,
+        unprocessed_total=unprocessed_total,
         pattern_context=pattern_context,
     )
 
@@ -195,6 +226,10 @@ def _build_packet_payload(
     context_limit: int,
     session_id: Optional[str],
     pattern_context: Sequence[Dict[str, Any]],
+    from_ts: Optional[str] = None,
+    to_ts: Optional[str] = None,
+    snapshot_cutoff: Optional[str] = None,
+    unprocessed_total: Optional[int] = None,
 ) -> Dict[str, Any]:
     batch_ids = [str(mem.get("id")) for mem in batch_memories if mem.get("id")]
     related_context_memories = [item[0] for item in related_context]
@@ -238,6 +273,10 @@ def _build_packet_payload(
         "batch_size": batch_size,
         "context_limit": context_limit,
         "session_id": session_id,
+        "from_ts": from_ts,
+        "to_ts": to_ts,
+        "snapshot_cutoff": snapshot_cutoff,
+        "unprocessed_remaining": max(0, int(unprocessed_total or 0) - len(batch_ids)),
         "unprocessed_memory_ids": batch_ids,
         "related_old_memory_ids": [str(mem.get("id")) for mem in related_context_memories if mem.get("id")],
         "memories": {
@@ -401,6 +440,14 @@ def _serialize_memory(memory: Dict[str, Any]) -> Dict[str, Any]:
         "scene_id": memory.get("scene_id"),
         "ts": memory.get("ts"),
         "turn": memory.get("turn"),
+        # Evidence must remain auditable when it crosses the agent boundary.
+        "provenance": dict(memory.get("provenance") or {}),
+        "source_event_ids": list(memory.get("source_event_ids") or []),
+        "source_type": memory.get("source_type"),
+        "source_reliability": memory.get("source_reliability"),
+        "verification_status": memory.get("verification_status"),
+        "fallback_generated": bool(memory.get("fallback_generated", False)),
+        "speaker_focus": memory.get("speaker_focus"),
     }
 
 

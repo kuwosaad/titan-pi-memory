@@ -9,9 +9,10 @@ Run Titan doctor for the Grok namespace.
 
 ## Steps
 
-1. Call `doctor` via `use_tool` with `titan-memory__doctor` (or the listed `titan-memory` tool).
-2. Report agent name/namespace, MCP tool visibility, trace directory status, memory/provider signals, and any missing keys.
-3. If something fails, point to the next concrete check (plugin enablement, `/mcps`, hooks, `~/.titan/agents/grok/.env`).
+1. Run `titan-grok doctor`.
+2. MCP equivalent: `titan-memory__doctor`.
+3. Report workspace, spool/traces, memory count, and config. Ignore OpenCode-centric `titan doctor --agent grok` "plugin missing" noise.
+4. If something fails, check `~/.titan/agents/grok/.env`, plugin enablement, and `/mcps`.
 
 ## Expected home
 

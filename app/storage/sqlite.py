@@ -33,10 +33,19 @@ def resolve_sqlite_path(default_path: Path, *, base_dir: Optional[Path] = None) 
     return (root / fallback).resolve()
 
 
-def connect_sqlite(path: Path) -> sqlite3.Connection:
+def connect_sqlite(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
     """Open a configured SQLite connection with consistent lock behavior."""
 
-    conn = sqlite3.connect(path, timeout=SQLITE_TIMEOUT_SECONDS)
+    if read_only:
+        # URI mode=ro prevents a missing/raced path from being materialized
+        # and makes the federation adapters genuinely read-only.
+        conn = sqlite3.connect(
+            f"{Path(path).expanduser().resolve().as_uri()}?mode=ro",
+            timeout=SQLITE_TIMEOUT_SECONDS,
+            uri=True,
+        )
+    else:
+        conn = sqlite3.connect(path, timeout=SQLITE_TIMEOUT_SECONDS)
     conn.execute(f"PRAGMA busy_timeout = {int(SQLITE_TIMEOUT_SECONDS * 1000)}")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
