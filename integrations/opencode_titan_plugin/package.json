@@ -1,0 +1,15 @@
+{
+  "name": "@titan-memory/opencode-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Titan Memory integration for classic OpenCode 1.x",
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "setup": "bun run scripts/setup.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.4.8"
+  }
+}
