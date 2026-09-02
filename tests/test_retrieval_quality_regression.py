@@ -12,18 +12,19 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         config = {
             "query_aspects_enabled": True,
             "profile_aspect_expansion_enabled": True,
+            "profile_actor_terms": ["alex"],
             "max_query_aspects": 3,
             "min_aspect_tokens": 2,
         }
         personal = _query_aspects(
-            "How does Saad prefer agents to explain things, and what frustrates him in collaboration?",
+            "How does Alex prefer agents to explain things, and what frustrates him in collaboration?",
             config,
         )
         technical = _query_aspects("How does this retrieval pipeline explain ranking?", config)
 
         self.assertEqual(len(personal), 3)
-        self.assertIn("root cause", personal[1])
-        self.assertIn("delegation", personal[2])
+        self.assertIn("explanation preference", personal[1])
+        self.assertIn("collaboration preference", personal[2])
         self.assertEqual(technical, ["How does this retrieval pipeline explain ranking?"])
 
     @patch("app.patterns.retrieval.retrieve_accepted_patterns", return_value=[])
@@ -711,7 +712,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
                 "stream": "learnings",
                 "type": "user_preference",
                 "memory_kind": "user_preference",
-                "speaker_focus": "kuwo",
+                "speaker_focus": "user",
                 "session_id": "preferences",
                 "scene_id": "preferences:scene:1",
                 "ts": "2026-07-01T00:00:00+00:00",

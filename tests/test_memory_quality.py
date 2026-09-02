@@ -13,11 +13,13 @@ class MemoryQualityTests(unittest.TestCase):
             [
                 {"text": "The agent's goal is to have a conversation with Karu."},
                 {"text": "Kuwo asked Karu to remember his preference for simple explanations."},
-            ]
+            ],
+            user_display_name="Kuwo",
+            assistant_display_name="Karu",
         )
 
         self.assertEqual(len(sanitized), 1)
-        self.assertEqual(sanitized[0]["speaker_focus"], "kuwo")
+        self.assertEqual(sanitized[0]["speaker_focus"], "user")
 
     def test_marks_meaningful_exchange_as_memory_worthy(self):
         result = assess_memory_worthiness(

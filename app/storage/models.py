@@ -26,7 +26,7 @@ class Memory(BaseModel):
     source_reliability: float = Field(0.5, description="Reliability score 0.0-1.0")
     verification_status: str = Field("unverified", description="unverified|verified|rejected")
     verification_method: Optional[str] = Field(None, description="How verification was performed")
-    speaker_focus: Optional[Literal["kuwo", "karu", "shared", "system"]] = Field(
+    speaker_focus: Optional[Literal["user", "assistant", "kuwo", "karu", "shared", "system"]] = Field(
         None, description="Primary perspective captured by the memory"
     )
     memory_kind: Optional[

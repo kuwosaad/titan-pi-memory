@@ -56,12 +56,10 @@ def _refresh_json_paths() -> None:
     if DEFAULT_SQLITE_FILE == _MEMORY_ROOT / "memory_store.db":
         DEFAULT_SQLITE_FILE = current_root / "memory_store.db"
     _MEMORY_ROOT = current_root
-_ALLOWED_SPEAKER_FOCUS = {"kuwo", "karu", "shared", "system"}
+_ALLOWED_SPEAKER_FOCUS = {"user", "assistant", "kuwo", "karu", "shared", "system"}
 _LEGACY_SPEAKER_FOCUS_ALIASES = {
     "mixed": "shared",
     "both": "shared",
-    "user": "kuwo",
-    "assistant": "karu",
 }
 
 

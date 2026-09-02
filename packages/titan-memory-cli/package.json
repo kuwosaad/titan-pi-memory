@@ -32,7 +32,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "prepack": "node scripts/prepare-runtime.js",
+    "prepack": "node scripts/prepare-runtime.js && node scripts/audit-runtime.js",
     "test": "node bin/titan.js codex list-tools --json"
   },
   "engines": {

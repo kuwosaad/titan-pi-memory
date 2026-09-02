@@ -112,6 +112,28 @@ class MemoryStoreSqliteTests(unittest.TestCase):
         self.assertEqual(len(recent), 1)
         self.assertEqual(recent[0].speaker_focus, "shared")
 
+    def test_get_recent_memories_accepts_neutral_assistant_focus(self):
+        class StubRepo:
+            def get_recent_memories(self, limit: int = 8, session_id: str | None = None):
+                record = _sample_records()[0]
+                return [{**record, "speaker_focus": "assistant"}]
+
+        with patch.object(memories, "get_memory_repository", return_value=StubRepo()):
+            recent = memories.get_recent_memories(limit=1)
+
+        self.assertEqual(recent[0].speaker_focus, "assistant")
+
+    def test_get_recent_memories_preserves_stored_karu_focus(self):
+        class StubRepo:
+            def get_recent_memories(self, limit: int = 8, session_id: str | None = None):
+                record = _sample_records()[0]
+                return [{**record, "speaker_focus": "karu"}]
+
+        with patch.object(memories, "get_memory_repository", return_value=StubRepo()):
+            recent = memories.get_recent_memories(limit=1)
+
+        self.assertEqual(recent[0].speaker_focus, "karu")
+
     def test_blob_pack_unpack_roundtrip(self):
         vector = np.array([0.1, -0.2, 0.3], dtype=np.float32)
         blob, dim, dtype = memories.pack_embedding(vector)

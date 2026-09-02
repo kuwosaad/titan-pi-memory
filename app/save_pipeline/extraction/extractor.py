@@ -1,8 +1,9 @@
 import json
 import re
+from collections.abc import Mapping
 from typing import Any, Dict, List, Tuple
 
-from .prompts import build_extract_prompt
+from .prompts import build_extract_messages
 from app.save_pipeline.extraction.adapters import ExtractionAdapter
 from .policy import classify_memory, is_hidden_metadata_memory
 
@@ -37,8 +38,8 @@ LOW_SIGNAL_MEMORY_PATTERNS = (
     r"^the assistant is in a conversation\b",
     r"^a user message was received\b",
     r"^an assistant message was sent\b",
-    r"^karu received (a|an)\b",
-    r"^the conversation (is happening|with karu originated)\b",
+    r"^the assistant received (a|an)\b",
+    r"^the conversation (is happening|originated)\b",
     r"^the conversation key\b",
     r"^the trace packet\b",
     r"^the agent received (an )?(inbound|outbound|telegram)\b",
@@ -52,7 +53,6 @@ MEANINGFUL_SIGNAL_PATTERNS = (
     r"\b(prefers?|wants?|asked|request(?:ed)?|needs?|plans?|decided|promised|committed|remember|important|should|must|use|uses)\b",
     r"\b(bug|issue|problem|fix|failed|failure|frustrat(?:ed|ing)|surpris(?:e|ing))\b",
     r"\b(working|implemented|configured|integrated|investigat(?:e|ed)|research(?:ed)?|dedupe|idempotent)\b",
-    r"\b(Kuwo|Karu)\b",
 )
 
 SHALLOW_EXCHANGE_PATTERNS = (
@@ -71,10 +71,10 @@ TRACE_METADATA_MARKERS = (
     "account_id",
 )
 
-TRACE_GENERIC_OUTCOMES = (
-    "user message in conversation with karu",
-    "user message in a conversation with karu",
-    "outcome: user message in conversation with karu",
+TRACE_GENERIC_OUTCOME_PREFIXES = (
+    "user message in conversation with ",
+    "user message in a conversation with ",
+    "outcome: user message in conversation with ",
 )
 
 TRACE_DURABLE_SIGNAL_PATTERNS = (
@@ -101,7 +101,7 @@ DURABLE_RELATIONAL_PATTERNS = (
 )
 
 SHALLOW_RELATIONAL_PATTERNS = (
-    r"\b(you'?re the best|ur the best|good job|thanks karu|thank you karu|love you|you are amazing)\b",
+    r"\b(you'?re the best|ur the best|good job|thanks(?:\s+[\w-]+)?|thank you(?:\s+[\w-]+)?|love you|you are amazing)\b",
 )
 
 
@@ -194,7 +194,7 @@ def assess_memory_worthiness(user_text: str, assistant_text: str) -> Dict[str, A
         } or goal.startswith("conversation:")
         tool_is_empty = tool_calls in {"", "[]"}
         durable_trace_signal = _contains_trace_durable_signal(thoughts)
-        generic_outcome = any(marker in outcome for marker in TRACE_GENERIC_OUTCOMES)
+        generic_outcome = any(marker in outcome for marker in TRACE_GENERIC_OUTCOME_PREFIXES)
         if generic_goal and tool_is_empty and generic_outcome and not durable_trace_signal:
             return {"should_extract": False, "allow_fallback": False, "skip_reason": "telegram_transport_only"}
         if generic_goal and tool_is_empty and not _contains_meaningful_signal(thoughts):
@@ -230,7 +230,7 @@ def build_safe_fallback_memories(user_text: str, assistant_text: str) -> List[di
     candidates: List[dict] = []
 
     if user_line and not _is_shallow_exchange(user_line):
-        speaker_focus, memory_kind = classify_memory(user_line)
+        speaker_focus, memory_kind = classify_memory(user_line, speaker_focus="user")
         candidates.append(
             {
                 "text": f"The user asked about {user_line[:-1].lower()}." if user_line.endswith("?") else user_line,
@@ -240,7 +240,7 @@ def build_safe_fallback_memories(user_text: str, assistant_text: str) -> List[di
             }
         )
     if assistant_line and _contains_meaningful_signal(assistant_line) and not _is_shallow_exchange(assistant_line):
-        speaker_focus, memory_kind = classify_memory(assistant_line)
+        speaker_focus, memory_kind = classify_memory(assistant_line, speaker_focus="assistant")
         candidates.append(
             {
                 "text": assistant_line,
@@ -262,7 +262,14 @@ def infer_stream(text: str, mem_type: str | None = None) -> str:
     return "learnings"
 
 
-def sanitize_memories(memories: List[dict]) -> List[dict]:
+def sanitize_memories(
+    memories: List[dict],
+    *,
+    user_display_name: str | None = None,
+    assistant_display_name: str | None = None,
+    user_aliases: tuple[str, ...] = (),
+    assistant_aliases: tuple[str, ...] = (),
+) -> List[dict]:
     cleaned = []
     seen = set()
     for mem in memories:
@@ -282,7 +289,15 @@ def sanitize_memories(memories: List[dict]) -> List[dict]:
         stream = mem.get("stream") or infer_stream(text, mem_type)
         if stream not in {"rough", "learnings"}:
             stream = infer_stream(text, mem_type)
-        speaker_focus, memory_kind = classify_memory(text, mem_type)
+        speaker_focus, memory_kind = classify_memory(
+            text,
+            mem_type,
+            speaker_focus=mem.get("speaker_focus"),
+            user_display_name=user_display_name,
+            assistant_display_name=assistant_display_name,
+            user_aliases=user_aliases,
+            assistant_aliases=assistant_aliases,
+        )
 
         cleaned.append(
             {
@@ -291,7 +306,7 @@ def sanitize_memories(memories: List[dict]) -> List[dict]:
                 "stream": stream,
                 "source": mem.get("source"),
                 "reliability": mem.get("reliability"),
-                "speaker_focus": mem.get("speaker_focus") or speaker_focus,
+                "speaker_focus": speaker_focus,
                 "memory_kind": mem.get("memory_kind") or memory_kind,
             }
         )
@@ -303,7 +318,7 @@ def fallback_memories(user_text: str, max_sentences: int = 3) -> List[dict]:
     parts = re.split(r"(?<=[.!?])\s+", user_text.strip())
     candidates = []
     for part in parts[:max_sentences]:
-        candidates.append({"text": part, "stream": "rough"})
+        candidates.append({"text": part, "stream": "rough", "speaker_focus": "user"})
     return sanitize_memories(candidates)
 
 
@@ -341,13 +356,25 @@ def detect_source_attribution(memory_text: str, user_text: str, assistant_text: 
 def extract_atomic_memories(user_text: str, assistant_text: str, adapter: ExtractionAdapter) -> List[dict]:
     from app.retrieval_pipeline.config import load_settings
 
-    prompt = build_extract_prompt(user_text, assistant_text)
+    settings = load_settings()
+    identity = settings.get("identity", {})
+    if not isinstance(identity, Mapping):
+        identity = {}
+    user_display_name = str(identity.get("user_display_name") or "User")
+    assistant_display_name = str(identity.get("assistant_display_name") or "Assistant")
+    configured_user_aliases = identity.get("user_aliases", ())
+    configured_assistant_aliases = identity.get("assistant_aliases", ())
+    user_aliases = tuple(str(value).strip() for value in configured_user_aliases if str(value).strip()) if isinstance(configured_user_aliases, (list, tuple)) else ()
+    assistant_aliases = tuple(str(value).strip() for value in configured_assistant_aliases if str(value).strip()) if isinstance(configured_assistant_aliases, (list, tuple)) else ()
+    messages = build_extract_messages(
+        user_text,
+        assistant_text,
+        user_display_name=user_display_name,
+        assistant_display_name=assistant_display_name,
+    )
 
     content = adapter.chat(
-        [
-            {"role": "system", "content": "You output strict JSON only."},
-            {"role": "user", "content": prompt},
-        ],
+        messages,
         format_hint="json",
         temperature=0.1,
     )
@@ -358,7 +385,13 @@ def extract_atomic_memories(user_text: str, assistant_text: str, adapter: Extrac
         return fallback_memories(user_text)
 
     if isinstance(data, list):
-        sanitized = sanitize_memories([{"text": str(x), "stream": "rough"} for x in data])
+        sanitized = sanitize_memories(
+            [{"text": str(x), "stream": "rough"} for x in data],
+            user_display_name=user_display_name,
+            assistant_display_name=assistant_display_name,
+            user_aliases=user_aliases,
+            assistant_aliases=assistant_aliases,
+        )
         for mem in sanitized:
             source, reliability = detect_source_attribution(mem["text"], user_text, assistant_text)
             mem["source"] = source
@@ -369,7 +402,6 @@ def extract_atomic_memories(user_text: str, assistant_text: str, adapter: Extrac
     if not isinstance(memories, list):
         return fallback_memories(user_text)
 
-    settings = load_settings()
     reliability_map = settings.get("source_reliability", {})
 
     normalized = []
@@ -392,7 +424,7 @@ def extract_atomic_memories(user_text: str, assistant_text: str, adapter: Extrac
                     "stream": stream,
                     "source": source,
                     "reliability": reliability,
-                    "speaker_focus": item.get("speaker_focus"),
+                    "speaker_focus": item.get("speaker_focus") or (source if source in {"user", "assistant"} else None),
                     "memory_kind": item.get("memory_kind"),
                 }
             )
@@ -410,4 +442,10 @@ def extract_atomic_memories(user_text: str, assistant_text: str, adapter: Extrac
                 }
             )
 
-    return sanitize_memories(normalized)
+    return sanitize_memories(
+        normalized,
+        user_display_name=user_display_name,
+        assistant_display_name=assistant_display_name,
+        user_aliases=user_aliases,
+        assistant_aliases=assistant_aliases,
+    )

@@ -27,6 +27,14 @@ min_memory_length: 6
 max_fallback_sentences: 3
 synthesize_implementation_outcomes: true
 
+# Names used only when rendering new memory text. Agent-local settings may
+# override these without changing the stable user/assistant speaker roles.
+identity:
+  user_display_name: User
+  assistant_display_name: Assistant
+  user_aliases: []
+  assistant_aliases: []
+
 # Server Settings
 host: 127.0.0.1
 port: 8000

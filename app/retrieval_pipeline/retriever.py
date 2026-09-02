@@ -3,7 +3,7 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 import networkx as nx
@@ -162,7 +162,6 @@ DUPLICATE_OPPOSING_TERM_PAIRS = (
     ("use", "avoid"),
 )
 
-PROFILE_ACTOR_TERMS = ("kuwo", "saad", "mohammad")
 PROFILE_QUERY_TERMS = (
     "behavior",
     "collaboration",
@@ -558,11 +557,11 @@ def _expand_profile_aspect(facet: str, profile_mode: Optional[str]) -> str:
     cues: List[str] = []
     if profile_mode == "preference":
         if "explain" in lowered:
-            cues.extend(["clarity", "concise", "direct", "simple wording", "abstraction", "root cause"])
+            cues.extend(["communication style", "explanation preference"])
         if "collaboration" in lowered or "frustrat" in lowered:
-            cues.extend(["delegation", "reliability", "speed", "slow", "unreliable"])
+            cues.extend(["collaboration preference", "working constraint"])
     elif profile_mode == "psychology" and any(term in lowered for term in ("behavior", "pattern", "personality", "psycholog")):
-        cues.extend(["recurring behavior", "continuity", "proof", "evidence"])
+        cues.extend(["recurring behavior", "personality pattern"])
     return facet if not cues else f"{facet}. {' '.join(cues)}"
 
 
@@ -576,7 +575,12 @@ def _query_aspects(query: str, config: Dict[str, Any]) -> List[str]:
 
     max_aspects = max(1, int(config.get("max_query_aspects", 3) or 3))
     min_tokens = max(1, int(config.get("min_aspect_tokens", 2) or 2))
-    profile_mode = _profile_query_mode(normalized) if bool(config.get("profile_aspect_expansion_enabled", False)) else None
+    actor_terms = tuple(str(term) for term in config.get("profile_actor_terms", ()) if str(term).strip())
+    profile_mode = (
+        _profile_query_mode(normalized, actor_terms)
+        if bool(config.get("profile_aspect_expansion_enabled", False))
+        else None
+    )
     aspects = [normalized]
     clause_pattern = re.compile(
         r"(?:[,;]\s*|\s+)and\s+(?=(?:what|how|why|which|when|where|who)\b)",
@@ -679,9 +683,29 @@ def _is_multi_anchor_entity_query(query: str) -> bool:
     return len(anchors) >= 2
 
 
-def _profile_query_mode(query: str) -> Optional[str]:
+def _query_mentions_profile_actor(query: str, actor_terms: Tuple[str, ...]) -> bool:
+    return any(
+        re.search(rf"(?<![\w-]){re.escape(term)}(?![\w-])", query, re.IGNORECASE)
+        for term in actor_terms
+        if term
+    )
+
+
+def _profile_actor_terms(settings: Mapping[str, Any]) -> Tuple[str, ...]:
+    identity = settings.get("identity", {})
+    if not isinstance(identity, Mapping):
+        identity = {}
+    configured = [identity.get("user_display_name")]
+    aliases = identity.get("user_aliases", ())
+    if isinstance(aliases, (list, tuple, set, frozenset)):
+        configured.extend(aliases)
+    terms = ["user", "i", "me", "my", *configured]
+    return tuple(dict.fromkeys(str(term).strip().lower() for term in terms if str(term or "").strip()))
+
+
+def _profile_query_mode(query: str, actor_terms: Tuple[str, ...]) -> Optional[str]:
     lowered = str(query or "").lower()
-    if not any(actor in lowered for actor in PROFILE_ACTOR_TERMS):
+    if not _query_mentions_profile_actor(lowered, actor_terms):
         return None
     if any(term in lowered for term in ("behavior", "pattern", "personality", "psycholog")):
         return "psychology"
@@ -690,27 +714,24 @@ def _profile_query_mode(query: str) -> Optional[str]:
     return None
 
 
-def _is_profile_query(query: str) -> bool:
-    return _profile_query_mode(query) is not None
+def _is_profile_query(query: str, actor_terms: Tuple[str, ...]) -> bool:
+    return _profile_query_mode(query, actor_terms) is not None
 
 
 def _profile_memory_affinity(memory: Dict[str, Any], profile_mode: Optional[str]) -> float:
     speaker_focus = str(memory.get("speaker_focus") or "").lower()
     memory_kind = str(memory.get("memory_kind") or "").lower()
     if profile_mode == "psychology":
-        text = str(memory.get("text") or "").lower()
-        if memory_kind in {"user_fact", "relationship"} and (
-            speaker_focus == "kuwo" or any(actor in text for actor in PROFILE_ACTOR_TERMS)
-        ):
+        if memory_kind in {"user_fact", "relationship"} and speaker_focus == "user":
             return 1.0
         if memory_kind in {"user_fact", "relationship"}:
             return 0.55
-        if speaker_focus == "kuwo" and memory_kind == "user_preference":
+        if speaker_focus == "user" and memory_kind == "user_preference":
             return 0.30
         if memory_kind in PROFILE_MEMORY_KINDS:
             return 0.20
         return 0.0
-    if speaker_focus == "kuwo" and memory_kind in PROFILE_MEMORY_KINDS:
+    if speaker_focus == "user" and memory_kind in PROFILE_MEMORY_KINDS:
         return 1.0
     if memory_kind in PROFILE_MEMORY_KINDS:
         return 0.45
@@ -2309,7 +2330,9 @@ def _retrieve_memories_impl(
     policy = RetrievalPolicy.resolve(settings, request)
     lnn_config = settings.get("lnn") or {}
     step1_config = settings.get("step1", {}) or {}
-    selection_config = settings.get("retrieval_selection", {}) or {}
+    selection_config = dict(settings.get("retrieval_selection", {}) or {})
+    actor_terms = _profile_actor_terms(settings)
+    selection_config["profile_actor_terms"] = actor_terms
     selection_enabled = bool(selection_config.get("enabled", False))
     top_k = policy.top_k
     rerank = _resolve_rerank_config(settings, int(top_k))
@@ -2373,7 +2396,7 @@ def _retrieve_memories_impl(
     raw_query = query.strip()
     conditioned_query = _condition_query(raw_query, resolved_intent, step1_config)
     query_aspects = _query_aspects(raw_query, selection_config) if selection_enabled else [raw_query]
-    profile_mode = _profile_query_mode(raw_query) if selection_enabled else None
+    profile_mode = _profile_query_mode(raw_query, actor_terms) if selection_enabled else None
     profile_query = profile_mode is not None
     entity_query = selection_enabled and _is_multi_anchor_entity_query(raw_query)
     query_embedding_inputs = [conditioned_query]

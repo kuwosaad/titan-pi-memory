@@ -7,8 +7,29 @@ const packageRoot = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(packageRoot, '..', '..');
 const runtimeDir = path.join(packageRoot, 'runtime');
 
-const copyDirs = ['app', 'config', 'entrypoints', 'integrations', 'tools'];
-const copyFiles = ['requirements.txt', 'LICENSE'];
+// This is a public release boundary, not a repository mirror. Keep the list
+// explicit so research artifacts, benchmarks, local paths, fixtures, and
+// personal examples cannot enter npm merely because they live in a copied
+// top-level directory.
+const runtimePaths = [
+  'app',
+  'config/.env.example',
+  'config/embedding_models.yaml',
+  'config/extraction_models.yaml',
+  'config/settings.yaml',
+  'config/visual_config.yaml',
+  'entrypoints/__init__.py',
+  'entrypoints/main.py',
+  'entrypoints/mcp_server.py',
+  'integrations/__init__.py',
+  'integrations/codex_titan_plugin',
+  'tools/__init__.py',
+  'tools/cli',
+  'tools/opencode/install_plugin.py',
+  'tools/opencode/titan_v2_spool_plugin.ts',
+  'requirements.txt',
+  'LICENSE',
+];
 const ignoredNames = new Set([
   '__pycache__',
   '.pytest_cache',
@@ -47,12 +68,8 @@ function copyRecursive(src, dest) {
 fs.rmSync(runtimeDir, { recursive: true, force: true });
 fs.mkdirSync(runtimeDir, { recursive: true });
 
-for (const dir of copyDirs) {
-  copyRecursive(path.join(repoRoot, dir), path.join(runtimeDir, dir));
-}
-
-for (const file of copyFiles) {
-  copyRecursive(path.join(repoRoot, file), path.join(runtimeDir, file));
+for (const relativePath of runtimePaths) {
+  copyRecursive(path.join(repoRoot, relativePath), path.join(runtimeDir, relativePath));
 }
 
 fs.copyFileSync(path.join(repoRoot, 'LICENSE'), path.join(packageRoot, 'LICENSE'));

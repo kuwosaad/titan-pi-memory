@@ -8,7 +8,7 @@ The extractor re-exports these functions for import compatibility.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 _LOW_SIGNAL_MARKERS = (
@@ -19,8 +19,8 @@ _LOW_SIGNAL_MARKERS = (
 _LOW_SIGNAL_PATTERNS = (
     r"^the agent'?s (goal|outcome|intent phrase)\b", r"^the agent is in a conversation\b",
     r"^the assistant is in a conversation\b", r"^a user message was received\b",
-    r"^an assistant message was sent\b", r"^karu received (a|an)\b",
-    r"^the conversation (is happening|with karu originated)\b", r"^the conversation key\b",
+    r"^an assistant message was sent\b", r"^the assistant received (a|an)\b",
+    r"^the conversation (is happening|originated)\b", r"^the conversation key\b",
     r"^the trace packet\b", r"^the agent received (an )?(inbound|outbound|telegram)\b",
     r"^an inbound message\b", r"^a new session started\b", r"^the inbound message\b",
     r"^the agent memory namespace\b",
@@ -51,26 +51,77 @@ def _is_low_signal_transport_text(text: str) -> bool:
     return any(re.search(pattern, lowered) for pattern in _LOW_SIGNAL_PATTERNS)
 
 
-def classify_memory(memory_text: str, mem_type: str | None = None) -> Tuple[str, str]:
+_SPEAKER_FOCUS_ALIASES = {
+    "both": "shared",
+    "mixed": "shared",
+}
+_SPEAKER_FOCUS_VALUES = {"user", "assistant", "shared", "system"}
+
+
+def _mentions_actor(text: str, names: tuple[str, ...]) -> bool:
+    return any(
+        re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text, re.IGNORECASE)
+        for name in names
+        if name
+    )
+
+
+def _actor_has_user_signal(text: str, names: tuple[str, ...]) -> bool:
+    return any(
+        re.search(
+            rf"(?<![\w-]){re.escape(name)}(?![\w-]).{{0,48}}\b(asked|directed|prefers|requested|wants)\b",
+            text,
+            re.IGNORECASE,
+        )
+        for name in names
+        if name
+    )
+
+
+def classify_memory(
+    memory_text: str,
+    mem_type: str | None = None,
+    *,
+    speaker_focus: Optional[str] = None,
+    user_display_name: Optional[str] = None,
+    assistant_display_name: Optional[str] = None,
+    user_aliases: tuple[str, ...] = (),
+    assistant_aliases: tuple[str, ...] = (),
+) -> Tuple[str, str]:
     lowered = memory_text.lower()
     type_lower = (mem_type or "").lower()
-    if "kuwo and karu" in lowered or "they discussed" in lowered:
-        speaker_focus = "shared"
-    elif "kuwo" in lowered or "the user" in lowered:
-        speaker_focus = "kuwo"
-    elif "karu" in lowered or "assistant" in lowered:
-        speaker_focus = "karu"
-    else:
-        speaker_focus = "system"
+    focus = str(speaker_focus or "").strip().lower()
+    focus = _SPEAKER_FOCUS_ALIASES.get(focus, focus)
+    if focus not in _SPEAKER_FOCUS_VALUES:
+        user_names = (str(user_display_name or "").strip(), *user_aliases, "the user", "user")
+        assistant_names = (
+            str(assistant_display_name or "").strip(),
+            *assistant_aliases,
+            "the assistant",
+            "assistant",
+        )
+        mentions_user = _mentions_actor(memory_text, user_names)
+        mentions_assistant = _mentions_actor(memory_text, assistant_names)
+        if mentions_user and mentions_assistant and _actor_has_user_signal(memory_text, user_names):
+            focus = "user"
+        elif (mentions_user and mentions_assistant) or "they discussed" in lowered:
+            focus = "shared"
+        elif mentions_user:
+            focus = "user"
+        elif mentions_assistant:
+            focus = "assistant"
+        else:
+            focus = "system"
+
     if type_lower in {"preference", "profile"}:
-        memory_kind = "user_preference" if speaker_focus == "kuwo" else "relationship"
+        memory_kind = "user_preference" if focus == "user" else "relationship"
     elif type_lower in {"decision", "plan", "constraint"}:
         memory_kind = "decision"
     elif type_lower in {"bug", "risk", "question"}:
         memory_kind = "issue"
     elif type_lower in {"fix", "workflow", "integration", "schema"}:
         memory_kind = "workflow"
-    elif any(token in lowered for token in ("prefers", "likes", "wants karu to", "asked karu to")):
+    elif any(token in lowered for token in ("prefers", "likes", "wants", "asked")) and focus == "user":
         memory_kind = "user_preference"
     elif any(token in lowered for token in ("promised", "will remember", "should remember", "committed")):
         memory_kind = "commitment"
@@ -83,8 +134,8 @@ def classify_memory(memory_text: str, mem_type: str | None = None) -> Tuple[str,
     elif any(token in lowered for token in ("bug", "issue", "problem", "failed", "frustration")):
         memory_kind = "issue"
     else:
-        memory_kind = "user_fact" if speaker_focus == "kuwo" else "workflow"
-    return speaker_focus, memory_kind
+        memory_kind = "user_fact" if focus == "user" else "workflow"
+    return focus, memory_kind
 
 
 def is_hidden_metadata_memory(memory: Dict[str, Any] | str) -> bool:

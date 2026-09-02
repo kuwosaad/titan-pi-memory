@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -39,7 +40,10 @@ class NpmTitanMemoryCliPackageTests(unittest.TestCase):
         )
         self.assertIn("titan-pi-memory", payload["repository"]["url"])
         self.assertIn("titan-pi-memory", payload["homepage"])
-        self.assertEqual(payload["scripts"]["prepack"], "node scripts/prepare-runtime.js")
+        self.assertEqual(
+            payload["scripts"]["prepack"],
+            "node scripts/prepare-runtime.js && node scripts/audit-runtime.js",
+        )
         self.assertIn("runtime/", payload["files"])
 
         bin_script = (PACKAGE_DIR / "bin" / "titan.js").read_text(encoding="utf-8")
@@ -65,6 +69,124 @@ class NpmTitanMemoryCliPackageTests(unittest.TestCase):
 
         self.assertIn("__pycache__", script)
         self.assertIn(".pyc", script)
+
+    def test_packed_runtime_excludes_personal_and_development_material(self):
+        prepared = subprocess.run(
+            ["node", "scripts/prepare-runtime.js"],
+            cwd=PACKAGE_DIR,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+
+        packed = subprocess.run(
+            ["npm", "pack", "--dry-run", "--json", "--ignore-scripts"],
+            cwd=PACKAGE_DIR,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(packed.returncode, 0, packed.stderr)
+        package = json.loads(packed.stdout)[0]
+        paths = {entry["path"] for entry in package["files"]}
+
+        forbidden_prefixes = (
+            "runtime/entrypoints/overnight/",
+            "runtime/tools/benchmarks/",
+            "runtime/tools/dev/",
+            "runtime/tools/pi_extension/",
+            "runtime/tools/presentations/",
+            "runtime/tools/scripts/",
+        )
+        self.assertFalse(
+            sorted(path for path in paths if path.startswith(forbidden_prefixes)),
+            "npm contains development-only runtime files",
+        )
+
+        personal_terms = re.compile(
+            r"(?:"
+            r"/Users/|"
+            r"PROFILE_ACTOR_TERMS\s*=|"
+            r"when the exchange clearly refers to Kuwo and Karu|"
+            r"Kuwo is a beginner learning Python|"
+            r"Kuwo prefers direct instructions|"
+            r"['\"]karu['\"]\s*:\s*['\"]assistant['\"]|"
+            r"['\"]kuwo['\"]\s*:\s*['\"]user['\"]|"
+            r"['\"]saad['\"]\s*,\s*['\"]kuwo['\"]"
+            r")",
+            re.IGNORECASE,
+        )
+        leaks = []
+        for relative_path in sorted(paths):
+            packaged_path = PACKAGE_DIR / relative_path
+            if not packaged_path.is_file():
+                continue
+            try:
+                text = packaged_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            if personal_terms.search(text):
+                leaks.append(relative_path)
+        self.assertEqual(leaks, [], f"npm contains founder-specific material: {leaks}")
+
+    def test_prepack_audit_rejects_a_local_home_path(self):
+        payload = json.loads((PACKAGE_DIR / "package.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            payload["scripts"]["prepack"],
+            "node scripts/prepare-runtime.js && node scripts/audit-runtime.js",
+        )
+
+        prepared = subprocess.run(
+            ["node", "scripts/prepare-runtime.js"],
+            cwd=PACKAGE_DIR,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+
+        leak = PACKAGE_DIR / "runtime" / "private-leak.txt"
+        try:
+            leak.write_text("/Users/example/private-memory.db\n", encoding="utf-8")
+            audited = subprocess.run(
+                ["node", "scripts/audit-runtime.js"],
+                cwd=PACKAGE_DIR,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        finally:
+            leak.unlink(missing_ok=True)
+
+        self.assertNotEqual(audited.returncode, 0)
+        self.assertIn("private-leak.txt", audited.stderr)
+
+    def test_prepack_audit_rejects_new_founder_specific_examples(self):
+        prepared = subprocess.run(
+            ["node", "scripts/prepare-runtime.js"],
+            cwd=PACKAGE_DIR,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+
+        leak = PACKAGE_DIR / "runtime" / "founder-example.txt"
+        try:
+            leak.write_text("Kuwo prefers concise replies from Karu.\n", encoding="utf-8")
+            audited = subprocess.run(
+                ["node", "scripts/audit-runtime.js"],
+                cwd=PACKAGE_DIR,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        finally:
+            leak.unlink(missing_ok=True)
+
+        self.assertNotEqual(audited.returncode, 0)
+        self.assertIn("founder-example.txt", audited.stderr)
 
     def test_runtime_activation_preserves_previous_pointer_and_marketplace_tree(self):
         script = (PACKAGE_DIR / "bin" / "titan.js").read_text(encoding="utf-8")
