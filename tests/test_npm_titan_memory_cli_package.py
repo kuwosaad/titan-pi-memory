@@ -70,6 +70,29 @@ class NpmTitanMemoryCliPackageTests(unittest.TestCase):
         self.assertIn("__pycache__", script)
         self.assertIn(".pyc", script)
 
+    def test_prepare_runtime_uses_committed_opencode_bundle(self):
+        script = (PACKAGE_DIR / "scripts" / "prepare-runtime.js").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "integrations/opencode_titan_plugin/dist/titan_v2_spool_plugin.ts",
+            script,
+        )
+        self.assertNotIn("tools/opencode/titan_v2_spool_plugin.ts", script)
+
+        for relative_path in (
+            "integrations/opencode_titan_plugin/dist/titan_v2_spool_plugin.ts",
+            "tools/opencode/install_plugin.py",
+        ):
+            with self.subTest(relative_path=relative_path):
+                tracked = subprocess.run(
+                    ["git", "ls-files", "--error-unmatch", relative_path],
+                    cwd=ROOT_DIR,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(tracked.returncode, 0, f"runtime source is not committed: {relative_path}")
+
     def test_packed_runtime_excludes_personal_and_development_material(self):
         prepared = subprocess.run(
             ["node", "scripts/prepare-runtime.js"],

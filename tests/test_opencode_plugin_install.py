@@ -9,7 +9,7 @@ class OpenCodePluginInstallTests(unittest.TestCase):
     def test_installs_project_plugin_to_project_path(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            template = root / "tools" / "opencode" / "titan_v2_spool_plugin.ts"
+            template = root / "integrations" / "opencode_titan_plugin" / "dist" / "titan_v2_spool_plugin.ts"
             template.parent.mkdir(parents=True, exist_ok=True)
             template.write_text("export const plugin = 1\n", encoding="utf-8")
 
@@ -23,7 +23,7 @@ class OpenCodePluginInstallTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "root"
             root.mkdir(parents=True, exist_ok=True)
-            template = root / "tools" / "opencode" / "titan_v2_spool_plugin.ts"
+            template = root / "integrations" / "opencode_titan_plugin" / "dist" / "titan_v2_spool_plugin.ts"
             template.parent.mkdir(parents=True, exist_ok=True)
             template.write_text("version-one\n", encoding="utf-8")
 
@@ -42,4 +42,3 @@ class OpenCodePluginInstallTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

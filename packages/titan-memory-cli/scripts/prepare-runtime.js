@@ -23,10 +23,11 @@ const runtimePaths = [
   'entrypoints/mcp_server.py',
   'integrations/__init__.py',
   'integrations/codex_titan_plugin',
+  'integrations/opencode_titan_plugin/dist/titan_v2_spool_plugin.ts',
   'tools/__init__.py',
   'tools/cli',
+  'tools/opencode/__init__.py',
   'tools/opencode/install_plugin.py',
-  'tools/opencode/titan_v2_spool_plugin.ts',
   'requirements.txt',
   'LICENSE',
 ];
