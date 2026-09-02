@@ -15,7 +15,7 @@
       "./tools/pi_extension"
     ],
     "skills": [
-      "./tools/pi_extension/skills/titan-pi-memory",
+      "./tools/pi_extension/skills/titan-memory-workflow",
       "./tools/pi_extension/skills/memory-sync"
     ],
     "prompts": [
