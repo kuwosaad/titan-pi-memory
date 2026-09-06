@@ -19,6 +19,32 @@ class PiExtensionContractTests(unittest.TestCase):
         self.assertIn('params.set("include_scenes", "false")', self.source)
         self.assertNotIn('"--- Scene context ---"', self.source)
 
+    def test_query_adapter_passes_mode_sources_and_session_id(self):
+        retrieve_start = self.source.index("async function apiRetrieve(")
+        retrieve_end = self.source.index("async function apiGetScene(", retrieve_start)
+        retrieve = self.source[retrieve_start:retrieve_end]
+
+        self.assertIn("mode?: string", retrieve)
+        self.assertIn("sources?: string", retrieve)
+        self.assertIn("session_id?: string", retrieve)
+        self.assertIn('params.set("mode", options.mode)', retrieve)
+        self.assertIn('params.set("sources", options.sources)', retrieve)
+        self.assertIn('params.set("session_id", options.session_id)', retrieve)
+
+    def test_both_query_tool_surfaces_expose_all_retrieve_filters(self):
+        unified = self.source[self.source.index('name: "titan"'):self.source.index('name: "titan_query_memories"')]
+        dedicated = self.source[self.source.index('name: "titan_query_memories"'):self.source.index('name: "titan_get_scene_context"')]
+
+        for surface in (unified, dedicated):
+            self.assertIn("mode:", surface)
+            self.assertIn("sources:", surface)
+            self.assertIn("session_id:", surface)
+            self.assertIn("params.date_from", surface)
+            self.assertIn("params.date_to", surface)
+            self.assertIn("params.mode", surface)
+            self.assertIn("params.sources", surface)
+            self.assertIn("params.session_id", surface)
+
     def test_tool_outputs_remain_compact(self):
         self.assertIn("compactText(JSON.stringify(input), 500)", self.source)
         self.assertIn("compactText(extractTextContent(event.content), 1000)", self.source)

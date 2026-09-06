@@ -772,37 +772,52 @@ def _minimum_direct_similarity(hit: Dict[str, Any], config: Dict[str, Any]) -> f
     return min_direct_similarity
 
 
-def _hit_has_sufficient_direct_evidence(hit: Dict[str, Any], config: Dict[str, Any]) -> bool:
-    if not bool(config.get("enabled", False)):
-        return True
-    if bool(hit.get("query_echo_memory", False)):
-        return False
-    direct_similarity = float(hit.get("direct_similarity", hit.get("base_score", hit.get("score", 0.0))) or 0.0)
+def _has_meaningful_lexical_anchor(hit: Dict[str, Any], config: Dict[str, Any]) -> bool:
+    """Require more than one generic token before admitting a weak pointer."""
     lexical_coverage = float(hit.get("lexical_coverage", 0.0) or 0.0)
-    if bool(hit.get("entity_query", False)) and not bool(hit.get("profile_query", False)):
-        entity_min_lexical_coverage = float(config.get("entity_min_lexical_coverage", 0.0))
-        entity_direct_similarity_override = float(config.get("entity_direct_similarity_override", 1.0))
-        if (
-            lexical_coverage < entity_min_lexical_coverage
-            and direct_similarity < entity_direct_similarity_override
+    if lexical_coverage <= 0.0:
+        return False
+
+    memory = hit.get("memory") or {}
+    memory_terms = _lexical_terms(str(memory.get("text") or ""))
+    aspects = hit.get("query_aspects") or []
+    if not memory_terms or not aspects:
+        return lexical_coverage >= float(config.get("keyword_short_query_min_coverage", 0.50))
+
+    for aspect in aspects:
+        aspect_terms = _lexical_terms(str(aspect))
+        overlap = memory_terms & aspect_terms
+        if not overlap:
+            continue
+        if any(
+            any(char.isdigit() for char in token) and any(char.isalpha() for char in token)
+            for token in overlap
         ):
-            return False
-    min_direct_similarity = _minimum_direct_similarity(hit, config)
-    if direct_similarity >= min_direct_similarity:
-        return True
-    strong_lexical_coverage = float(config.get("strong_lexical_coverage", 1.0))
-    lexical_override_min_similarity = float(config.get("lexical_override_min_similarity", 1.0))
-    max_lexical_override_terms = max(1, int(config.get("max_lexical_override_terms", 3) or 3))
-    return (
-        bool(hit.get("lexical_override_allowed", True))
-        and lexical_coverage >= strong_lexical_coverage
-        and direct_similarity >= lexical_override_min_similarity
-        and min(len(_content_tokens(aspect)) for aspect in hit.get("query_aspects", [""])) <= max_lexical_override_terms
-    )
+            return True
+        if len(aspect_terms) <= 2 or len(overlap) >= 2:
+            return True
+    return False
 
 
 def _query_has_sufficient_evidence(hits: List[Dict[str, Any]], config: Dict[str, Any]) -> bool:
-    return any(_hit_has_sufficient_direct_evidence(hit, config) for hit in hits)
+    """Keep unrelated candidate pools from reaching associative reranking.
+
+    Direct evidence is no longer a display-admission requirement.  A lexical
+    anchor makes a weak pointer viable for navigation; without one, require a
+    strong semantic anchor before allowing the pool to continue.  This keeps
+    nonsense queries from being amplified by LNN while leaving final ranking
+    responsible for ordering viable pointers.
+    """
+    viable_hits = [hit for hit in hits if not bool(hit.get("query_echo_memory", False))]
+    if not viable_hits:
+        return False
+    if any(_has_meaningful_lexical_anchor(hit, config) for hit in viable_hits):
+        return True
+    return any(
+        float(hit.get("direct_similarity", hit.get("base_score", hit.get("score", 0.0))) or 0.0)
+        >= _minimum_direct_similarity(hit, config)
+        for hit in viable_hits
+    )
 
 
 def _selection_rank_score(hit: Dict[str, Any], config: Dict[str, Any]) -> float:
@@ -868,8 +883,13 @@ def _select_diverse_hits(
     aspect_count: int,
     config: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    """Allocate visible slots to distinct, directly relevant memory evidence."""
-    admitted = [hit for hit in hits if _hit_has_sufficient_direct_evidence(hit, config)]
+    """Allocate visible slots to distinct pointers from a viable pool.
+
+    Similarity and lexical coverage affect ordering, but do not certify a
+    pointer as correct.  Query echoes remain excluded because they merely
+    repeat the question instead of pointing to evidence.
+    """
+    admitted = [hit for hit in hits if not bool(hit.get("query_echo_memory", False))]
     if not admitted:
         return []
 
@@ -926,7 +946,6 @@ def _select_diverse_hits(
         facet_candidates = [
             hit for hit in admitted
             if len(hit.get("aspect_scores") or []) > aspect_index
-            and float(hit["aspect_scores"][aspect_index]) >= _minimum_direct_similarity(hit, config)
         ]
         facet_candidates.sort(
             key=lambda hit: (
@@ -2202,29 +2221,31 @@ def _keyword_fallback_hits(
     top_k: int,
     selection_config: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    query_terms = set(_tokenize(query))
+    query_terms = _lexical_terms(query)
     query_content_terms = _content_tokens(query)
     if not query_terms:
         return []
 
-    strong_lexical_coverage = float((selection_config or {}).get("strong_lexical_coverage", 0.0))
-    if len(query_content_terms) <= 2:
-        strong_lexical_coverage = float(
-            (selection_config or {}).get("keyword_short_query_min_coverage", 0.50)
-        )
     enforce_selection = bool((selection_config or {}).get("enabled", False))
     hits = []
     for mem in memories:
         text = str(mem.get("text") or "")
-        text_terms = set(_tokenize(text))
+        text_terms = _lexical_terms(text)
         overlap = query_terms & text_terms
         if not overlap:
             continue
         content_overlap = query_content_terms & _content_tokens(text)
-        lexical_coverage = len(content_overlap) / max(len(query_content_terms), 1)
-        if enforce_selection and lexical_coverage < strong_lexical_coverage:
+        if not content_overlap:
             continue
-        score = len(overlap) / max(len(query_terms), 1)
+        # A single generic word in a long, otherwise unrelated query is not a
+        # useful pointer.  Keep short exact-anchor queries permissive while
+        # allowing partial matches for normal multi-term queries.
+        if enforce_selection and len(query_content_terms) > 2 and len(content_overlap) < 2:
+            continue
+        if enforce_selection and _is_query_echo_memory(text, query):
+            continue
+        lexical_coverage = len(content_overlap) / max(len(query_content_terms), 1)
+        score = len(content_overlap) / max(len(query_content_terms), 1)
         hits.append(
             {
                 "memory": mem,

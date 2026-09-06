@@ -14,4 +14,4 @@ agent namespace under `~/.titan/agents/pi` so its memories and traces do not mix
 other agents. The `titan` tool's doctor operation reports the selected storage backend
 and whether LNN features are available; JSON storage supports basic memory but not LNN.
 
-**Docs:** [github.com/kuwosaad/titan-karu](https://github.com/kuwosaad/titan-karu)
+**Docs:** [github.com/kuwosaad/titan-pi-memory](https://github.com/kuwosaad/titan-pi-memory)

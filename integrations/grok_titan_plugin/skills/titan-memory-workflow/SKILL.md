@@ -1,184 +1,93 @@
 ---
 name: titan-memory-workflow
-description: Use Titan Memory when prior decisions, work, chronology, agents, preferences, or project history could materially change the answer. Compiles natural-language requests into retrieval-shaped evidence probes, follows memory pointers to source scenes, and verifies current state; skip it when the present conversation or repository already answers.
+description: Use Titan Memory when prior decisions, work, chronology, agents, preferences, or project history could materially change the answer. Run an agent-led investigation from concrete pointers to source scenes, then verify against current state; skip it when the present context or current files already answer.
 ---
 
 # Titan Memory Workflow
 
-Restore the relevant past with the least retrieval needed for a trustworthy answer.
+Use Titan when the answer depends on what happened before. The agent investigates;
+Titan supplies searchable pointers and source scenes.
 
-The agent reasons; Titan retrieves. A human request is rarely a good Titan query by
-itself. Translate it into language likely to occur in stored memories, then use the
-results as evidence.
+## Evidence model
 
-## Mental Model
+- A **Memory** is a possible pointer: a compressed lead, not an answer.
+- A **Scene** is the source evidence behind a pointer.
+- The **current system**—files, Git, tests, and live diagnostics—is authoritative
+  for what is true now.
+- Preserve `source_agent`, `session_id`, `scene_id`, and timestamps whenever they are
+  returned. Foreign recall is read-only.
 
-- A **Memory** is a compressed, usually declarative pointer to prior work.
-- A **Scene** is the source interaction behind a Memory.
-- A **Pattern** is a generalization supported across Memories.
-- The **current system** determines what is true now.
+## Investigative loop
 
-The usual direction is `request -> evidence probes -> Memories -> decisive Scenes ->
-current verification`. Enter at the cheapest layer that resolves the uncertainty.
+1. **Frame.** State the target (decision, event, reason, chronology, preference,
+   outcome, or current state), its project/artifact/agent/time scope, and the
+   evidence needed. Split broad requests into temporary claims.
 
-## Evidence Loop
+   **Complete when:** the uncertainty is specific enough to search.
 
-### 1. Frame
+2. **Probe.** Compile one hypothesis per query using concrete language likely to
+   occur in memory: a distinctive name, path, identifier, error, mechanism, or
+   lifecycle event plus one relationship or expected outcome. Use source, date,
+   `session_id`, and memory-stream parameters when the live schema supports them. Use
+   `both` for uncertain status, `rough` for events and chronology, and `learnings`
+   for decisions and rules.
 
-Identify what the answer needs:
+   **Complete when:** each probe has one subject and one evidence relationship.
 
-- target: event, decision, reason, chronology, current state, preference, or pattern;
-- scope: projects, artifacts, actors, source agents, and time window;
-- evidence bar: orientation, scene-grounded history, or current verification.
+3. **Investigate.** Read results as leads. Extract only anchors already present:
+   names, paths, errors, dates, decisions, lifecycle terms, source agents,
+   `session_id` values, scene IDs, and timestamps. Infer the strongest unexplored connection,
+   such as the same artifact or person, plan-to-execution, failure-to-workaround,
+   or chronology connecting earlier and later scenes. Use returned timestamps,
+   `session_id`, source, and scene IDs to form the next search; the scene-context
+   tool opens only the selected scene.
 
-For broad questions, split the requested answer into temporary evidence claims. This
-organizes the current investigation; it does not classify the user's nonlinear
-conversation permanently.
+   Build the next probe by changing one search dimension—anchor, relationship,
+   time, source, stream, or chronology. A paraphrase of the same failed query is
+   not a new probe.
 
-**Complete when:** the missing evidence is specific enough to search for.
+   **Continue when:** new evidence creates a useful unexplored direction.
 
-### 2. Compile
+4. **Follow.** Open a Scene when it can confirm, reject, or redirect the current
+   hypothesis. Preserve its owning `source_agent`; group repeated pointers by
+   `source_agent + scene_id` so one Scene is not counted as several. Expand only
+   scenes that could change the conclusion. Use targeted pointers and verification
+   when a scene is too large to inspect usefully.
 
-Compile each claim into one or more **memory-shaped probes**. A strong probe resembles
-a sentence fragment Titan may have stored:
+   **Complete when:** the material history is covered or the remaining gap has no
+   useful unexplored direction. There is no preset probe or retry count.
 
-`distinctive entity or artifact + one action or relationship + expected evidence`
+5. **Prove.** A Scene establishes origin and context; it does not establish present
+   correctness. Verify technical claims against current files, Git, tests, or live
+   diagnostics. For absence, compare positive planning evidence with positive
+   execution evidence and their timestamps. A retrieval miss is not proof of
+   absence. Current verified reality overrides remembered state.
 
-Keep project names, file paths, identifiers, errors, people, models, and concrete
-mechanisms. Remove conversational wrappers such as "what all stuff did we do" and
-abstract status labels that carry little subject matter.
+   **Complete when:** every material claim is scene-grounded, currently verified,
+   or clearly bounded as an inference or unknown.
 
-Use separate probes for separate hypotheses:
+6. **Answer.** Answer the user directly. Distinguish remembered, scene-grounded,
+   currently verified, inferred, and unknown only when that changes trust. After
+   significant work, store one concise trace packet containing the durable decision,
+   verified outcome, and remaining work.
 
-- implementation: `<thing> implemented changed files tests passed verified`;
-- planning: `<thing> proposed recommendation roadmap next step deferred`;
-- rationale: `<thing> reason constraint tradeoff decision`;
-- outcome: `<thing> completed connected passed written created`.
+## Tool map
 
-These are examples, not magic keywords. Prefer wording likely to appear in the relevant
-Memory. Split mechanism from outcome when one query would mix several generations of
-history.
+- `titan-memory_query_memories`: retrieve possible pointers with a bounded initial
+  result set.
+- `titan-memory_get_recent_memories`: recover chronology and recent orientation.
+- `titan-memory_get_scene_context`: open source evidence with preserved provenance.
+- `titan-memory_store_trace_packet`: preserve a significant distilled outcome.
 
-**Absence has no embedding.** To decide that something was not started, retrieve
-positive planning evidence and positive execution evidence separately, then compare
-their timestamps and verify current artifacts. A failed search alone never proves
-absence.
+Follow the live tool schema. Titan is the recall layer; the agent owns anchor
+extraction, hypothesis testing, connection inference, search-path choice, and the
+stopping decision.
 
-Keep scope controls out of the semantic payload when possible:
+## Routing
 
-- pass `sources` when ownership is known or one namespace is causing noise;
-- use date parameters when the live schema exposes them, with an inclusive end-of-day
-  bound for a whole day;
-- when date parameters are unavailable, use recent recall and filter returned
-  timestamps;
-- use a bare date inside a query only when the date itself is evidence, not merely a
-  filter. Titan versions may interpret one date as midnight-to-midnight and exclude
-  the rest of that day.
+Use the pattern workflow for pattern lifecycle work, the cluster workflow for graph
+synthesis, the doctor workflow for runtime or setup failures, and memory-sync for
+historical imports. Use direct database inspection only when diagnosing Titan.
 
-Semantic retrieval is already the search algorithm. `mode` selects memory streams; it
-is not `semantic`. When supported, use:
-
-- `both` for broad status, uncertain wording, or competing plan/outcome evidence;
-- `rough` for episodic events and chronology;
-- `learnings` for distilled decisions, rules, and patterns.
-
-Follow the live schema if it differs. Never invent a mode value.
-
-**Complete when:** every probe contains one clear subject and one evidence relationship,
-while time and source are handled structurally where possible.
-
-### 3. Probe
-
-Choose the smallest call or small set of independent calls that could change the
-answer. Start with a bounded result count; widen only when coverage requires it.
-
-Use recent or date-bounded recall for activity windows. Use semantic probes for topics,
-mechanisms, decisions, and expected evidence. Search all agents when ownership is
-unknown; isolate a source when the owner is known or stale foreign history dominates.
-
-A non-empty response is not automatically a hit. Count a result only when it supports
-the probe's subject and evidence relationship; generic semantic neighbors are noise.
-
-Treat a response that exactly fills its limit as potentially incomplete. Split by
-source, time, or topic before requesting one enormous response.
-
-When results are weak, audit the call before diagnosing Titan:
-
-1. valid mode and tool parameters;
-2. date handled as scope rather than accidental semantic text;
-3. one topic and relationship per probe;
-4. concrete anchors instead of abstract labels;
-5. appropriate source and memory stream.
-
-Then change the retrieval angle: use a path or identifier, phrase the expected Memory,
-separate mechanism from outcome, narrow the source, or recover chronology. Repeating a
-paraphrase of the same bad query is not a new probe.
-
-When a known recent Memory is absent from semantic results, inspect recent recall in
-the owning source before escalating. Semantic thresholds can hide a stored record
-without implying that capture or federation is broken.
-
-**Complete when:** the relevant evidence space is covered, or the remaining gap is
-explicit and cannot be reduced with another cheap probe.
-
-### 4. Reconstruct
-
-Treat results as clues, not answers. Preserve `source_agent` and `scene_id`. Group
-repeated fragments by `source_agent + scene_id` before judging coverage.
-
-For lifecycle questions, build a temporary evidence table mentally:
-
-`claim | planning evidence | execution evidence | verification | latest timestamp`
-
-The agent infers status from evidence; Titan does not need to understand labels such as
-"done" or "unstarted."
-
-Semantic rank is relevance, not chronology. Recent Memories are orientation, not
-automatically a work report. Keep conflicts and superseding evidence visible.
-
-Expand only Scenes that can materially change the conclusion: decisive outcomes,
-reasoning, corrections, conflicts, or plans that could be mistaken for execution. If a
-Scene is enormous, stop expanding and use targeted Memories plus current verification
-instead of opening more of the same session.
-
-**Complete when:** every material claim has supporting evidence, a competing state has
-been checked where relevant, and no duplicate Scene is being counted as separate work.
-
-### 5. Prove
-
-A Scene proves origin and context, not present correctness. Verify current technical
-claims with files, Git, tests, or live diagnostics. For preferences and conversational
-corrections, weigh the source Scene, recency, repetition, and later superseding
-evidence.
-
-Current verified reality overrides remembered repository state. Lower reliability
-means weaker evidence, not automatic falsehood. State unresolved uncertainty instead
-of converting a retrieval miss into certainty.
-
-**Complete when:** each material claim is scene-grounded, currently verified, or
-explicitly bounded as an inference or unknown.
-
-### 6. Answer and Preserve
-
-Answer the user's actual question rather than narrating the retrieval process.
-Distinguish remembered, scene-grounded, verified, inferred, and unknown only where the
-distinction changes trust. Name the originating agent when provenance matters.
-
-After significant work, save one distilled trace packet when future continuity will
-benefit. Capture the goal, durable decisions or corrections, verified outcome, and
-remaining work. Passive capture already handles routine conversation.
-
-## Boundaries
-
-- Federated Memory and Scene recall is read-only. Preserve the owning
-  `source_agent` when opening a foreign Scene.
-- Writes, traces, settings, patterns, and learning state remain in the active agent's
-  namespace.
-- Use diagnostics only after a correctly shaped retrieval still indicates stale or
-  broken state.
-- Route pattern lifecycle work to the pattern workflow, graph synthesis to the cluster
-  workflow, runtime failures to the doctor workflow, and historical imports to
-  memory-sync.
-- Use direct database inspection only when diagnosing Titan itself.
-
-The governing rule is simple: compile for retrieval, then reason from evidence.
+The governing rule is: retrieve pointers, investigate through evidence, then verify
+against the present.

@@ -7,6 +7,7 @@ WORKFLOW_PATHS = (
     ROOT / "integrations" / "codex_titan_plugin" / "skills" / "titan-memory-workflow" / "SKILL.md",
     ROOT / "integrations" / "claude_titan_plugin" / "skills" / "titan-memory-workflow" / "SKILL.md",
     ROOT / "integrations" / "grok_titan_plugin" / "skills" / "titan-memory-workflow" / "SKILL.md",
+    ROOT / "integrations" / "opencode_titan_plugin" / "skills" / "titan-memory-workflow" / "SKILL.md",
     ROOT / "tools" / "pi_extension" / "skills" / "titan-memory-workflow" / "SKILL.md",
 )
 

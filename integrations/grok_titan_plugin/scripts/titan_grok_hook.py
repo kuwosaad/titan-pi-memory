@@ -54,7 +54,7 @@ _EVENT_ALIASES: dict[str, str] = {
 
 
 def _now_iso() -> str:
-    return _dt.datetime.now(_dt.UTC).isoformat().replace("+00:00", "Z")
+    return _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _redact_text(text: str) -> str:

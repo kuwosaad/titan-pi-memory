@@ -33,7 +33,7 @@ _STOPWORDS = {
     "where", "which", "while", "with", "within", "without", "would", "your", "will", "were",
     "been", "they", "them", "then", "also", "such", "like", "make", "made", "makes", "needs",
     "need", "used", "uses", "use", "currently", "current", "previous", "recent", "memory",
-    "memories", "system", "project", "package", "extension", "updated", "asked", "karu", "titan",
+    "memories", "system", "project", "package", "extension", "updated", "asked", "titan",
 }
 
 _TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9_./-]{2,}")

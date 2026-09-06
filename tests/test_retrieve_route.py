@@ -7,6 +7,13 @@ from entrypoints.main import app
 
 
 class RetrieveRouteTests(unittest.TestCase):
+    def test_invalid_sources_are_client_errors_before_retrieval(self):
+        for sources in ("../escape", "[bad", '["valid", "../escape"]'):
+            with self.subTest(sources=sources), patch("app.api.routes.retrieve_memory_brief") as recall:
+                response = TestClient(app).get("/api/retrieve", params={"query": "example", "sources": sources})
+                self.assertEqual(response.status_code, 400)
+                recall.assert_not_called()
+
     def test_health_endpoint_returns_ok(self):
         client = TestClient(app)
 
@@ -70,6 +77,43 @@ class RetrieveRouteTests(unittest.TestCase):
             date_from=None,
             date_to=None,
             include_scenes=False,
+            sources=None,
+        )
+
+    def test_retrieve_endpoint_passes_all_adapter_filters_to_pipeline(self):
+        expected_payload = {"query": "what changed?", "count": 0, "memories": [], "scene_refs": []}
+
+        with patch("app.api.routes.retrieve_memory_brief", return_value=expected_payload) as mock_retrieve:
+            client = TestClient(app)
+            response = client.get(
+                "/api/retrieve",
+                params={
+                    "query": "what changed?",
+                    "session_id": "session-42",
+                    "mode": "rough",
+                    "limit": "11",
+                    "max_items": "5",
+                    "max_chars": "1200",
+                    "from_date": "2026-08-01",
+                    "to_date": "2026-08-31",
+                    "include_scenes": "true",
+                    "sources": "codex,pi",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected_payload)
+        mock_retrieve.assert_called_once_with(
+            query="what changed?",
+            session_id="session-42",
+            mode="rough",
+            limit=11,
+            max_items=5,
+            max_chars=1200,
+            date_from="2026-08-01",
+            date_to="2026-08-31",
+            include_scenes=True,
+            sources="codex,pi",
         )
 
     def test_retrieve_endpoint_can_return_scene_pointers_without_scene_bodies(self):

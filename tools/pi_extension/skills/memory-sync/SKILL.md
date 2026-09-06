@@ -283,7 +283,7 @@ The user ran a command and saw a long stack trace.
 Good memory shape:
 
 ```txt
-OpenClaw does not auto-inject arbitrary karu.md; put persona in SOUL.md and identity in IDENTITY.md.
+OpenClaw does not auto-inject arbitrary persona.md; put persona in SOUL.md and identity in IDENTITY.md.
 ```
 
 Bad memory shape:
@@ -328,16 +328,16 @@ Every memory stored from an import MUST carry source provenance. Titan currently
 Correct format for `thoughts`:
 
 ```txt
-[source:codex] Kuwo is a beginner learning Python and benefits from direct, simple commands.
+[source:codex] The user is learning Python and benefits from direct, simple commands.
 [source:codex] Root cause of Titan-Mem issue was store-path drift: MCP inherited stale TITAN_BASE_DIR.
-[source:codex] OpenClaw does not auto-inject arbitrary karu.md; put persona in SOUL.md and identity in IDENTITY.md.
+[source:codex] OpenClaw does not auto-inject arbitrary persona.md; put persona in SOUL.md and identity in IDENTITY.md.
 ```
 
 For Claude Code:
 
 ```txt
-[source:claude-code] Kuwo prefers direct instructions; when told "commit and push", just do it without overthinking.
-[source:claude-code] The local Claude Code data on this machine is sparse — mostly metadata, few full project transcripts.
+[source:claude-code] The user prefers direct instructions; when told "commit and push", just do it without overthinking.
+[source:claude-code] Source agent data may be sparse — mostly metadata, with few full project transcripts.
 ```
 
 **Why this matters:** The earlier Codex import on 2026-05-30 stored 83 learnings in Titan but they were unqueryable because they shared the same session ID as the ~99 process-level memories about npm publish and git commits. The source tag makes imported memories distinguishable from import-process noise.
@@ -405,7 +405,7 @@ Record shape:
   "session_id": "019c75ed-47d4-70a1-870b-eda732caadde",
   "session_file": "~/.codex/sessions/2026/02/19/rollout-...jsonl",
   "fingerprint": "sha256:...",
-  "project": "/Users/mohammadsaad/Desktop/Code/Titan-Mem...",
+  "project": "/path/to/project...",
   "thread_name": "Explain titan-go duplicate events",
   "timestamp": "2026-02-19T12:43:30.644Z",
   "schema_family": "codex-new-jsonl",
@@ -441,14 +441,14 @@ Query examples:
 [source:codex] Titan-Mem store-path drift
 [source:codex] OpenClaw SOUL.md IDENTITY.md
 [source:codex] pipx-only packaging Titan-Mem
-[source:claude-code] Kuwo preferences
+[source:claude-code] Source agent preferences
 ```
 
 Also try broader semantic queries to confirm the memories are discoverable:
 
 ```txt
 what did we learn from Codex about Titan-Mem architecture
-what did Kuwo prefer in Codex sessions about project structure
+what preferences did the source agent mention in Codex sessions about project structure
 ```
 
 Report whether imported memories appear in retrieval. If storage succeeded but retrieval fails, say so and recommend re-indexing/restarting Titan if applicable.

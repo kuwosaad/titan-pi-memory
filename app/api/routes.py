@@ -3,7 +3,7 @@ from typing import Optional
 import os
 import time as _time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
@@ -17,6 +17,7 @@ from app.save_pipeline.pipeline import (
     retrieve_memory_brief,
 )
 from app.save_pipeline.extraction.extractor import is_hidden_metadata_memory
+from app.retrieval_pipeline.federated import _source_list, _validate_agent_name
 from app.graph.builder import build_graph
 from app.graph.clusters import inspect_memory_clusters
 from app.graph.cortex_analysis import analyze_memory_clusters
@@ -294,8 +295,13 @@ def pattern_mark_processed(req: PatternMarkProcessedRequest) -> dict:
 
 
 @router.get("/api/scenes/{scene_id}")
-def get_scene_by_id(scene_id: str):
-    payload = get_scene_context(scene_id)
+def get_scene_by_id(scene_id: str, source_agent: Optional[str] = None):
+    if source_agent is not None:
+        try:
+            _validate_agent_name(source_agent)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid source_agent") from exc
+    payload = get_scene_context(scene_id, source_agent=source_agent)
     if "error" in payload:
         status_code = 400 if payload["error"] == "scene_id is required" else 404
         return JSONResponse(status_code=status_code, content=payload)
@@ -328,7 +334,14 @@ def retrieve(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     include_scenes: bool = False,
+    sources: Optional[str] = None,
 ) -> dict:
+    if sources is not None:
+        try:
+            for source in _source_list("", sources):
+                _validate_agent_name(source)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid sources") from exc
     return retrieve_memory_brief(
         query=query or "",
         session_id=session_id,
@@ -339,6 +352,7 @@ def retrieve(
         date_from=from_date,
         date_to=to_date,
         include_scenes=include_scenes,
+        sources=sources,
     )
 
 

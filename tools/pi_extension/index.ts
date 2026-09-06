@@ -721,16 +721,24 @@ async function safeJson(res: Response): Promise<Record<string, unknown>> {
 
 async function apiRetrieve(
   query: string,
-  limit = 8,
-  date_from?: string,
-  date_to?: string,
+  options: {
+    limit?: number;
+    date_from?: string;
+    date_to?: string;
+    mode?: string;
+    sources?: string;
+    session_id?: string;
+  } = {},
 ): Promise<TitanRetrieveResponse> {
   const params = new URLSearchParams();
   params.set("query", query);
-  params.set("limit", String(limit));
+  params.set("limit", String(options.limit ?? 8));
   params.set("include_scenes", "false");
-  if (date_from) params.set("from_date", date_from);
-  if (date_to) params.set("to_date", date_to);
+  if (options.mode) params.set("mode", options.mode);
+  if (options.sources) params.set("sources", options.sources);
+  if (options.session_id) params.set("session_id", options.session_id);
+  if (options.date_from) params.set("from_date", options.date_from);
+  if (options.date_to) params.set("to_date", options.date_to);
   const url = `${TITAN_API_BASE}/api/retrieve?${params.toString()}`;
   const res = await fetch(url);
   return (await safeJson(res)) as unknown as TitanRetrieveResponse;
@@ -1354,6 +1362,8 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       }),
       query: Type.Optional(Type.String({ description: "Search query for query_memories. Leave empty only with date_from/date_to." })),
       limit: Type.Optional(Type.Number({ description: "Max results or memories to process (default depends on action)." })),
+      mode: Type.Optional(Type.String({ description: "Optional retrieval mode, such as rough, learnings, or both." })),
+      sources: Type.Optional(Type.String({ description: "Optional comma-separated source agents for federated recall." })),
       date_from: Type.Optional(Type.String({ description: "Start date/time filter for query_memories, ISO 8601." })),
       date_to: Type.Optional(Type.String({ description: "End date/time filter for query_memories, ISO 8601." })),
       scene_id: Type.Optional(Type.String({ description: "Scene ID for get_scene_context." })),
@@ -1429,7 +1439,14 @@ export default function titanPiExtension(pi: ExtensionAPI) {
 
       if (params.action === "query_memories") {
         const query = params.query ?? "";
-        const data = await apiRetrieve(query, params.limit ?? 8, params.date_from, params.date_to);
+        const data = await apiRetrieve(query, {
+          limit: params.limit ?? 8,
+          mode: params.mode,
+          sources: params.sources,
+          session_id: params.session_id,
+          date_from: params.date_from,
+          date_to: params.date_to,
+        });
         const memories = data.memories ?? [];
         if (memories.length === 0) {
           return { content: [{ type: "text" as const, text: "No sufficiently relevant memories found." }] };
@@ -1553,6 +1570,15 @@ export default function titanPiExtension(pi: ExtensionAPI) {
           default: 8,
         }),
       ),
+      mode: Type.Optional(
+        Type.String({ description: "Optional retrieval mode, such as rough, learnings, or both." }),
+      ),
+      sources: Type.Optional(
+        Type.String({ description: "Optional comma-separated source agents for federated recall." }),
+      ),
+      session_id: Type.Optional(
+        Type.String({ description: "Optional Titan session ID filter." }),
+      ),
       date_from: Type.Optional(
         Type.String({
           description: "Start of date range (ISO 8601, e.g. '2026-05-15' or '2026-05-15T00:00:00'). Filters memories at or after this timestamp.",
@@ -1575,7 +1601,14 @@ export default function titanPiExtension(pi: ExtensionAPI) {
           ],
         };
       }
-      const data = await apiRetrieve(params.query, params.limit ?? 8, params.date_from, params.date_to);
+      const data = await apiRetrieve(params.query, {
+        limit: params.limit ?? 8,
+        mode: params.mode,
+        sources: params.sources,
+        session_id: params.session_id,
+        date_from: params.date_from,
+        date_to: params.date_to,
+      });
       const memories = data.memories ?? [];
       if (memories.length === 0) {
         return {

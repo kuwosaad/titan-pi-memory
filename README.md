@@ -7,7 +7,7 @@
 > **Canonical source of truth.** This repository owns the Titan engine, agent
 > adapters (including Pi and Codex), Codex plugin, CLI packaging, tests, and
 > release configuration. Pi is one adapter and npm package, not the ownership
-> boundary. The older `titan-karu` checkout and separate Codex/CLI repositories
+> boundary. Older Titan checkouts and separate Codex/CLI repositories
 > are compatibility distributions; they are not authoritative.
 
 ```bash
@@ -243,6 +243,21 @@ Codex hook trust remains a manual safety decision: open Codex, inspect `/hooks`,
 and trust the Titan hook only if you want passive capture. A successful CLI
 check does not claim that a live Codex session has loaded MCP tools or trusted
 hooks; confirm those separately with `/mcp` and `/hooks`.
+
+### Name the user and assistant in new memories
+
+Titan stores neutral `user` / `assistant` speaker roles, but memory text can use
+the names that belong to each agent namespace. Add this to
+`~/.titan/agents/<agent>/config/settings.yaml`:
+
+```yaml
+identity:
+  user_display_name: Your Name
+  assistant_display_name: Your Agent
+```
+
+The bundled defaults are `User` and `Assistant`. Changing these settings only
+affects newly extracted memories; Titan does not rewrite historical records.
 
 ---
 

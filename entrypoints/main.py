@@ -47,7 +47,17 @@ async def _startup_auto_ingest() -> None:
         return
     spool_dir = _RUNTIME_CONTEXT.trace_dir
     interval_seconds = float(os.getenv("TITAN_AUTO_INGEST_INTERVAL_SECONDS", "3"))
-    start_auto_ingest_worker(app, spool_dir=spool_dir, interval_seconds=interval_seconds)
+    maintenance_callback = None
+    if _RUNTIME_CONTEXT.agent_name == "codex":
+        from integrations.codex_titan_plugin.pending_recovery import recover_one_pending_turn
+
+        maintenance_callback = recover_one_pending_turn
+    start_auto_ingest_worker(
+        app,
+        spool_dir=spool_dir,
+        interval_seconds=interval_seconds,
+        maintenance_callback=maintenance_callback,
+    )
 
     dedup_stop = threading.Event()
     app.state.dedup_stop_event = dedup_stop

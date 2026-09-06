@@ -61,6 +61,12 @@ from app.storage.models import TraceEvent, TracePacketRequest, TraceToolCall
 from app.save_pipeline.auto_ingest import _auto_ingest_loop
 from app.save_pipeline.dedup_worker import start_dedup_worker
 from app.save_pipeline.lnn_tick_worker import start_lnn_tick_worker
+from integrations.codex_titan_plugin.pending_recovery import (
+    inspect_codex_stop_hook,
+    pending_recovery_enabled,
+    recover_one_pending_turn,
+    recover_pending_sessions,
+)
 
 
 server = FastMCP("titan-memory")
@@ -420,6 +426,38 @@ async def doctor() -> dict:
         "trace_dir": str(trace_dir),
         "memory_db": str(_RUNTIME_CONTEXT.memory_db_path),
     }
+    pending_recovery = {
+        "enabled": False,
+        "pending_sessions": 0,
+        "pending_events": 0,
+        "recoverable_completed_turns": 0,
+        "partial_turns": 0,
+        "active_turns": 0,
+        "missing_transcripts": 0,
+        "memoryless_recovery_scenes": 0,
+    }
+    hook_capture = {"plugin_enabled": False, "stop_configured": False, "stop_enabled": False}
+    if agent_name == "codex":
+        try:
+            preview = recover_pending_sessions(apply=False)
+            pending_recovery.update(
+                {
+                    key: int(preview.get(key) or 0)
+                    for key in (
+                        "pending_sessions",
+                        "pending_events",
+                        "recoverable_completed_turns",
+                        "partial_turns",
+                        "active_turns",
+                        "missing_transcripts",
+                        "memoryless_recovery_scenes",
+                    )
+                }
+            )
+        except Exception:
+            pending_recovery["inspection_failed"] = True
+        pending_recovery["enabled"] = pending_recovery_enabled()
+        hook_capture = inspect_codex_stop_hook()
 
     return {
         "agent_name": agent_name,
@@ -459,6 +497,8 @@ async def doctor() -> dict:
             "spool_dir": str(Path(os.getenv("TITAN_SPOOL_DIR", str(TITAN_HOME / "traces"))).expanduser()),
             "interval_seconds": ingest_interval,
         },
+        "pending_recovery": pending_recovery,
+        "hook_capture": hook_capture,
         "required_config_files": required_config_files,
         "settings_scope": {
             "effective_path": str(_RUNTIME_CONTEXT.settings_path),
@@ -668,7 +708,12 @@ def run() -> None:
     ing_stop = threading.Event()
     threading.Thread(
         target=_auto_ingest_loop,
-        args=(ing_stop, spool_dir, ingest_interval),
+        args=(
+            ing_stop,
+            spool_dir,
+            ingest_interval,
+            recover_one_pending_turn if _RUNTIME_CONTEXT.agent_name == "codex" else None,
+        ),
         daemon=True,
         name="titan-auto-ingest",
     ).start()

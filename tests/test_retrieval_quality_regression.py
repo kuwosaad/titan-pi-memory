@@ -330,6 +330,112 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         self.assertEqual(hits, [])
         mock_step2.assert_not_called()
 
+    @patch("app.retrieval_pipeline.retriever._step2_1_rerank")
+    @patch("app.retrieval_pipeline.retriever.query_memory_candidates")
+    @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
+    @patch("app.retrieval_pipeline.retriever.embed")
+    @patch("app.retrieval_pipeline.config.load_settings")
+    def test_single_generic_lexical_overlap_does_not_admit_weak_pointer(
+        self,
+        mock_load_settings,
+        mock_embed,
+        mock_lexical_candidates,
+        mock_semantic_candidates,
+        mock_step2,
+    ):
+        mock_load_settings.return_value = {
+            "retrieval_top_k": 8,
+            "retrieval_min_similarity": 0.0,
+            "retrieval_recency_days": None,
+            "retrieval_session_bias": False,
+            "retrieval_rerank_enabled": True,
+            "retrieval_rerank_alpha": 1.0,
+            "retrieval_rerank_pool_k": 8,
+            "retrieval": {"min_reliability": 0.0},
+            "retrieval_selection": {
+                "enabled": True,
+                "hybrid_candidates_enabled": True,
+                "query_aspects_enabled": False,
+                "min_direct_similarity": 0.70,
+            },
+            "step1": {"enabled": False},
+            "step2": {"attention_mask_enabled": True},
+            "lnn": {"enabled": True, "use_ode_rerank": True},
+        }
+        generic_candidate = {
+            "id": "generic-preference-pointer",
+            "text": "Saad has a preference for concise explanations.",
+            "stream": "learnings",
+            "type": "user_preference",
+            "session_id": "preferences",
+            "scene_id": "preferences:scene:1",
+            "ts": "2026-07-01T00:00:00+00:00",
+            "embedding": [0.40, 0.9165],
+            "source_reliability": 0.9,
+        }
+        mock_lexical_candidates.return_value = [generic_candidate]
+        mock_semantic_candidates.return_value = [generic_candidate]
+        mock_embed.return_value = [np.array([1.0, 0.0], dtype=np.float32)]
+
+        hits = retrieve_memories(
+            query="purple giraffe quantum bakery underwater violin preference",
+            top_k=8,
+            min_similarity=0.0,
+        )
+
+        self.assertEqual(hits, [])
+        mock_step2.assert_not_called()
+
+    @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
+    @patch("app.retrieval_pipeline.retriever.embed")
+    @patch("app.retrieval_pipeline.config.load_settings")
+    def test_related_pointer_below_direct_admission_threshold_is_returned(
+        self,
+        mock_load_settings,
+        mock_embed,
+        mock_candidates,
+    ):
+        mock_load_settings.return_value = {
+            "retrieval_top_k": 8,
+            "retrieval_min_similarity": 0.0,
+            "retrieval_recency_days": None,
+            "retrieval_session_bias": False,
+            "retrieval_rerank_enabled": False,
+            "retrieval": {"min_reliability": 0.0},
+            "retrieval_selection": {
+                "enabled": True,
+                "hybrid_candidates_enabled": False,
+                "query_aspects_enabled": False,
+                "min_direct_similarity": 0.70,
+                "strong_lexical_coverage": 0.80,
+                "lexical_override_min_similarity": 0.25,
+            },
+            "step1": {"enabled": False},
+            "step2": {},
+            "lnn": {},
+        }
+        mock_candidates.return_value = [{
+            "id": "weak-related-pointer",
+            "text": "The migration work uses scene context to investigate related evidence.",
+            "stream": "learnings",
+            "type": "workflow",
+            "session_id": "retrieval",
+            "scene_id": "retrieval:scene:1",
+            "ts": "2026-07-01T00:00:00+00:00",
+            "embedding": [0.60, 0.80],
+            "source_reliability": 0.9,
+        }]
+        mock_embed.return_value = [np.array([1.0, 0.0], dtype=np.float32)]
+
+        hits = retrieve_memories(
+            query="migration scene evidence",
+            top_k=8,
+            min_similarity=0.0,
+        )
+
+        self.assertEqual([hit["memory"]["id"] for hit in hits], ["weak-related-pointer"])
+        self.assertLess(hits[0]["direct_similarity"], 0.70)
+
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates")
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
     @patch("app.retrieval_pipeline.retriever.embed")
@@ -611,6 +717,55 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         )
 
         self.assertEqual(hits, [])
+
+    @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
+    @patch("app.retrieval_pipeline.retriever.embed", side_effect=ConnectionError("embedding unavailable"))
+    @patch("app.retrieval_pipeline.config.load_settings")
+    def test_keyword_fallback_returns_best_partial_content_overlap(
+        self,
+        mock_load_settings,
+        _mock_embed,
+        mock_candidates,
+    ):
+        mock_load_settings.return_value = {
+            "retrieval_top_k": 8,
+            "retrieval_min_similarity": 0.0,
+            "retrieval_recency_days": None,
+            "retrieval_session_bias": False,
+            "retrieval_rerank_enabled": False,
+            "retrieval": {"min_reliability": 0.0},
+            "retrieval_selection": {
+                "enabled": True,
+                "hybrid_candidates_enabled": False,
+                "query_aspects_enabled": False,
+                "min_direct_similarity": 0.70,
+                "strong_lexical_coverage": 0.80,
+                "lexical_override_min_similarity": 0.25,
+            },
+            "step1": {"enabled": False},
+            "step2": {},
+            "lnn": {},
+        }
+        mock_candidates.return_value = [{
+            "id": "partial-keyword-pointer",
+            "text": "Authentication migration still has a token refresh blocker.",
+            "stream": "rough",
+            "type": "issue",
+            "session_id": "engineering",
+            "scene_id": "engineering:scene:1",
+            "ts": "2026-07-01T00:00:00+00:00",
+            "source_reliability": 0.9,
+        }]
+
+        hits = retrieve_memories(
+            query="authentication migration release blocker",
+            top_k=8,
+            min_similarity=0.0,
+        )
+
+        self.assertEqual([hit["memory"]["id"] for hit in hits], ["partial-keyword-pointer"])
+        self.assertEqual(hits[0]["retrieval_method"], "keyword_fallback")
+        self.assertEqual(hits[0]["lexical_coverage"], 0.75)
 
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
     @patch("app.retrieval_pipeline.retriever.embed")
