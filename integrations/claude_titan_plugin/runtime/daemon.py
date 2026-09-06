@@ -253,7 +253,7 @@ class RuntimeGateway:
 
         try:
             await asyncio.wait_for(self.recall_slots.acquire(), timeout=0.1)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             return 503, {"ok": False, "error": "Titan recall is busy"}
 
         loop = asyncio.get_running_loop()
@@ -261,7 +261,7 @@ class RuntimeGateway:
         release_now = True
         try:
             result = await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             release_now = False
 
             async def release_when_finished() -> None:

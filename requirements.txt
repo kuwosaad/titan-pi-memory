@@ -7,3 +7,4 @@ networkx
 pydantic
 mcp>=1.5.0,<2
 rich
+tomli>=2.0.0; python_version < "3.11"

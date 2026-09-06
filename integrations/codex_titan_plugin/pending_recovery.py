@@ -83,7 +83,10 @@ def _find_rollouts(sessions_dir: Path, wanted: set[str]) -> dict[str, Path]:
 def inspect_codex_stop_hook(config_path: Path | None = None) -> dict[str, bool]:
     """Read the canonical plugin and Stop-hook state without exposing config data."""
 
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10 compatibility
+        import tomli as tomllib
 
     path = Path(config_path or (Path.home() / ".codex" / "config.toml"))
     try:

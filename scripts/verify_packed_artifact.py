@@ -22,7 +22,13 @@ import time
 from pathlib import Path
 from typing import Mapping, Sequence
 
-SUBPROCESS_TIMEOUT_SEC = 30
+# Most verifier subprocesses and the warm MCP protocol path should stay short.
+# The first CLI invocation is different: titan.js lazily creates a venv and
+# installs the bundled requirements before it can answer list-tools.
+WARM_STARTUP_TIMEOUT_SEC = 30
+COLD_BOOTSTRAP_TIMEOUT_SEC = 5 * 60
+SUBPROCESS_TIMEOUT_SEC = WARM_STARTUP_TIMEOUT_SEC
+DIAGNOSTIC_LIMIT = 8 * 1024
 REQUIRED_MCP_TOOLS = {
     "store_trace_packet",
     "store_trace_event",
@@ -45,6 +51,23 @@ REQUIRED_MCP_TOOLS = {
 }
 
 
+def _diagnostics(stdout: object, stderr: object) -> str:
+    """Render bounded child diagnostics, including timeout partial output."""
+    details: list[str] = []
+    for name, value in (("stderr", stderr), ("stdout", stdout)):
+        if value is None:
+            continue
+        if isinstance(value, bytes):
+            value = value.decode(errors="replace")
+        text = str(value).strip()
+        if text:
+            if len(text) > DIAGNOSTIC_LIMIT:
+                text = text[-DIAGNOSTIC_LIMIT:]
+                text = f"[...truncated...]\n{text}"
+            details.append(f"{name}: {text}")
+    return "\n".join(details)
+
+
 def run_checked(
     command: list[str], *, cwd: Path, env: Mapping[str, str], timeout: float = SUBPROCESS_TIMEOUT_SEC
 ) -> subprocess.CompletedProcess[str]:
@@ -59,10 +82,17 @@ def run_checked(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"command timed out after {timeout:g}s: {' '.join(command)}") from exc
+        detail = _diagnostics(exc.stdout, exc.stderr)
+        if detail:
+            detail = f"\n{detail}"
+        raise RuntimeError(
+            f"command timed out after {timeout:g}s: {' '.join(command)}{detail}"
+        ) from exc
     if result.returncode:
-        detail = (result.stderr or result.stdout).strip()
-        raise RuntimeError(f"command failed ({result.returncode}): {' '.join(command)}\n{detail}")
+        detail = _diagnostics(result.stdout, result.stderr)
+        if detail:
+            detail = f"\n{detail}"
+        raise RuntimeError(f"command failed ({result.returncode}): {' '.join(command)}{detail}")
     return result
 
 
@@ -183,7 +213,7 @@ def _stop_process_group(process: subprocess.Popen[str]) -> None:
 
 
 def mcp_stdio_handshake(
-    command: list[str], *, cwd: Path, env: Mapping[str, str], timeout: float = SUBPROCESS_TIMEOUT_SEC
+    command: list[str], *, cwd: Path, env: Mapping[str, str], timeout: float = WARM_STARTUP_TIMEOUT_SEC
 ) -> list[str]:
     """Perform initialize and tools/list, with bounded group cleanup and drains."""
     popen_kwargs: dict[str, object] = {
@@ -204,7 +234,8 @@ def mcp_stdio_handshake(
     output: queue.Queue[tuple[str, str | None]] = queue.Queue()
     readers: list[threading.Thread] = []
     stderr_lines: list[str] = []
-    deadline = time.monotonic() + min(timeout, SUBPROCESS_TIMEOUT_SEC)
+    effective_timeout = min(timeout, WARM_STARTUP_TIMEOUT_SEC)
+    deadline = time.monotonic() + effective_timeout
     try:
         process = subprocess.Popen(command, **popen_kwargs)  # type: ignore[arg-type]
         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
@@ -215,17 +246,17 @@ def mcp_stdio_handshake(
 
         def request(payload: dict, expected_id: int) -> dict:
             if time.monotonic() >= deadline:
-                raise RuntimeError(f"MCP handshake timed out after {timeout:g}s")
+                raise RuntimeError(f"MCP handshake timed out after {effective_timeout:g}s")
             process.stdin.write(json.dumps(payload) + "\n")
             process.stdin.flush()
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise RuntimeError(f"MCP handshake timed out after {timeout:g}s")
+                    raise RuntimeError(f"MCP handshake timed out after {effective_timeout:g}s")
                 try:
                     stream_name, line = output.get(timeout=remaining)
                 except queue.Empty as exc:
-                    raise RuntimeError(f"MCP handshake timed out after {timeout:g}s") from exc
+                    raise RuntimeError(f"MCP handshake timed out after {effective_timeout:g}s") from exc
                 if stream_name == "stderr":
                     if line:
                         stderr_lines.append(line)
@@ -292,6 +323,26 @@ def mcp_stdio_handshake(
                     pass
 
 
+def list_installed_tools(
+    installed_cli: Path, *, cwd: Path, env: Mapping[str, str]
+) -> set[str]:
+    """List tools after the cold bootstrap, without masking command failures."""
+    list_result = run_checked(
+        ["node", str(installed_cli), "codex", "list-tools", "--json"],
+        cwd=cwd,
+        env=env,
+        timeout=COLD_BOOTSTRAP_TIMEOUT_SEC,
+    )
+    try:
+        payload = json.loads(list_result.stdout)
+        raw_tools = payload["tools"]
+        if not isinstance(raw_tools, list) or not all(isinstance(item, str) for item in raw_tools):
+            raise TypeError("tools must be a list of names")
+        return set(raw_tools)
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"installed CLI returned invalid MCP tool JSON: {list_result.stdout!r}") from exc
+
+
 def verify(root: Path, requested_archive: Path | None) -> tuple[str, int, int, int]:
     repo_root, package_root = resolve_package_root(root)
     with tempfile.TemporaryDirectory(prefix="titan-memory-cli-artifact-") as directory:
@@ -318,17 +369,7 @@ def verify(root: Path, requested_archive: Path | None) -> tuple[str, int, int, i
         if not installed_cli.is_file():
             raise RuntimeError(f"installed CLI is missing: {installed_cli}")
 
-        list_result = run_checked(
-            ["node", str(installed_cli), "codex", "list-tools", "--json"], cwd=temporary, env=env
-        )
-        try:
-            payload = json.loads(list_result.stdout)
-            raw_tools = payload["tools"]
-            if not isinstance(raw_tools, list) or not all(isinstance(item, str) for item in raw_tools):
-                raise TypeError("tools must be a list of names")
-            tools = set(raw_tools)
-        except (KeyError, TypeError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"installed CLI returned invalid MCP tool JSON: {list_result.stdout!r}") from exc
+        tools = list_installed_tools(installed_cli, cwd=temporary, env=env)
         missing = sorted(REQUIRED_MCP_TOOLS - tools)
         if missing:
             raise RuntimeError(f"installed CLI tool listing is missing: {', '.join(missing)}")

@@ -11,6 +11,9 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from scripts import verify_packed_artifact as verifier
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "packages" / "titan-memory-cli"
@@ -27,9 +30,9 @@ REQUIRED_TOOLS = {
 }
 
 
-def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None, timeout: float = TIMEOUT) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        command, cwd=cwd, env=env, text=True, capture_output=True, check=False, timeout=TIMEOUT
+        command, cwd=cwd, env=env, text=True, capture_output=True, check=False, timeout=timeout
     )
 
 
@@ -198,6 +201,52 @@ class ReleaseArtifactTests(unittest.TestCase):
             self.assertNotEqual(gate.returncode, 0)
             self.assertIn("cortex_analysis.py", gate.stderr)
 
+    def test_cold_bootstrap_budget_is_bounded_and_failures_remain_failures(self):
+        with tempfile.TemporaryDirectory(prefix="titan-release-bootstrap-budget-") as directory:
+            state = Path(directory)
+            installed_cli = state / "titan.js"
+            tools = sorted(REQUIRED_TOOLS)
+            completed = subprocess.CompletedProcess(
+                ["node", str(installed_cli)],
+                0,
+                json.dumps({"tools": tools}),
+                "",
+            )
+            with patch.object(verifier, "run_checked", return_value=completed) as checked:
+                self.assertEqual(verifier.list_installed_tools(installed_cli, cwd=state, env={}), set(tools))
+
+            self.assertEqual(checked.call_args.kwargs["timeout"], verifier.COLD_BOOTSTRAP_TIMEOUT_SEC)
+            self.assertEqual(verifier.COLD_BOOTSTRAP_TIMEOUT_SEC, 5 * 60)
+            self.assertEqual(verifier.WARM_STARTUP_TIMEOUT_SEC, 30)
+            self.assertGreater(verifier.COLD_BOOTSTRAP_TIMEOUT_SEC, verifier.WARM_STARTUP_TIMEOUT_SEC)
+
+            # A failed dependency bootstrap must still abort verification; the
+            # longer budget is not permission to fall back to source Python.
+            with patch.object(verifier, "run_checked", side_effect=RuntimeError("pip bootstrap failed")):
+                with self.assertRaisesRegex(RuntimeError, "pip bootstrap failed"):
+                    verifier.list_installed_tools(installed_cli, cwd=state, env={})
+
+    def test_timeout_failure_includes_actual_captured_diagnostics(self):
+        with tempfile.TemporaryDirectory(prefix="titan-release-timeout-diagnostics-") as directory:
+            state = Path(directory)
+            command = [
+                sys.executable,
+                "-c",
+                (
+                    "import sys, time; "
+                    "print('bootstrap progress', flush=True); "
+                    "print('pip diagnostic', file=sys.stderr, flush=True); "
+                    "time.sleep(5)"
+                ),
+            ]
+            with self.assertRaises(RuntimeError) as raised:
+                verifier.run_checked(command, cwd=state, env=os.environ.copy(), timeout=1)
+
+            message = str(raised.exception)
+            self.assertIn("timed out after 1s", message)
+            self.assertIn("stderr: pip diagnostic", message)
+            self.assertIn("stdout: bootstrap progress", message)
+
     def test_verifier_binds_real_python_instead_of_inherited_fake_python(self):
         with tempfile.TemporaryDirectory(prefix="titan-release-fake-python-") as directory:
             state = Path(directory)
@@ -276,6 +325,8 @@ class ReleaseArtifactTests(unittest.TestCase):
                 [sys.executable, str(bootstrap)],
                 cwd=isolated_cwd,
                 env=env,
+                # Allow the bounded cold install plus npm and warm protocol checks.
+                timeout=verifier.COLD_BOOTSTRAP_TIMEOUT_SEC + 3 * TIMEOUT,
             )
             self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
             self.assertFalse(marker.exists(), "verifier allowed inherited PYTHON to run the artifact")
