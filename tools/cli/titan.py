@@ -655,10 +655,11 @@ def run_pattern_graph(
 
     from app.patterns.store import PatternStore
     from app.storage.memories import _resolve_sqlite_path
+    from app.storage.sqlite import sqlite_connection
 
     db_path = _resolve_sqlite_path()
     PatternStore(db_path)  # ensures pattern tables exist before counting
-    with sqlite3.connect(db_path) as conn:
+    with sqlite_connection(db_path, read_only=True) as conn:
         accepted_count = conn.execute("SELECT COUNT(*) FROM patterns WHERE status = 'accepted'").fetchone()[0]
         candidate_count = conn.execute("SELECT COUNT(*) FROM patterns WHERE status = 'candidate'").fetchone()[0]
 

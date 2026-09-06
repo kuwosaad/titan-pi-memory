@@ -183,13 +183,31 @@ async def run_proxy() -> None:
             while not stop_heartbeat.is_set():
                 try:
                     await asyncio.wait_for(stop_heartbeat.wait(), timeout=15.0)
-                except TimeoutError:
+                except asyncio.TimeoutError:
                     try:
                         await _lease_request(client, state, "heartbeat", lease_id)
                     except httpx.HTTPError:
                         return
 
         heartbeat_task = asyncio.create_task(heartbeat())
+        lease_closed = False
+
+        async def close_lease() -> None:
+            nonlocal lease_closed
+            if lease_closed:
+                return
+            lease_closed = True
+            stop_heartbeat.set()
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            try:
+                await _lease_request(client, state, "close", lease_id)
+            except httpx.HTTPError:
+                pass
+
         try:
             async with streamable_http_client(state.url, http_client=client) as (remote_read, remote_write, _):
                 async with ClientSession(remote_read, remote_write) as remote:
@@ -218,19 +236,21 @@ async def run_proxy() -> None:
                         return await remote.call_tool(name, arguments)
 
                     async with stdio_server() as (local_read, local_write):
-                        await proxy.run(
-                            local_read,
-                            local_write,
-                            proxy.create_initialization_options(),
-                            raise_exceptions=False,
-                        )
+                        try:
+                            await proxy.run(
+                                local_read,
+                                local_write,
+                                proxy.create_initialization_options(),
+                                raise_exceptions=False,
+                            )
+                        finally:
+                            # Release the lease before stdio_server starts its
+                            # platform-specific pipe teardown. On Windows that
+                            # teardown can terminate this process before the
+                            # outer finally block gets to run.
+                            await close_lease()
         finally:
-            stop_heartbeat.set()
-            heartbeat_task.cancel()
-            try:
-                await _lease_request(client, state, "close", lease_id)
-            except httpx.HTTPError:
-                pass
+            await close_lease()
 
 
 def main() -> int:

@@ -448,6 +448,22 @@ class TitanCliTests(unittest.TestCase):
         self.assertIn("Port 8000 is busy. Using 8010 instead.", stdout.getvalue())
 
     def test_run_pattern_graph_uses_agent_home_and_pattern_graph_url(self):
+        import sqlite3
+        from app.storage.sqlite import connect_sqlite
+
+        connections = []
+
+        def capture_connection(*args, **kwargs):
+            connection = connect_sqlite(*args, **kwargs)
+            connections.append(connection)
+            return connection
+
+        def verify_connections_closed(*args, **kwargs):
+            self.assertTrue(connections)
+            for connection in connections:
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    connection.execute("SELECT 1")
+
         stdout = io.StringIO()
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = Path(tmp_dir) / "memory_store.db"
@@ -473,7 +489,9 @@ class TitanCliTests(unittest.TestCase):
                 return_value=db_path,
             ), patch("tools.cli.titan._select_graph_port", return_value=(8010, False)), patch(
                 "tools.cli.titan.webbrowser.open"
-            ) as open_mock, patch("uvicorn.run") as uvicorn_mock:
+            ) as open_mock, patch(
+                "app.storage.sqlite.connect_sqlite", side_effect=capture_connection
+            ), patch("uvicorn.run", side_effect=verify_connections_closed) as uvicorn_mock:
                 exit_code = run_pattern_graph(agent="opencode", open_browser=True, port=8010, limit=25)
         self.assertEqual(exit_code, 0)
         open_mock.assert_called_once_with("http://127.0.0.1:8010/pattern-graph?limit=25")
