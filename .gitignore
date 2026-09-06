@@ -58,8 +58,7 @@ experiments/**/.env
 # Install scripts (Pi is the path)
 install.sh
 
-# Agent guides at root (moved to docs/)
-/AGENTS.md
+# Local planning guides at root
 /TODO-pi-extension.md
 
 # Lab artifacts (kept locally, not pushed)
@@ -84,3 +83,30 @@ titan-one-pager.md
 titan-one-pager.pdf
 
 .gstack/
+
+# Local-only material retained on disk; remove from Git only with explicit review.
+# Internal agent notes are guidance, not product inputs.
+/app/api/api_agents.md
+/app/app_agents.md
+/app/embedding/embedding_agents.md
+/app/graph/graph_agents.md
+/app/retrieval_pipeline/retrieval_pipeline_agents.md
+/app/save_pipeline/extraction/extraction_agents.md
+/app/save_pipeline/save_pipeline_agents.md
+/app/storage/storage_agents.md
+/assets/assets_agents.md
+/assets/fonts/fonts_agents.md
+/assets/logos/logos_agents.md
+/assets/web/web_agents.md
+/tools/benchmarks/plot_progress.py
+/tools/benchmarks/plot_step1_step2.py
+/tools/benchmarks/plot_sweep.py
+/tools/presentations/build_memory_cross_rerank_deck.py
+
+# Local checkout/report state; keep physical files out of future public adds.
+/AGENTS.md
+/completion/
+/.claude/worktrees/
+
+# Personal research retained locally, not a public product input.
+/docs/research/saad-preference-model-research.md

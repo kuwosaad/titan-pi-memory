@@ -13,10 +13,31 @@ Pi is one adapter and one npm distribution package. It is not the boundary of
 engine ownership. The engine and shared contracts remain canonical even when a
 user installs Titan through Pi, Codex, or the CLI.
 
-The older `titan-karu` checkout and separate Codex/CLI repositories are
-compatibility distributions. They may be archived later and must not become a
-second source of truth. Production changes graduate into this repository and
-must pass the canonical tests before distribution.
+The older `titan-karu` checkout and the standalone
+[`titan-memory-cli`](https://github.com/kuwosaad/titan-memory-cli) repository are
+compatibility/recovery distributions. They must not become a second source of
+truth or a separately maintained hand-written runtime. Production changes
+originate here, graduate through the canonical tests, and are distributed from
+this repository.
+
+The public `titan-memory-cli` name is preserved for existing users, but its
+distributions have separate authorities: the repository-root `pyproject.toml`
+owns the Python/PyPI distribution, while
+`packages/titan-memory-cli/package.json` owns the npm distribution. The
+standalone checkout must not independently publish a stale engine. A generated
+compatibility sync is appropriate only when a real consumer requires it; it is
+not permission to maintain two runtimes.
+
+## Release authority
+
+For the current package checks and release sequences, see
+[`docs/pypi_titan_memory_cli.md`](pypi_titan_memory_cli.md). The npm path
+regenerates the bundled runtime, runs final checks after an explicit
+`--no-git-tag-version` bump, commits exact reviewed metadata, creates an
+annotated scoped tag, pushes the source, and only then publishes from
+`packages/titan-memory-cli/`. The PyPI path builds and publishes the
+repository-root `pyproject.toml` distribution separately. Publishing the
+standalone checkout is not part of either flow.
 
 ## Codex storage and setup
 
