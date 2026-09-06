@@ -1,0 +1,13 @@
+{
+  "name": "titan-memory-claude-plugin",
+  "version": "0.2.6",
+  "private": true,
+  "description": "Managed runtime dependency for the Titan Memory Claude Code plugin.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "titan-memory-cli": "0.1.4"
+  }
+}

@@ -1,0 +1,25 @@
+prune .bench
+prune .claude
+prune .opencode
+prune build
+prune dist
+prune docs/research
+prune entrypoints/overnight
+prune out
+prune packages/titan-memory-cli/runtime
+prune tests
+prune tools/benchmarks
+prune tools/dev
+prune tools/presentations
+prune tools/release
+prune tools/scripts
+prune traces
+
+exclude AGENTS.md
+exclude CONTEXT.md
+global-exclude .DS_Store
+global-exclude *.db
+global-exclude *.jsonl
+global-exclude *.py[cod]
+global-exclude *.sqlite
+global-exclude *.sqlite3

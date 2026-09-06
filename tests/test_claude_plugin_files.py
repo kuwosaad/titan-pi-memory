@@ -9,32 +9,58 @@ PLUGIN_ROOT = ROOT / "integrations" / "claude_titan_plugin"
 
 
 class ClaudePluginFileTests(unittest.TestCase):
-    def test_plugin_manifest_parses_and_paths_exist(self):
+    def test_plugin_manifest_uses_standard_component_discovery(self):
         manifest_path = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
         self.assertEqual(manifest["name"], "titan-memory")
-        for key in ("skills", "mcpServers", "hooks"):
-            value = manifest[key]
-            self.assertTrue(value.startswith("./"))
-            self.assertTrue((PLUGIN_ROOT / value).exists())
+        self.assertTrue((PLUGIN_ROOT / "skills").is_dir())
+        self.assertTrue((PLUGIN_ROOT / ".mcp.json").is_file())
+        self.assertTrue((PLUGIN_ROOT / "hooks" / "hooks.json").is_file())
+        for standard_component in ("skills", "mcpServers", "hooks"):
+            self.assertNotIn(
+                standard_component,
+                manifest,
+                f"{standard_component} is auto-discovered; declaring its standard path loads it twice",
+            )
 
-    def test_mcp_config_uses_titan_memory_server(self):
+    def test_mcp_config_uses_plugin_local_managed_launcher(self):
         config = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
         server = config["mcpServers"]["titan-memory"]
+        serialized = json.dumps(server, sort_keys=True)
 
-        self.assertEqual(server["command"], "titan")
-        self.assertEqual(server["args"], ["mcp", "--agent", "${user_config.agent_name}"])
-        self.assertEqual(server["env"]["TITAN_AGENT_NAME"], "${user_config.agent_name}")
+        self.assertNotEqual(server["command"], "titan")
+        self.assertIn("CLAUDE_PLUGIN_ROOT", serialized)
+        self.assertIn("CLAUDE_PLUGIN_DATA", serialized)
+        self.assertIn("${user_config.agent_name}", serialized)
 
-    def test_hooks_point_at_titan_hook_script(self):
+    def test_hooks_cover_current_claude_lifecycle(self):
         config = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
-        for entries in config["hooks"].values():
-            for entry in entries:
-                for hook in entry["hooks"]:
-                    self.assertEqual(hook["type"], "command")
-                    self.assertEqual(hook["command"], '"${CLAUDE_PLUGIN_ROOT}"/scripts/titan_claude_hook.py')
-                    self.assertEqual(hook["timeout"], 10)
+        expected = {
+            "SessionStart",
+            "UserPromptSubmit",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "PostCompact",
+            "Stop",
+            "SubagentStop",
+            "SessionEnd",
+        }
+        self.assertTrue(expected.issubset(config["hooks"]))
+
+    def test_hooks_use_cross_platform_plugin_local_launcher(self):
+        config = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        commands = {
+            hook["command"]
+            for entries in config["hooks"].values()
+            for entry in entries
+            for hook in entry["hooks"]
+        }
+
+        self.assertEqual(len(commands), 1)
+        command = commands.pop()
+        self.assertIn("${CLAUDE_PLUGIN_ROOT}", command)
+        self.assertFalse(command.rstrip().endswith(".py"), "Claude hooks must not rely on direct .py execution")
 
     def test_hook_script_is_executable(self):
         script = PLUGIN_ROOT / "scripts" / "titan_claude_hook.py"

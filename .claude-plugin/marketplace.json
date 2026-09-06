@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "titan-pi-memory",
+  "description": "Official Titan Memory plugins for Claude Code.",
+  "owner": {
+    "name": "Titan Memory"
+  },
+  "plugins": [
+    {
+      "name": "titan-memory",
+      "description": "Persistent, provenance-aware memory and passive trace capture for Claude Code.",
+      "author": {
+        "name": "Titan Memory"
+      },
+      "category": "productivity",
+      "source": "./integrations/claude_titan_plugin",
+      "homepage": "https://github.com/kuwosaad/titan-pi-memory"
+    }
+  ]
+}

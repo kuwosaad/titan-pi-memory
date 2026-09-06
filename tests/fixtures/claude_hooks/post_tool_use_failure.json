@@ -1,0 +1,14 @@
+{
+  "session_id": "fixture-session",
+  "transcript_path": "/tmp/claude/fixture-session.jsonl",
+  "cwd": "/tmp/titan-project",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_use_id": "tool-bash-1",
+  "tool_input": {
+    "command": "false"
+  },
+  "error": "Command exited with status 1",
+  "is_interrupt": false
+}

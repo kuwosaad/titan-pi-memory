@@ -1,18 +1,16 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "titan-memory",
   "displayName": "Titan Memory",
-  "version": "0.1.0",
-  "description": "Persistent memory, recall, and passive trace capture for Claude Code.",
+  "version": "0.2.6",
+  "description": "Persistent, provenance-aware memory and passive trace capture for Claude Code.",
   "author": {
     "name": "Titan"
   },
-  "homepage": "https://github.com/kuwosaad/titan-karu",
-  "repository": "https://github.com/kuwosaad/titan-karu",
+  "homepage": "https://github.com/kuwosaad/titan-pi-memory",
+  "repository": "https://github.com/kuwosaad/titan-pi-memory",
   "license": "Apache-2.0",
   "keywords": ["memory", "mcp", "claude-code", "coding-agent"],
-  "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
-  "hooks": "./hooks/hooks.json",
   "userConfig": {
     "agent_name": {
       "type": "string",
@@ -20,6 +18,55 @@
       "description": "Memory namespace under ~/.titan/agents/. Keep this stable.",
       "default": "claude-code",
       "required": true
+    },
+    "capture_mode": {
+      "type": "string",
+      "title": "Capture mode",
+      "description": "How much Claude session data Titan may save: full, messages, metadata, or off.",
+      "default": "messages"
+    },
+    "capture_tool_io": {
+      "type": "boolean",
+      "title": "Capture tool input and output",
+      "description": "Include bounded, redacted tool arguments and results in passive traces.",
+      "default": false
+    },
+    "recall_mode": {
+      "type": "string",
+      "title": "Recall mode",
+      "description": "Recall behavior: automatic bounded injection, manual skill/tool use, or off.",
+      "default": "automatic"
+    },
+    "excluded_projects": {
+      "type": "string",
+      "title": "Excluded projects",
+      "description": "Absolute paths or glob patterns where capture and automatic recall stay off.",
+      "multiple": true,
+      "default": []
+    },
+    "retention_days": {
+      "type": "number",
+      "title": "Raw trace retention days",
+      "description": "Days to keep Claude adapter raw traces before cleanup. Use 0 to retain until manually removed.",
+      "default": 30,
+      "min": 0,
+      "max": 3650
+    },
+    "recall_limit": {
+      "type": "number",
+      "title": "Automatic recall limit",
+      "description": "Maximum memories considered for one automatic prompt-time recall.",
+      "default": 6,
+      "min": 1,
+      "max": 8
+    },
+    "recall_timeout_ms": {
+      "type": "number",
+      "title": "Automatic recall timeout",
+      "description": "Fail-open deadline in milliseconds for startup and prompt-time recall.",
+      "default": 3000,
+      "min": 250,
+      "max": 5000
     }
   }
 }

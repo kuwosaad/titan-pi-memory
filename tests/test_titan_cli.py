@@ -51,6 +51,40 @@ from tools.cli.titan import (
 
 
 class TitanCliTests(unittest.TestCase):
+    def setUp(self):
+        # The CLI captures TITAN_HOME when it is imported.  Give every test a
+        # private runtime and clear that import-time single-home marker so the
+        # agent-home assertions exercise the default namespace layout even
+        # when the test runner exports Titan variables.
+        self._test_tmp = tempfile.TemporaryDirectory(prefix="titan-cli-test-")
+        self.addCleanup(self._test_tmp.cleanup)
+        root = Path(self._test_tmp.name)
+        self._test_home = root / "titan-home"
+        self._test_base = root / "titan-base"
+        self._test_runtime = root / "runtime"
+
+        self._env_patch = patch.dict(
+            os.environ,
+            {
+                "TITAN_HOME": str(self._test_home),
+                "TITAN_BASE_DIR": str(self._test_base),
+                "TITAN_RUNTIME_HOME": str(self._test_runtime),
+                "TITAN_RUNTIME_DIR": str(self._test_runtime),
+                "TITAN_RUNTIME_MANIFEST": str(self._test_runtime / "current.json"),
+            },
+            clear=False,
+        )
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
+
+        self._explicit_home_patch = patch("tools.cli.titan._explicit_titan_home", None)
+        self._explicit_home_patch.start()
+        self.addCleanup(self._explicit_home_patch.stop)
+
+        self._module_home_patch = patch("tools.cli.titan.TITAN_HOME", self._test_home)
+        self._module_home_patch.start()
+        self.addCleanup(self._module_home_patch.stop)
+
     def test_codex_mcp_handshake_falls_back_when_selector_fails_after_registration(self):
         class ExplodingSelector:
             def register(self, _stream, _events):

@@ -29,6 +29,7 @@ dependencies = [
   "networkx",
   "pydantic",
   "mcp>=1.5.0,<2",
+  "rich",
 ]
 
 [project.scripts]
@@ -38,13 +39,29 @@ titan = "tools.cli.titan:main"
 Homepage = "https://github.com/kuwosaad/titan-pi-memory"
 Repository = "https://github.com/kuwosaad/titan-pi-memory"
 "Codex Plugin" = "https://github.com/kuwosaad/titan-pi-memory/tree/main/integrations/codex_titan_plugin"
+"Claude Code Plugin" = "https://github.com/kuwosaad/titan-pi-memory/tree/main/integrations/claude_titan_plugin"
 Issues = "https://github.com/kuwosaad/titan-pi-memory/issues"
 
 [tool.setuptools.packages.find]
 include = ["app*", "tools*", "entrypoints*", "config*", "integrations*"]
+exclude = [
+  "entrypoints.overnight*",
+  "tools.benchmarks*",
+  "tools.dev*",
+  "tools.pi_extension*",
+  "tools.presentations*",
+  "tools.release*",
+  "tools.scripts*",
+]
 
 [tool.setuptools.package-data]
-config = ["*.yaml"]
+config = [
+  ".env.example",
+  "embedding_models.yaml",
+  "extraction_models.yaml",
+  "settings.yaml",
+  "visual_config.yaml",
+]
 "integrations.codex_titan_plugin" = [
   "README.md",
   "PRIVACY.md",
@@ -56,4 +73,19 @@ config = ["*.yaml"]
   "hooks/*.json",
   "scripts/*.py",
   "skills/*/SKILL.md",
+]
+"integrations.claude_titan_plugin" = [
+  "README.md",
+  "PRIVACY.md",
+  "TERMS.md",
+  ".mcp.json",
+  ".claude-plugin/*.json",
+  "hooks/*.json",
+  "scripts/*.py",
+  "scripts/*.js",
+  "runtime/*.py",
+  "runtime/*.js",
+  "skills/*/SKILL.md",
+  "package.json",
+  "package-lock.json",
 ]

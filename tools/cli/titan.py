@@ -47,6 +47,12 @@ CODEX_PLUGIN_DIR = ROOT_DIR / "integrations" / "codex_titan_plugin"
 CODEX_MARKETPLACE_DIR = Path.home() / ".titan" / "codex-marketplace"
 CODEX_MARKETPLACE_PATH = CODEX_MARKETPLACE_DIR / ".agents" / "plugins" / "marketplace.json"
 CODEX_MCP_TIMEOUT_SEC = 120
+CLAUDE_AGENT_NAME = "claude-code"
+CLAUDE_MARKETPLACE_NAME = "titan-pi-memory"
+CLAUDE_PLUGIN_ID = f"titan-memory@{CLAUDE_MARKETPLACE_NAME}"
+CLAUDE_PLUGIN_DIR = ROOT_DIR / "integrations" / "claude_titan_plugin"
+CLAUDE_MARKETPLACE_DIR = Path.home() / ".titan" / "claude-marketplace"
+CLAUDE_MARKETPLACE_PATH = CLAUDE_MARKETPLACE_DIR / ".claude-plugin" / "marketplace.json"
 DEFAULT_GRAPH_PORT = 8010
 _explicit_titan_home = os.getenv("TITAN_HOME")
 _default_home = Path.home() / ".titan"
@@ -1561,6 +1567,144 @@ def _codex_marketplace_digest(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _claude_marketplace_payload(source: str = "./plugins/titan-memory") -> Dict[str, object]:
+    """Load canonical marketplace metadata and rewrite only its local source."""
+
+    manifest = ROOT_DIR / ".claude-plugin" / "marketplace.json"
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        plugins = payload["plugins"]
+        if not isinstance(plugins, list) or len(plugins) != 1 or not isinstance(plugins[0], dict):
+            raise ValueError("expected exactly one plugin")
+        plugins[0]["source"] = source
+        return payload
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"canonical Claude marketplace is invalid ({manifest}: {exc})") from exc
+
+
+def validate_claude_marketplace(payload: object) -> tuple[bool, str]:
+    """Validate the local Claude marketplace shape before invoking Claude Code."""
+    if not isinstance(payload, dict):
+        return False, "marketplace must be a JSON object"
+    if payload.get("name") != CLAUDE_MARKETPLACE_NAME:
+        return False, f"marketplace.name must be {CLAUDE_MARKETPLACE_NAME}"
+    owner = payload.get("owner")
+    if not isinstance(owner, dict) or not isinstance(owner.get("name"), str) or not owner["name"].strip():
+        return False, "marketplace.owner.name is required"
+    plugins = payload.get("plugins")
+    if not isinstance(plugins, list) or len(plugins) != 1:
+        return False, "marketplace must contain exactly one Titan plugin"
+    plugin = plugins[0]
+    if not isinstance(plugin, dict) or plugin.get("name") != "titan-memory":
+        return False, "marketplace plugin must be named titan-memory"
+    source = plugin.get("source")
+    if not isinstance(source, str) or not source.strip():
+        return False, "marketplace plugin source must be a path string"
+    source_path = Path(source)
+    if source_path.is_absolute() or ".." in source_path.parts:
+        return False, "marketplace plugin source must stay inside the marketplace root"
+    return True, "ok"
+
+
+_CLAUDE_PLUGIN_RELEASE_FILES = (
+    ".claude-plugin/plugin.json",
+    ".mcp.json",
+    "README.md",
+    "PRIVACY.md",
+    "package.json",
+    "package-lock.json",
+    "hooks/hooks.json",
+    "scripts/titan_claude_hook.py",
+    "scripts/titan_claude_hook.js",
+    "scripts/titan_claude_mcp.py",
+    "scripts/titan_claude_mcp.js",
+    "scripts/titan_claude_runtime.js",
+    "runtime/__init__.py",
+    "runtime/client.py",
+    "runtime/common.py",
+    "runtime/daemon.py",
+    "runtime/proxy.py",
+    "skills/titan-memory-workflow/SKILL.md",
+    "skills/titan-patterns-workflow/SKILL.md",
+)
+
+
+def _copy_claude_plugin_release(source_root: Path, destination_root: Path) -> None:
+    """Copy only reviewed production files into the installable snapshot."""
+
+    for relative in _CLAUDE_PLUGIN_RELEASE_FILES:
+        source = source_root / relative
+        if not source.is_file() or source.is_symlink():
+            raise FileNotFoundError(f"required Claude plugin file is missing or unsafe: {source}")
+        destination = destination_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+
+def ensure_claude_marketplace_snapshot(*, target: Optional[Path] = None) -> tuple[bool, str]:
+    """Materialize a private, stable Claude marketplace containing the full plugin."""
+    destination = target or CLAUDE_MARKETPLACE_DIR
+    if destination.suffix == ".json":
+        destination = destination.parents[1]
+    destination_plugin = destination / "plugins" / "titan-memory"
+    destination_manifest = destination / ".claude-plugin" / "marketplace.json"
+    try:
+        if not (CLAUDE_PLUGIN_DIR / ".claude-plugin" / "plugin.json").exists():
+            return False, f"bundled Claude plugin is incomplete: {CLAUDE_PLUGIN_DIR}"
+        payload = _claude_marketplace_payload()
+        valid, reason = validate_claude_marketplace(payload)
+        if not valid:
+            return False, f"bundled Claude marketplace is invalid: {reason}"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.parent / f".{destination.name}.tmp-{os.getpid()}"
+        if temporary.exists():
+            shutil.rmtree(temporary)
+        (temporary / ".claude-plugin").mkdir(parents=True)
+        destination_plugin_root = temporary / "plugins" / "titan-memory"
+        destination_plugin_root.mkdir(parents=True)
+        _copy_claude_plugin_release(CLAUDE_PLUGIN_DIR, destination_plugin_root)
+        (temporary / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        if destination_manifest.exists() and destination_plugin.exists():
+            if _codex_marketplace_digest(destination) == _codex_marketplace_digest(temporary):
+                shutil.rmtree(temporary)
+                return True, str(destination)
+        try:
+            temporary.chmod(0o700)
+            for path in temporary.rglob("*"):
+                path.chmod(0o600 if path.is_file() else 0o700)
+        except OSError:
+            pass
+        if destination.exists():
+            backup = destination.with_name(f"{destination.name}.previous-{os.getpid()}")
+            if backup.exists():
+                shutil.rmtree(backup)
+            os.replace(destination, backup)
+        os.replace(temporary, destination)
+        return True, str(destination)
+    except (OSError, ValueError) as exc:
+        return False, f"could not install Claude marketplace snapshot at {destination}: {exc}"
+
+
+def resolve_claude_marketplace_plugin_source(*, marketplace_root: Optional[Path] = None) -> Path:
+    root = (marketplace_root or CLAUDE_MARKETPLACE_DIR).resolve()
+    manifest_path = root / ".claude-plugin" / "marketplace.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    valid, reason = validate_claude_marketplace(payload)
+    if not valid:
+        raise ValueError(reason)
+    resolved = (root / str(payload["plugins"][0]["source"])).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("marketplace plugin source must stay inside the marketplace root") from exc
+    if not (resolved / ".claude-plugin" / "plugin.json").exists():
+        raise FileNotFoundError(f"marketplace plugin source is missing: {resolved}")
+    return resolved
+
+
 def ensure_codex_marketplace_snapshot(*, target: Optional[Path] = None) -> tuple[bool, str]:
     """Copy the complete bundled marketplace tree to a stable location."""
     source_root = CODEX_PLUGIN_DIR
@@ -1807,10 +1951,11 @@ def codex_mcp_stdio_handshake(
     timeout_sec: float = CODEX_MCP_TIMEOUT_SEC,
     popen_fn=subprocess.Popen,
     plugin_root: Optional[Path] = None,
+    transport: Optional[dict] = None,
 ) -> tuple[bool, List[str], str]:
-    """Exercise the installed plugin's MCP contract through initialize/tools-list."""
+    """Exercise an MCP stdio contract through initialize/tools-list."""
     try:
-        contract = (
+        contract = transport or (
             load_codex_mcp_contract(plugin_root=plugin_root)
             if plugin_root is not None
             else load_codex_effective_mcp_transport()
@@ -2037,6 +2182,53 @@ def run_codex_list_tools(*, json_output: bool = False) -> int:
     return 0
 
 
+def _safe_pending_recovery_report(report: object, *, apply: bool) -> Dict[str, object]:
+    """Keep the recovery CLI to dry-run state and non-sensitive counters."""
+    safe: Dict[str, object] = {"dry_run": not apply}
+    if not isinstance(report, dict):
+        return safe
+    allowed = (
+        "pending_sessions",
+        "pending_events",
+        "recoverable_completed_turns",
+        "partial_turns",
+        "active_turns",
+        "missing_transcripts",
+        "applied_turns",
+        "stored_memories",
+        "recovered_retries",
+        "reconciled_extractions",
+        "memoryless_recovery_scenes",
+    )
+    for key in allowed:
+        value = report.get(key)
+        if isinstance(value, (bool, int, float)):
+            safe[key] = value
+    return safe
+
+
+def run_codex_recover_pending(*, apply: bool = False, session_ids: Optional[List[str]] = None) -> int:
+    """Preview or apply recovery of pending Codex session events."""
+    try:
+        configure_runtime_for_agent(CODEX_AGENT_NAME)
+        from app.runtime.context import get_runtime_context, hydrate_process_environment, reset_runtime_context_cache
+
+        reset_runtime_context_cache()
+        hydrate_process_environment(get_runtime_context())
+        from integrations.codex_titan_plugin.pending_recovery import recover_pending_sessions
+
+        report = recover_pending_sessions(
+            apply=apply,
+            session_ids=session_ids,
+            pending_file=resolve_effective_spool_dir(CODEX_AGENT_NAME) / "pending_user_messages.json",
+        )
+    except (ImportError, OSError, RuntimeError, ValueError):
+        print(json.dumps({"dry_run": not apply, "error": "pending recovery unavailable"}, sort_keys=True))
+        return 1
+    print(json.dumps(_safe_pending_recovery_report(report, apply=apply), indent=2, sort_keys=True))
+    return 0
+
+
 def run_codex_reinstall_plugin(*, dry_run: bool = False, config_path: Optional[Path] = None) -> int:
     config_target = config_path or _default_codex_config_path()
     marketplace_command = ["codex", "plugin", "marketplace", "add", str(CODEX_MARKETPLACE_DIR), "--json"]
@@ -2198,6 +2390,33 @@ def run_codex_verify(*, config_path: Optional[Path] = None) -> int:
         ok = False
         print(f"[missing] Codex config enable block: {config_target}")
 
+    try:
+        from integrations.codex_titan_plugin.pending_recovery import (
+            inspect_codex_stop_hook,
+            pending_recovery_enabled,
+            recover_pending_sessions,
+        )
+
+        hook = inspect_codex_stop_hook(config_target)
+        if hook["plugin_enabled"] and hook["stop_configured"] and hook["stop_enabled"]:
+            print("[ok] Codex Stop hook capture is enabled")
+        else:
+            ok = False
+            print("[missing] Codex Stop hook capture is disabled or untrusted")
+        pending = recover_pending_sessions(
+            apply=False,
+            pending_file=trace_dir / "pending_user_messages.json",
+        )
+        print(
+            "[ok] Pending recovery: "
+            f"{int(pending.get('pending_events') or 0)} event(s), "
+            f"{int(pending.get('recoverable_completed_turns') or 0)} completed turn(s), "
+            f"automatic={'on' if pending_recovery_enabled() else 'off'}"
+        )
+    except Exception:
+        ok = False
+        print("[missing] Pending recovery inspection failed")
+
     if trace_dir.exists():
         trace_count = len(list(trace_dir.glob("*.jsonl")))
         print(f"[ok] Codex trace dir: {trace_dir} ({trace_count} trace file(s))")
@@ -2231,8 +2450,14 @@ def run_codex_doctor(*, config_path: Optional[Path] = None) -> int:
     return run_codex_verify(config_path=config_path)
 
 
-def _setup_codex_model_config(agent_home: Path, *, non_interactive: bool = False) -> Dict[str, str]:
-    """Configure Codex model files with a simple public-install wizard."""
+def _setup_public_agent_model_config(
+    agent_home: Path,
+    *,
+    agent_name: str,
+    agent_label: str,
+    non_interactive: bool = False,
+) -> Dict[str, str]:
+    """Configure model files for a public coding-agent connector."""
     import tools.cli.titan_voice as voice
 
     extraction_cfg = _load_yaml(ROOT_DIR / "config" / "extraction_models.yaml")
@@ -2240,6 +2465,8 @@ def _setup_codex_model_config(agent_home: Path, *, non_interactive: bool = False
 
     if non_interactive:
         extraction_choice = str(extraction_cfg.get("current") or "openai")
+        if agent_name == CLAUDE_AGENT_NAME and extraction_choice == "opencode_go":
+            extraction_choice = "ollama"
         extraction_block = extraction_cfg.get(extraction_choice) or {}
         extraction_model = str(extraction_block.get("model") or "gpt-4o-mini")
         embedding_choice = str(embedding_cfg.get("current") or "ollama")
@@ -2257,7 +2484,7 @@ def _setup_codex_model_config(agent_home: Path, *, non_interactive: bool = False
 
     voice.section(
         "I need a model to read your conversations and decide what to remember.\n"
-        "Pick the one you want Titan Memory to use with Codex."
+        f"Pick the one you want Titan Memory to use with {agent_label}."
     )
     provider_pick = voice.prompt_choice(
         "Which model provider should Titan use?",
@@ -2342,12 +2569,30 @@ def _setup_codex_model_config(agent_home: Path, *, non_interactive: bool = False
     if missing_keys:
         voice.warn(f"Missing key(s): {', '.join(missing_keys)}. Memory extraction may not work until set.")
         for key in missing_keys:
-            voice.info(f"Run: titan key set {key} --agent codex")
+            voice.info(f"Run: titan key set {key} --agent {agent_name}")
 
     voice.success(f"Config saved to {agent_home}")
     voice.model_picked(extraction_model, extraction_choice)
     voice.model_picked(embedding_model, embedding_choice)
     return env_updates
+
+
+def _setup_codex_model_config(agent_home: Path, *, non_interactive: bool = False) -> Dict[str, str]:
+    return _setup_public_agent_model_config(
+        agent_home,
+        agent_name=CODEX_AGENT_NAME,
+        agent_label="Codex",
+        non_interactive=non_interactive,
+    )
+
+
+def _setup_claude_model_config(agent_home: Path, *, non_interactive: bool = False) -> Dict[str, str]:
+    return _setup_public_agent_model_config(
+        agent_home,
+        agent_name=CLAUDE_AGENT_NAME,
+        agent_label="Claude Code",
+        non_interactive=non_interactive,
+    )
 
 
 def run_setup_codex(
@@ -2415,6 +2660,457 @@ def run_setup_codex(
         print("[titan] Managed MCP runtime is not activated yet. Repair it with: npx -y titan-memory-cli@latest setup codex")
     print("[titan] Next manual step: open Codex, run /hooks, and trust `python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py`.")
     print("[titan] Then run: titan codex verify")
+    return 0
+
+
+def load_claude_mcp_contract(
+    *,
+    plugin_root: Path = CLAUDE_PLUGIN_DIR,
+    plugin_data: Optional[Path] = None,
+    agent: str = CLAUDE_AGENT_NAME,
+) -> dict:
+    """Resolve Claude plugin placeholders into the exact stdio transport."""
+
+    root = plugin_root.expanduser().resolve()
+    data = (plugin_data or Path(os.getenv("CLAUDE_PLUGIN_DATA", Path.home() / ".titan" / "claude-plugin"))).expanduser().resolve()
+    config_path = root / ".mcp.json"
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        server = payload["mcpServers"]["titan-memory"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Claude MCP config is unreadable ({config_path}: {exc})") from exc
+    if not isinstance(server, dict):
+        raise ValueError(f"Claude MCP server is not an object: {config_path}")
+
+    replacements = {
+        "${CLAUDE_PLUGIN_ROOT}": str(root),
+        "${CLAUDE_PLUGIN_DATA}": str(data),
+        "${user_config.agent_name}": _normalize_agent_name(agent),
+    }
+
+    def resolve(value: object) -> object:
+        if isinstance(value, str):
+            for marker, replacement in replacements.items():
+                value = value.replace(marker, replacement)
+            return value
+        if isinstance(value, list):
+            return [resolve(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): resolve(item) for key, item in value.items()}
+        return value
+
+    resolved = resolve(server)
+    if not isinstance(resolved, dict):
+        raise ValueError(f"Claude MCP server is invalid: {config_path}")
+    command = resolved.get("command")
+    args = resolved.get("args", [])
+    env = resolved.get("env", {})
+    if not isinstance(command, str) or not command.strip():
+        raise ValueError("Claude MCP transport needs a command")
+    if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
+        raise ValueError("Claude MCP transport args must be strings")
+    if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+        raise ValueError("Claude MCP transport env must contain strings")
+    return {
+        "command": command,
+        "args": args,
+        "cwd": ".",
+        "env": env,
+        "plugin_root": root,
+        "config_path": config_path,
+    }
+
+
+def claude_mcp_stdio_handshake(
+    *,
+    plugin_root: Path = CLAUDE_PLUGIN_DIR,
+    plugin_data: Optional[Path] = None,
+    timeout_sec: float = CODEX_MCP_TIMEOUT_SEC,
+    popen_fn=subprocess.Popen,
+) -> tuple[bool, List[str], str]:
+    try:
+        contract = load_claude_mcp_contract(
+            plugin_root=plugin_root,
+            plugin_data=plugin_data,
+            agent=CLAUDE_AGENT_NAME,
+        )
+    except ValueError as exc:
+        return False, [], str(exc)
+    ok, tools, detail = codex_mcp_stdio_handshake(
+        agent=CLAUDE_AGENT_NAME,
+        timeout_sec=timeout_sec,
+        popen_fn=popen_fn,
+        transport=contract,
+    )
+    return ok, tools, detail.replace("Codex MCP", "Claude MCP")
+
+
+def _claude_plugin_files_ok() -> tuple[bool, List[str]]:
+    required_paths = [CLAUDE_PLUGIN_DIR / relative for relative in _CLAUDE_PLUGIN_RELEASE_FILES]
+    missing = [str(path) for path in required_paths if not path.is_file() or path.is_symlink()]
+    return not missing, missing
+
+
+def run_claude_list_tools(*, json_output: bool = False) -> int:
+    ok, tools, detail = claude_mcp_stdio_handshake()
+    if not ok:
+        if json_output:
+            print(json.dumps({"server": "titan-memory", "count": 0, "tools": [], "error": detail}, indent=2, sort_keys=True))
+        else:
+            print(f"[missing] Titan MCP launcher: {detail}")
+        return 1
+    if json_output:
+        print(json.dumps({"server": "titan-memory", "count": len(tools), "tools": tools}, indent=2, sort_keys=True))
+    else:
+        print(f"titan-memory: {len(tools)} tools")
+        for tool in tools:
+            print(tool)
+    return 0
+
+
+def _claude_plugin_registration_status() -> tuple[bool, str]:
+    try:
+        result = subprocess.run(
+            ["claude", "plugin", "list", "--json"],
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"could not query Claude plugin registrations: {exc}"
+    if result.returncode != 0:
+        return False, result.stderr.strip() or f"Claude plugin list exited {result.returncode}"
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return False, f"Claude plugin list returned invalid JSON: {exc}"
+    if not isinstance(payload, list):
+        return False, "Claude plugin list did not return an array"
+    plugin = next((item for item in payload if isinstance(item, dict) and item.get("id") == CLAUDE_PLUGIN_ID), None)
+    if not plugin or plugin.get("enabled") is not True:
+        return False, f"{CLAUDE_PLUGIN_ID} is not installed and enabled"
+    errors = plugin.get("errors")
+    if isinstance(errors, list) and errors:
+        return False, "; ".join(str(error) for error in errors)
+    return True, f"{CLAUDE_PLUGIN_ID} is installed, enabled, and error-free"
+
+
+def run_claude_reinstall_plugin(*, dry_run: bool = False) -> int:
+    commands = [
+        (["claude", "plugin", "uninstall", CLAUDE_PLUGIN_ID], True),
+        (["claude", "plugin", "marketplace", "remove", CLAUDE_MARKETPLACE_NAME], True),
+        (["claude", "plugin", "marketplace", "add", str(CLAUDE_MARKETPLACE_DIR)], False),
+        (["claude", "plugin", "install", CLAUDE_PLUGIN_ID], False),
+    ]
+    if dry_run:
+        print("[titan] Claude Code plugin reinstall plan:")
+        for command, _optional in commands:
+            print("  " + " ".join(command))
+        return 0
+
+    marketplace_ok, detail = ensure_claude_marketplace_snapshot()
+    if not marketplace_ok:
+        print(f"[titan] {detail}")
+        return 1
+    if shutil.which("claude") is None:
+        print("[titan] Claude Code CLI not found on PATH.")
+        print("[titan] Install Claude Code, then rerun: titan claude reinstall-plugin")
+        return 1
+
+    for command, optional in commands:
+        result = subprocess.run(command, cwd=ROOT_DIR, capture_output=True, text=True, timeout=120)
+        if result.returncode == 0:
+            continue
+        if optional:
+            continue
+        detail = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
+        print(f"[titan] Claude plugin command failed: {' '.join(command)}")
+        print(f"  {detail}")
+        return result.returncode or 1
+    print(f"[titan] Claude Code plugin installed: {CLAUDE_PLUGIN_ID}")
+    print("[titan] Restart Claude Code or run /reload-plugins in an active session.")
+    return 0
+
+
+def run_claude_verify() -> int:
+    trace_dir = resolve_effective_spool_dir(CLAUDE_AGENT_NAME)
+    ok = True
+    print("[titan] Claude Code verification")
+
+    if shutil.which("claude"):
+        print("[ok] Claude Code CLI found")
+        registration_ok, registration_detail = _claude_plugin_registration_status()
+        print(f"[{'ok' if registration_ok else 'missing'}] Claude plugin registration: {registration_detail}")
+        ok = registration_ok and ok
+    else:
+        print("[missing] Claude Code CLI not found on PATH")
+        ok = False
+
+    plugin_ok, missing = _claude_plugin_files_ok()
+    if plugin_ok:
+        print(f"[ok] Claude plugin files: {CLAUDE_PLUGIN_DIR}")
+    else:
+        ok = False
+        print("[missing] Claude plugin files:")
+        for path in missing:
+            print(f"  {path}")
+
+    marketplace_path = CLAUDE_MARKETPLACE_DIR / ".claude-plugin" / "marketplace.json"
+    if marketplace_path.exists():
+        try:
+            payload = json.loads(marketplace_path.read_text(encoding="utf-8"))
+            marketplace_ok, reason = validate_claude_marketplace(payload)
+            if marketplace_ok:
+                resolve_claude_marketplace_plugin_source(marketplace_root=CLAUDE_MARKETPLACE_DIR)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            marketplace_ok, reason = False, str(exc)
+    else:
+        marketplace_ok, reason = False, f"missing {marketplace_path}"
+    print(f"[{'ok' if marketplace_ok else 'missing'}] Claude marketplace snapshot: {reason if not marketplace_ok else marketplace_path}")
+    ok = marketplace_ok and ok
+
+    if trace_dir.exists():
+        print(f"[ok] Claude trace dir: {trace_dir} ({len(list(trace_dir.glob('*.jsonl')))} trace file(s))")
+    else:
+        print(f"[missing] Claude trace dir: {trace_dir}")
+        ok = False
+
+    handshake_ok, tools, handshake_detail = claude_mcp_stdio_handshake()
+    missing_tools = [tool for tool in CODEX_REQUIRED_MCP_TOOLS if tool not in tools]
+    if not handshake_ok:
+        print(f"[missing] Titan MCP launcher: {handshake_detail}")
+        ok = False
+    elif missing_tools:
+        print(f"[missing] Titan MCP tools: {', '.join(missing_tools)}")
+        ok = False
+    else:
+        print(f"[ok] Titan MCP launcher: {handshake_detail}")
+        print(f"[ok] Titan MCP tools: {len(tools)} exported")
+
+    agent_home = resolve_agent_titan_home(CLAUDE_AGENT_NAME)
+    effective_env = _read_agent_effective_env(agent_home, {})
+    provider_info = get_required_provider_envs(ROOT_DIR, effective_env)
+    missing_envs = [
+        str(name)
+        for name in provider_info.get("required_envs", [])
+        if not effective_env.get(str(name))
+    ]
+    extraction_backend = str(provider_info.get("extraction_backend") or "unknown")
+    embedding_backend = str(provider_info.get("embedding_backend") or "unknown")
+    print(f"[info] Titan models: extraction={extraction_backend}, embedding={embedding_backend}")
+    if missing_envs:
+        print(f"[missing] Titan model credentials: {', '.join(missing_envs)}")
+        ok = False
+    else:
+        print("[ok] Titan model credentials")
+    if "ollama" in {extraction_backend, embedding_backend}:
+        required_models: List[str] = []
+        for config_key, backend in (
+            ("extraction_config_path", extraction_backend),
+            ("embedding_config_path", embedding_backend),
+        ):
+            if backend != "ollama":
+                continue
+            config = _load_yaml(Path(str(provider_info[config_key])))
+            model = str((config.get("ollama") or {}).get("model") or "").strip()
+            if model and model not in required_models:
+                required_models.append(model)
+        ollama_ok, guidance = _check_required_ollama_models(required_models)
+        if ollama_ok:
+            print(f"[ok] Ollama models: {', '.join(required_models)}")
+        else:
+            ok = False
+            print("[missing] Ollama runtime/models")
+            for line in guidance:
+                print(f"  {line}")
+
+    if ok:
+        print("[titan] Claude Code setup looks ready.")
+        return 0
+    print("[titan] Fix: titan setup claude-code")
+    return 1
+
+
+def run_claude_doctor() -> int:
+    return run_claude_verify()
+
+
+def run_setup_claude(
+    *,
+    dry_run: bool = False,
+    verify: bool = False,
+    skip_plugin_install: bool = False,
+    non_interactive: bool = False,
+) -> int:
+    trace_dir = resolve_effective_spool_dir(CLAUDE_AGENT_NAME)
+    if verify:
+        return run_claude_verify()
+    if dry_run:
+        print("[titan] Claude Code setup dry run")
+        print(f"- Ensure agent home: {resolve_agent_titan_home(CLAUDE_AGENT_NAME)}")
+        print(f"- Ensure trace dir: {trace_dir}")
+        print("- Configure extraction and embedding models for Claude Code")
+        print(f"- Materialize Claude marketplace: {CLAUDE_MARKETPLACE_DIR}")
+        if not skip_plugin_install:
+            print(f"- Install Claude plugin: {CLAUDE_PLUGIN_ID}")
+        print("- Verify plugin registration, model credentials, and Titan MCP tools")
+        return 0
+
+    agent_home = bootstrap_agent_home(CLAUDE_AGENT_NAME)
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    _setup_claude_model_config(agent_home, non_interactive=non_interactive)
+    marketplace_ok, detail = ensure_claude_marketplace_snapshot()
+    if not marketplace_ok:
+        print(f"[titan] Claude marketplace setup failed: {detail}")
+        return 1
+    print(f"[titan] Claude marketplace snapshot: {detail}")
+    plugin_ok, missing = _claude_plugin_files_ok()
+    if not plugin_ok:
+        print("[titan] Claude plugin files are incomplete:")
+        for path in missing:
+            print(f"  {path}")
+        return 1
+    if not skip_plugin_install:
+        result = run_claude_reinstall_plugin()
+        if result != 0:
+            return result
+    else:
+        print(f"[titan] Plugin install skipped. Marketplace is ready at {CLAUDE_MARKETPLACE_DIR}")
+    print("[titan] Run `titan claude verify` after restarting Claude Code or /reload-plugins.")
+    return 0
+
+
+def _claude_runtime_state_paths() -> List[Path]:
+    roots: List[Path] = []
+    for raw in (
+        os.getenv("TITAN_CLAUDE_DATA"),
+        os.getenv("CLAUDE_PLUGIN_DATA"),
+        str(Path.home() / ".titan" / "claude-plugin"),
+        str(Path.home() / ".claude" / "plugins" / "data" / "titan-memory-titan-pi-memory"),
+    ):
+        if not raw:
+            continue
+        root = Path(raw).expanduser().resolve()
+        if root not in roots:
+            roots.append(root)
+    return [root / "runtime" / CLAUDE_AGENT_NAME / "daemon.json" for root in roots]
+
+
+def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _stop_verified_claude_runtime(*, timeout: float = 5.0) -> tuple[bool, str]:
+    """Stop only an authenticated runtime whose live identity matches private state."""
+
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    for path in _claude_runtime_state_paths():
+        if not path.exists():
+            continue
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            pid = int(state["pid"])
+            port = int(state["port"])
+            token = str(state["token"])
+            nonce = str(state.get("owner_nonce") or "")
+            started_at = float(state.get("started_at") or 0.0)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            return False, f"refusing purge because Claude runtime state is invalid: {path}: {exc}"
+        if not _process_alive(pid):
+            continue
+        headers = {"X-Titan-Claude-Token": token}
+        try:
+            identity_request = Request(f"http://127.0.0.1:{port}/identity", headers=headers)
+            with urlopen(identity_request, timeout=1.0) as response:
+                identity = json.loads(response.read().decode("utf-8"))
+        except (OSError, HTTPError, URLError, ValueError, json.JSONDecodeError) as exc:
+            return False, f"refusing purge because active Claude runtime identity could not be verified: {exc}"
+        if (
+            int(identity.get("pid") or 0) != pid
+            or str(identity.get("owner_nonce") or "") != nonce
+            or float(identity.get("started_at") or 0.0) != started_at
+        ):
+            return False, "refusing purge because Claude runtime state does not match the live owner"
+        try:
+            shutdown_request = Request(
+                f"http://127.0.0.1:{port}/shutdown",
+                data=b"{}",
+                headers={**headers, "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(shutdown_request, timeout=1.0) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            if result.get("ok") is not True:
+                return False, "Claude runtime rejected graceful shutdown"
+        except (OSError, HTTPError, URLError, ValueError, json.JSONDecodeError) as exc:
+            return False, f"Claude runtime shutdown failed: {exc}"
+        deadline = time.monotonic() + timeout
+        while _process_alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if _process_alive(pid):
+            return False, "Claude runtime is still active; purge refused"
+    return True, "Claude runtime is stopped"
+
+
+def _claude_runtime_purge_targets(*, traces_only: bool) -> List[Path]:
+    targets: List[Path] = []
+    for state in _claude_runtime_state_paths():
+        runtime_dir = state.parent.resolve()
+        if runtime_dir.name != CLAUDE_AGENT_NAME or runtime_dir.parent.name != "runtime":
+            continue
+        target = runtime_dir / "fallback" if traces_only else runtime_dir
+        if target not in targets:
+            targets.append(target)
+    return targets
+
+
+def run_claude_purge(*, apply: bool = False, yes: bool = False, traces_only: bool = False) -> int:
+    agent_home = resolve_agent_titan_home(CLAUDE_AGENT_NAME).resolve()
+    expected_parent = (TITAN_HOME / "agents").resolve()
+    try:
+        agent_home.relative_to(expected_parent)
+    except ValueError:
+        print(f"[titan] Refusing purge outside Titan agent storage: {agent_home}")
+        return 1
+    if agent_home.name != CLAUDE_AGENT_NAME:
+        print(f"[titan] Refusing purge of non-Claude namespace: {agent_home}")
+        return 1
+    target = resolve_effective_spool_dir(CLAUDE_AGENT_NAME).resolve() if traces_only else agent_home
+    try:
+        target.relative_to(agent_home)
+    except ValueError:
+        print(f"[titan] Refusing purge outside Claude namespace: {target}")
+        return 1
+    label = "Claude raw traces" if traces_only else "the complete Claude Titan namespace"
+    purge_targets = [target, *_claude_runtime_purge_targets(traces_only=traces_only)]
+    print(f"[titan] Purge targets ({label}):")
+    for purge_target in purge_targets:
+        print(f"  {purge_target}")
+    if not apply:
+        print("[titan] Dry run only. Re-run with --apply --yes to delete them.")
+        return 0
+    if not yes:
+        print("[titan] Refusing destructive purge without --yes.")
+        return 1
+    runtime_stopped, runtime_detail = _stop_verified_claude_runtime()
+    if not runtime_stopped:
+        print(f"[titan] {runtime_detail}")
+        return 1
+    for purge_target in purge_targets:
+        if purge_target.exists():
+            shutil.rmtree(purge_target)
+        print(f"[titan] Removed: {purge_target}")
     return 0
 
 
@@ -2741,9 +3437,9 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--yes", action="store_true", help="Approve safe OpenCode config edits without prompting.")
     setup_parser.add_argument("--opencode-config", type=Path, help="OpenCode config path to patch. Defaults to ~/.config/opencode/opencode.json.")
     setup_parser.add_argument("--codex-config", type=Path, help="Codex config path to patch when running `titan setup codex`.")
-    setup_parser.add_argument("--dry-run", action="store_true", help="For `titan setup codex`, print planned changes without writing files.")
-    setup_parser.add_argument("--verify", action="store_true", help="For `titan setup codex`, verify the current Codex setup without applying changes.")
-    setup_parser.add_argument("--skip-plugin-install", action="store_true", help="For `titan setup codex`, patch config but do not run codex plugin install commands.")
+    setup_parser.add_argument("--dry-run", action="store_true", help="For Codex or Claude Code, print planned changes without writing files.")
+    setup_parser.add_argument("--verify", action="store_true", help="For Codex or Claude Code, verify the current setup without applying changes.")
+    setup_parser.add_argument("--skip-plugin-install", action="store_true", help="For Codex or Claude Code, configure Titan without running plugin install commands.")
     setup_parser.add_argument("--key", action="append", default=[], dest="cli_keys", metavar="NAME=VALUE", help="Set an API key. Repeatable. Example: --key GEMINI_API_KEY=xxx")
 
     init_parser = subparsers.add_parser("init", help="Initialize Titan onboarding")
@@ -2816,8 +3512,32 @@ def build_parser() -> argparse.ArgumentParser:
     codex_verify_parser.add_argument("--config", type=Path, help="Codex config path. Defaults to ~/.codex/config.toml.")
     codex_list_tools_parser = codex_subparsers.add_parser("list-tools", help="List local Titan MCP tools exposed to Codex")
     codex_list_tools_parser.add_argument("--json", action="store_true", dest="json_output", help="Print machine-readable JSON.")
+    codex_recover_pending_parser = codex_subparsers.add_parser(
+        "recover-pending",
+        help="Preview or apply recovery of pending Codex session events",
+    )
+    codex_recover_pending_parser.add_argument("--apply", action="store_true", help="Apply recovery. Without this flag, only preview.")
+    codex_recover_pending_parser.add_argument(
+        "--session-id",
+        action="append",
+        dest="session_ids",
+        help="Limit recovery to a session id. Repeatable.",
+    )
     codex_reinstall_parser = codex_subparsers.add_parser("reinstall-plugin", help="Reinstall the local Titan Codex plugin")
     codex_reinstall_parser.add_argument("--dry-run", action="store_true", help="Print codex plugin commands without running them.")
+
+    claude_parser = subparsers.add_parser("claude", help="Claude Code-specific Titan setup and verification helpers")
+    claude_subparsers = claude_parser.add_subparsers(dest="claude_command", required=True)
+    claude_subparsers.add_parser("doctor", help="Check Claude plugin, runtime, capture, credentials, and MCP tools")
+    claude_subparsers.add_parser("verify", help="Strict Claude Code setup verification")
+    claude_list_tools_parser = claude_subparsers.add_parser("list-tools", help="List Titan MCP tools exposed to Claude Code")
+    claude_list_tools_parser.add_argument("--json", action="store_true", dest="json_output", help="Print machine-readable JSON.")
+    claude_reinstall_parser = claude_subparsers.add_parser("reinstall-plugin", help="Reinstall the local Titan Claude Code plugin")
+    claude_reinstall_parser.add_argument("--dry-run", action="store_true", help="Print Claude plugin commands without running them.")
+    claude_purge_parser = claude_subparsers.add_parser("purge", help="Remove Claude-owned Titan traces or namespace data")
+    claude_purge_parser.add_argument("--apply", action="store_true", help="Apply the purge. Without this flag, only print the target.")
+    claude_purge_parser.add_argument("--yes", action="store_true", help="Confirm the destructive purge.")
+    claude_purge_parser.add_argument("--traces-only", action="store_true", help="Remove only Claude raw trace files.")
 
     patterns_parser = subparsers.add_parser("patterns", help="Inspect and manage Titan learned patterns")
     patterns_parser.add_argument("--agent", default=DEFAULT_AGENT_NAME, help="Agent name whose Titan pattern store should be used.")
@@ -2865,7 +3585,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "setup":
-        if _normalize_agent_name(args.agent) == CODEX_AGENT_NAME:
+        normalized_setup_agent = _normalize_agent_name(args.agent)
+        if normalized_setup_agent == CODEX_AGENT_NAME:
             codex_setup_kwargs = {
                 "dry_run": args.dry_run,
                 "verify": args.verify,
@@ -2875,6 +3596,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             if args.non_interactive:
                 codex_setup_kwargs["non_interactive"] = True
             return run_setup_codex(**codex_setup_kwargs)
+        if normalized_setup_agent == CLAUDE_AGENT_NAME:
+            return run_setup_claude(
+                dry_run=args.dry_run,
+                verify=args.verify,
+                skip_plugin_install=args.skip_plugin_install,
+                non_interactive=args.non_interactive,
+            )
         return run_setup(
             agent=args.agent,
             scope=args.scope,
@@ -2903,9 +3631,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             return run_codex_verify(config_path=args.config)
         if args.codex_command == "list-tools":
             return run_codex_list_tools(json_output=args.json_output)
+        if args.codex_command == "recover-pending":
+            return run_codex_recover_pending(apply=args.apply, session_ids=args.session_ids)
         if args.codex_command == "reinstall-plugin":
             return run_codex_reinstall_plugin(dry_run=args.dry_run)
         parser.error(f"Unsupported codex command: {args.codex_command}")
+        return 2
+    if args.command == "claude":
+        if args.claude_command == "doctor":
+            return run_claude_doctor()
+        if args.claude_command == "verify":
+            return run_claude_verify()
+        if args.claude_command == "list-tools":
+            return run_claude_list_tools(json_output=args.json_output)
+        if args.claude_command == "reinstall-plugin":
+            return run_claude_reinstall_plugin(dry_run=args.dry_run)
+        if args.claude_command == "purge":
+            return run_claude_purge(apply=args.apply, yes=args.yes, traces_only=args.traces_only)
+        parser.error(f"Unsupported Claude command: {args.claude_command}")
         return 2
     if args.command == "doctor":
         agent_arg = args.agent_positional if args.agent_positional is not None else args.agent
