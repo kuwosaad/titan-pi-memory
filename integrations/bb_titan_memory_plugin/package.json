@@ -1,0 +1,47 @@
+{
+  "name": "bb-plugin-titan-memory",
+  "version": "0.1.0",
+  "description": "A lightweight, read-only Titan memory explorer for BB.",
+  "type": "module",
+  "engines": {
+    "bb": ">=0.42",
+    "bbPluginSdk": ">=0.4.47"
+  },
+  "bb": {
+    "name": "Titan Memory Explorer",
+    "description": "Inspect Titan memories beside a BB chat without changing the memory store.",
+    "branding": {
+      "icon": "Brain"
+    },
+    "server": "./src/server.ts",
+    "app": "./src/app.tsx",
+    "host": "./src/host.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\" \"tests/**/*.test.ts\"",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "3d-force-graph": "^1.79.0",
+    "three": "^0.185.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.4.47",
+    "@testing-library/react": "^16.3.3",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.18",
+    "@types/three": "^0.185.4",
+    "better-sqlite3": "^13.0.3",
+    "cron-parser": "^5.10.0",
+    "hono": "^4.13.7",
+    "jsdom": "^30.0.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tsx": "^4.20.6",
+    "typescript": "^5.7.0"
+  }
+}
