@@ -56,7 +56,7 @@ def _refresh_json_paths() -> None:
     if DEFAULT_SQLITE_FILE == _MEMORY_ROOT / "memory_store.db":
         DEFAULT_SQLITE_FILE = current_root / "memory_store.db"
     _MEMORY_ROOT = current_root
-_ALLOWED_SPEAKER_FOCUS = {"user", "assistant", "kuwo", "karu", "shared", "system"}
+_ALLOWED_SPEAKER_FOCUS = {"user", "assistant", "shared", "system"}
 _LEGACY_SPEAKER_FOCUS_ALIASES = {
     "mixed": "shared",
     "both": "shared",
@@ -155,6 +155,69 @@ def _normalize_stream(value: Any) -> str:
     return stream if stream in {"rough", "learnings"} else "rough"
 
 
+_MEMORY_IDENTITY_FIELDS = (
+    "id",
+    "text",
+    "type",
+    "stream",
+    "session_id",
+    "turn",
+    "scene_id",
+    "source_type",
+    "source_reliability",
+    "verification_status",
+    "fallback_generated",
+    "source_event_ids",
+    "provenance",
+    "speaker_focus",
+    "memory_kind",
+    "embedding",
+)
+
+
+def _canonical_memory_payload(record: Dict[str, Any]) -> str:
+    """Return immutable derivation identity, excluding mutable retrieval state."""
+
+    normalized = _normalize_memory(record)
+    payload = {field: normalized.get(field) for field in _MEMORY_IDENTITY_FIELDS}
+    payload["id"] = str(normalized.get("id") or "")
+    payload["text"] = str(normalized.get("text") or "")
+    payload["stream"] = _normalize_stream(normalized.get("stream"))
+    payload["session_id"] = str(normalized.get("session_id") or "")
+    payload["turn"] = int(normalized.get("turn") or 0)
+    payload["scene_id"] = (
+        str(normalized["scene_id"]) if normalized.get("scene_id") is not None else None
+    )
+    payload["source_type"] = str(normalized.get("source_type") or "legacy")
+    payload["source_reliability"] = float(normalized.get("source_reliability") or 0.0)
+    payload["verification_status"] = str(normalized.get("verification_status") or "unverified")
+    payload["fallback_generated"] = bool(normalized.get("fallback_generated", False))
+    payload["source_event_ids"] = [str(value) for value in normalized.get("source_event_ids") or []]
+    payload["speaker_focus"] = normalized.get("speaker_focus")
+    payload["memory_kind"] = normalized.get("memory_kind")
+
+    embedding = normalized.get("embedding")
+    if embedding is None:
+        payload["embedding"] = None
+    else:
+        array = np.asarray(embedding, dtype=np.float32).reshape(-1)
+        payload["embedding"] = array.tolist() if array.size else None
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _same_memory(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    return _canonical_memory_payload(left) == _canonical_memory_payload(right)
+
+
+def _memory_id(record: Dict[str, Any]) -> str:
+    return str(record.get("id") or "")
+
+
+def _reject_memory_collision(memory_id: str) -> None:
+    LOGGER.warning("Rejecting immutable Memory collision for memory_id=%s", memory_id)
+    raise ValueError(f"memory collision for immutable memory id: {memory_id}")
+
+
 def _resolve_sqlite_path() -> Path:
     from app.runtime.context import get_runtime_context
     return get_runtime_context().memory_db_path
@@ -206,10 +269,40 @@ class JsonMemoryRepository:
             write_json(self._path, memories)
 
     def append_memories(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not records:
+            return []
         with _MEMORIES_LOCK:
             all_memories = read_json(self._path, [])
-            all_memories.extend(records)
-            write_json(self._path, all_memories)
+            # Do not repair or rewrite historical duplicate IDs here. A legacy
+            # JSON store may contain duplicate rows with distinct mutable LNN
+            # metadata; append must preserve every existing row verbatim.
+            existing_by_id: Dict[str, List[Dict[str, Any]]] = {}
+            for item in all_memories:
+                if isinstance(item, dict):
+                    memory_id = _memory_id(item)
+                    if memory_id:
+                        existing_by_id.setdefault(memory_id, []).append(item)
+
+            retained: List[Any] = list(all_memories)
+            changed = False
+            for record in records:
+                if not isinstance(record, dict):
+                    retained.append(record)
+                    changed = True
+                    continue
+                memory_id = _memory_id(record)
+                existing = existing_by_id.get(memory_id, []) if memory_id else []
+                if existing:
+                    if any(_same_memory(item, record) for item in existing):
+                        continue
+                    _reject_memory_collision(memory_id)
+                if memory_id:
+                    existing_by_id[memory_id] = [record]
+                retained.append(record)
+                changed = True
+
+            if changed:
+                write_json(self._path, retained)
         return records
 
     def get_recent_memories(self, limit: Optional[int] = 8, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -599,36 +692,48 @@ class SqliteMemoryRepository:
             :h, :tau, :outgoing_weights, :incoming_weights,
             :embedding_blob, :embedding_dim, :embedding_dtype
         )
-        ON CONFLICT(id) DO UPDATE SET
-            session_id=excluded.session_id,
-            turn=excluded.turn,
-            scene_id=excluded.scene_id,
-            idx=excluded.idx,
-            text=excluded.text,
-            type=excluded.type,
-            stream=excluded.stream,
-            ts=excluded.ts,
-            source_type=excluded.source_type,
-            source_reliability=excluded.source_reliability,
-            verification_status=excluded.verification_status,
-            fallback_generated=excluded.fallback_generated,
-            source_event_ids_json=excluded.source_event_ids_json,
-            provenance_user=excluded.provenance_user,
-            provenance_assistant=excluded.provenance_assistant,
-            speaker_focus=excluded.speaker_focus,
-            memory_kind=excluded.memory_kind,
-            h=excluded.h,
-            tau=excluded.tau,
-            outgoing_weights=excluded.outgoing_weights,
-            incoming_weights=excluded.incoming_weights,
-            embedding_blob=excluded.embedding_blob,
-            embedding_dim=excluded.embedding_dim,
-            embedding_dtype=excluded.embedding_dtype
         """
         rows = [self._record_to_row(record) for record in records]
+        normalized_records = [_normalize_memory(record) for record in records]
         with self._lock, self._connect() as conn:
-            conn.executemany(sql, rows)
-            conn.commit()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                memory_ids = list(dict.fromkeys(row["id"] for row in rows))
+                placeholders = ",".join("?" for _ in memory_ids)
+                existing_rows = (
+                    conn.execute(
+                        f"SELECT * FROM memories WHERE id IN ({placeholders})",
+                        memory_ids,
+                    ).fetchall()
+                    if memory_ids
+                    else []
+                )
+                existing = {
+                    row["id"]: self._row_to_memory(row, decode_embedding=True)
+                    for row in existing_rows
+                }
+                pending: Dict[str, Dict[str, Any]] = {}
+                pending_order: List[str] = []
+                for normalized, row in zip(normalized_records, rows):
+                    memory_id = row["id"]
+                    current = pending.get(memory_id, existing.get(memory_id))
+                    if current is None:
+                        pending[memory_id] = normalized
+                        pending_order.append(memory_id)
+                        continue
+                    if _same_memory(current, normalized):
+                        continue
+                    _reject_memory_collision(memory_id)
+
+                if pending_order:
+                    conn.executemany(
+                        sql,
+                        [self._record_to_row(pending[memory_id]) for memory_id in pending_order],
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return records
 
     def load_all_memories(self) -> List[Dict[str, Any]]:

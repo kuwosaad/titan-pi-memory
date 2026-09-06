@@ -22,6 +22,8 @@ _SCENE_ROOT = MEMORIES_DIR
 _SCENES_LOCK = threading.RLock()
 _REPO_CACHE: Optional["SceneRepository"] = None
 _REPO_CACHE_KEY: Optional[tuple[str, str]] = None
+_RECOVERY_MARKER_KEY = "titan_recovery_extraction"
+_VALID_RECOVERY_MARKERS = {"stored", "skipped"}
 
 
 def _refresh_json_paths() -> None:
@@ -163,6 +165,235 @@ def _is_complete_scene(scene: Dict[str, Any]) -> bool:
     return str(scene.get("evidence_status") or "partial") == "complete" and int(scene.get("evidence_version") or 0) == 1
 
 
+def _canonical_scene_payload(scene: Dict[str, Any]) -> str:
+    """Return the immutable scene payload used for replay comparisons.
+
+    ``ts`` is an observation timestamp rather than evidence identity.  It can
+    be regenerated when a scene is replayed, so it must not turn an otherwise
+    identical replay into a collision.
+    """
+
+    canonical = {key: value for key, value in scene.items() if key != "ts"}
+    raw_events = canonical.get("raw_events")
+    if isinstance(raw_events, list):
+        canonical["raw_events"] = [_canonical_raw_event(event) for event in raw_events]
+    elif isinstance(canonical.get("payload"), dict):
+        canonical = _canonical_raw_event(canonical)
+    return json.dumps(
+        canonical,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _canonical_raw_event(event: Any) -> Any:
+    if not isinstance(event, dict):
+        return event
+    canonical = dict(event)
+    payload = canonical.get("payload")
+    if isinstance(payload, dict) and _RECOVERY_MARKER_KEY in payload:
+        canonical["payload"] = {
+            key: value for key, value in payload.items() if key != _RECOVERY_MARKER_KEY
+        }
+    return canonical
+
+
+def _same_scene(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    return _canonical_scene_payload(left) == _canonical_scene_payload(right)
+
+
+def _valid_recovery_marker(value: Any) -> Optional[str]:
+    marker = str(value or "").strip().lower()
+    return marker if marker in _VALID_RECOVERY_MARKERS else None
+
+
+def _scene_recovery_marker(scene: Dict[str, Any]) -> Optional[str]:
+    raw_events = [event for event in scene.get("raw_events") or [] if isinstance(event, dict)]
+    anchor_event_id = str(scene.get("anchor_event_id") or "")
+    ordered = sorted(
+        raw_events,
+        key=lambda event: 0 if str(event.get("event_id") or "") == anchor_event_id else 1,
+    )
+    for event in ordered:
+        payload = event.get("payload")
+        if isinstance(payload, dict):
+            marker = _valid_recovery_marker(payload.get(_RECOVERY_MARKER_KEY))
+            if marker is not None:
+                return marker
+    return None
+
+
+def _set_scene_recovery_marker(scene: Dict[str, Any], marker: str) -> bool:
+    marker = _valid_recovery_marker(marker)
+    if marker is None:
+        return False
+    anchor_event_id = str(scene.get("anchor_event_id") or "")
+    for event in scene.get("raw_events") or []:
+        if not isinstance(event, dict) or str(event.get("event_id") or "") != anchor_event_id:
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        if _valid_recovery_marker(payload.get(_RECOVERY_MARKER_KEY)) == marker:
+            return False
+        event["payload"] = {**payload, _RECOVERY_MARKER_KEY: marker}
+        return True
+    return False
+
+
+def _merge_recovery_marker(current: Dict[str, Any], incoming: Dict[str, Any]) -> bool:
+    """Merge the one mutable recovery marker without weakening stored state."""
+
+    incoming_marker = _scene_recovery_marker(incoming)
+    if incoming_marker is None:
+        return False
+    current_marker = _scene_recovery_marker(current)
+    if current_marker == "stored" or (current_marker == incoming_marker):
+        return False
+    return _set_scene_recovery_marker(current, incoming_marker)
+
+
+def _copy_with_recovery_marker(scene: Dict[str, Any], marker: Optional[str]) -> Dict[str, Any]:
+    """Copy a scene while retaining only the valid, strongest recovery marker."""
+
+    copied = dict(scene)
+    copied["raw_events"] = []
+    for event in scene.get("raw_events") or []:
+        if not isinstance(event, dict):
+            copied["raw_events"].append(event)
+            continue
+        event_copy = dict(event)
+        if isinstance(event.get("payload"), dict):
+            event_copy["payload"] = dict(event["payload"])
+        copied["raw_events"].append(event_copy)
+    if marker is None:
+        for event in copied["raw_events"]:
+            payload = event.get("payload") if isinstance(event, dict) else None
+            if isinstance(payload, dict) and _RECOVERY_MARKER_KEY in payload:
+                payload.pop(_RECOVERY_MARKER_KEY, None)
+        return copied
+    _set_scene_recovery_marker(copied, marker)
+    return copied
+
+
+def _merged_recovery_marker(current: Dict[str, Any], incoming: Dict[str, Any]) -> Optional[str]:
+    current_marker = _scene_recovery_marker(current)
+    incoming_marker = _scene_recovery_marker(incoming)
+    if current_marker == "stored" or incoming_marker == "stored":
+        return "stored"
+    return incoming_marker or current_marker
+
+
+def _ordered_subset(needles: List[str], haystack: List[str]) -> bool:
+    """Return whether ``needles`` occurs in order inside ``haystack``."""
+
+    position = 0
+    for value in haystack:
+        if position < len(needles) and value == needles[position]:
+            position += 1
+    return position == len(needles)
+
+
+def _scene_is_provably_fuller(current: Dict[str, Any], incoming: Dict[str, Any]) -> bool:
+    """Allow only evidence-preserving partial -> fuller upgrades."""
+
+    current_source_ids = [str(value) for value in current.get("source_event_ids") or []]
+    incoming_source_ids = [str(value) for value in incoming.get("source_event_ids") or []]
+    if not _ordered_subset(current_source_ids, incoming_source_ids):
+        return False
+
+    # These fields identify the logical scene rather than the amount of
+    # evidence currently available. A fuller replay may add evidence, but it
+    # must not silently turn the scene into another turn/kind/anchor/sequence.
+    for field in ("session_id", "turn", "kind", "scene_seq", "anchor_event_id"):
+        if current.get(field) != incoming.get(field):
+            return False
+    # Event bounds may legitimately widen as previously missing evidence is
+    # recovered, while preserving the scene's stable sequence identity above.
+    for field, direction in (("end_event_seq", "increase"), ("start_event_seq", "decrease")):
+        current_value = current.get(field)
+        incoming_value = incoming.get(field)
+        if current_value is None or incoming_value is None:
+            continue
+        if direction == "increase" and int(incoming_value) < int(current_value):
+            return False
+        if direction == "decrease" and int(incoming_value) > int(current_value):
+            return False
+
+    current_raw = {
+        str(event.get("event_id") or ""): event
+        for event in current.get("raw_events") or []
+        if isinstance(event, dict) and str(event.get("event_id") or "")
+    }
+    incoming_raw = {
+        str(event.get("event_id") or ""): event
+        for event in incoming.get("raw_events") or []
+        if isinstance(event, dict) and str(event.get("event_id") or "")
+    }
+    incoming_raw_ids = [
+        str(event.get("event_id") or "")
+        for event in incoming.get("raw_events") or []
+        if isinstance(event, dict) and str(event.get("event_id") or "")
+    ]
+    if len(incoming_raw_ids) != len(set(incoming_raw_ids)):
+        return False
+    if not _ordered_subset(incoming_raw_ids, incoming_source_ids):
+        return False
+    if not set(incoming_source_ids).issubset(set(incoming_raw_ids) | set(incoming.get("missing_source_event_ids") or [])):
+        return False
+    for event_id, event in current_raw.items():
+        if event_id not in incoming_raw or _canonical_scene_payload(event) != _canonical_scene_payload(incoming_raw[event_id]):
+            return False
+
+    # A fuller replay may also learn that an additional expected event is
+    # unavailable. Such a source ID is valid only because it is explicitly
+    # carried in the incoming missing list; the lineage subset check above
+    # rejects IDs that are neither raw nor missing.
+    current_missing = {str(value) for value in current.get("missing_source_event_ids") or []}
+    incoming_missing = {str(value) for value in incoming.get("missing_source_event_ids") or []}
+
+    if _is_complete_scene(incoming) and not _is_complete_scene(current):
+        return True
+    return any(
+        (
+            len(incoming_source_ids) > len(current_source_ids),
+            len(incoming.get("raw_events") or []) > len(current.get("raw_events") or []),
+            len(incoming.get("messages") or []) > len(current.get("messages") or []),
+            len(incoming.get("tool_calls") or []) > len(current.get("tool_calls") or []),
+            int(incoming.get("evidence_version") or 0) > int(current.get("evidence_version") or 0),
+            len(incoming_missing) < len(current_missing),
+        )
+    )
+
+
+def _merge_scene(existing: Dict[str, Dict[str, Any]], incoming: Dict[str, Any]) -> bool:
+    """Merge one scene, rejecting identity collisions before persistence."""
+
+    scene_id = str(incoming.get("scene_id") or "")
+    current = existing.get(scene_id)
+    if current is None:
+        existing[scene_id] = incoming
+        return True
+    if _same_scene(current, incoming):
+        return _merge_recovery_marker(current, incoming)
+    if _is_complete_scene(current):
+        if _is_complete_scene(incoming):
+            LOGGER.warning("Rejecting immutable Scene collision for scene_id=%s", scene_id)
+            raise ValueError(f"scene collision for immutable complete scene: {scene_id}")
+        # A replayed partial observation must never downgrade durable evidence.
+        return False
+    if _scene_is_provably_fuller(current, incoming):
+        existing[scene_id] = _copy_with_recovery_marker(
+            incoming,
+            _merged_recovery_marker(current, incoming),
+        )
+        return True
+
+    LOGGER.warning("Rejecting non-fuller Scene collision for scene_id=%s", scene_id)
+    raise ValueError(f"scene collision is not a fuller evidence upgrade: {scene_id}")
+
+
 class SceneRepository(Protocol):
     def append_scenes(self, scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         ...
@@ -200,20 +431,59 @@ class JsonSceneRepository:
     def append_scenes(self, scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not scenes:
             return []
-        normalized_scenes = [_normalize_scene(scene) for scene in scenes]
+        normalized_scenes: List[Dict[str, Any]] = []
+        for scene in scenes:
+            normalized = _normalize_scene(scene)
+            normalized_scenes.append(
+                _copy_with_recovery_marker(normalized, _scene_recovery_marker(normalized))
+            )
         with _SCENES_LOCK:
-            existing = {
-                str(item.get("scene_id") or ""): _normalize_scene(item)
-                for item in read_json(self._path, [])
-                if isinstance(item, dict)
-            }
-            for normalized in normalized_scenes:
-                current = existing.get(normalized["scene_id"])
-                if current is not None and _is_complete_scene(current) and not _is_complete_scene(normalized):
+            raw_scenes = read_json(self._path, [])
+            retained: List[Any] = list(raw_scenes) if isinstance(raw_scenes, list) else []
+            existing: Dict[str, List[tuple[int, Dict[str, Any]]]] = {}
+            for index, item in enumerate(retained):
+                if not isinstance(item, dict):
                     continue
-                existing[normalized["scene_id"]] = normalized
-            ordered = sorted(existing.values(), key=lambda item: str(item.get("ts") or ""))
-            write_json(self._path, ordered)
+                normalized = _normalize_scene(item)
+                scene_id = str(normalized.get("scene_id") or "")
+                existing.setdefault(scene_id, []).append((index, normalized))
+            changed = False
+            for normalized in normalized_scenes:
+                scene_id = str(normalized.get("scene_id") or "")
+                entries = existing.get(scene_id, [])
+                if not entries:
+                    retained.append(normalized)
+                    existing.setdefault(scene_id, []).append((len(retained) - 1, normalized))
+                    changed = True
+                    continue
+                if len(entries) > 1:
+                    # Historical duplicate rows are left untouched. An
+                    # unrelated new scene must remain appendable even when
+                    # old JSON contains ambiguous rows for another ID.
+                    if any(_same_scene(item, normalized) for _index, item in entries):
+                        continue
+                    if any(_is_complete_scene(item) for _index, item in entries) and not _is_complete_scene(normalized):
+                        continue
+                    LOGGER.warning("Rejecting collision against historical duplicate Scene rows for scene_id=%s", scene_id)
+                    raise ValueError(f"scene collision against historical duplicate rows: {scene_id}")
+
+                index, current = entries[0]
+                if _same_scene(current, normalized):
+                    if _merge_recovery_marker(current, normalized):
+                        marker = _scene_recovery_marker(current)
+                        raw_item = retained[index]
+                        if isinstance(raw_item, dict):
+                            raw_item_copy = _copy_with_recovery_marker(raw_item, marker)
+                            retained[index] = raw_item_copy
+                            changed = True
+                    continue
+                holder = {scene_id: current}
+                if _merge_scene(holder, normalized):
+                    retained[index] = holder[scene_id]
+                    existing[scene_id] = [(index, holder[scene_id])]
+                    changed = True
+            if changed:
+                write_json(self._path, retained)
         return scenes
 
     def get_scene(self, scene_id: str) -> Optional[Dict[str, Any]]:
@@ -405,12 +675,68 @@ class SqliteSceneRepository:
             extraction_user_text=excluded.extraction_user_text,
             extraction_assistant_text=excluded.extraction_assistant_text,
             used_context_fallback=excluded.used_context_fallback
-        WHERE scenes.evidence_status <> 'complete' OR excluded.evidence_status = 'complete'
         """
-        rows = [self._scene_to_row(scene) for scene in scenes]
+        normalized_scenes: List[Dict[str, Any]] = []
+        for scene in scenes:
+            normalized = _normalize_scene(scene)
+            normalized_scenes.append(
+                _copy_with_recovery_marker(normalized, _scene_recovery_marker(normalized))
+            )
+        rows = [self._scene_to_row(scene) for scene in normalized_scenes]
         with self._lock, self._connect() as conn:
-            conn.executemany(sql, rows)
-            conn.commit()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                scene_ids = list(dict.fromkeys(row["scene_id"] for row in rows))
+                placeholders = ",".join("?" for _ in scene_ids)
+                existing_rows = (
+                    conn.execute(
+                        f"SELECT * FROM scenes WHERE scene_id IN ({placeholders})",
+                        scene_ids,
+                    ).fetchall()
+                    if scene_ids
+                    else []
+                )
+                existing = {row["scene_id"]: self._row_to_scene(row) for row in existing_rows}
+                pending: Dict[str, Dict[str, Any]] = {}
+                pending_order: List[str] = []
+
+                def queue(scene_id: str, payload: Dict[str, Any]) -> None:
+                    pending[scene_id] = payload
+                    if scene_id not in pending_order:
+                        pending_order.append(scene_id)
+
+                for normalized in normalized_scenes:
+                    scene_id = normalized["scene_id"]
+                    current = pending.get(scene_id, existing.get(scene_id))
+                    if current is None:
+                        queue(scene_id, normalized)
+                        continue
+                    if _same_scene(current, normalized):
+                        if _merge_recovery_marker(current, normalized):
+                            queue(scene_id, current)
+                        continue
+                    if _is_complete_scene(current):
+                        if _is_complete_scene(normalized):
+                            LOGGER.warning("Rejecting immutable Scene collision for scene_id=%s", scene_id)
+                            raise ValueError(f"scene collision for immutable complete scene: {scene_id}")
+                        continue
+                    if _scene_is_provably_fuller(current, normalized):
+                        queue(
+                            scene_id,
+                            _copy_with_recovery_marker(
+                                normalized,
+                                _merged_recovery_marker(current, normalized),
+                            ),
+                        )
+                        continue
+                    LOGGER.warning("Rejecting non-fuller Scene collision for scene_id=%s", scene_id)
+                    raise ValueError(f"scene collision is not a fuller evidence upgrade: {scene_id}")
+
+                conn.executemany(sql, [self._scene_to_row(pending[scene_id]) for scene_id in pending_order])
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return scenes
 
     def get_scene(self, scene_id: str) -> Optional[Dict[str, Any]]:

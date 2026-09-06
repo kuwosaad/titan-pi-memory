@@ -46,6 +46,9 @@ class SynthesisOutcomeTests(unittest.TestCase):
             stack.enter_context(patch("app.save_pipeline.pipeline.embed", return_value=[]))
             stack.enter_context(patch("app.save_pipeline.pipeline.get_verifier", return_value=self.verifier))
             stack.enter_context(patch("app.save_pipeline.pipeline.append_memories"))
+            # These tests inspect derived records, not scene persistence. Each
+            # fixture reuses a scene ID, so keep writes isolated as well.
+            stack.enter_context(patch("app.save_pipeline.pipeline.append_scene"))
             stack.enter_context(patch("app.save_pipeline.pipeline.append_memory_notes"))
             if settings is not None:
                 stack.enter_context(patch("app.retrieval_pipeline.config.load_settings", return_value=settings))
