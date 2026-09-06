@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import sys
@@ -15,7 +16,11 @@ from mcp.client.streamable_http import streamable_http_client
 
 from integrations.claude_titan_plugin.runtime.client import recall_context, submit_events
 from integrations.claude_titan_plugin.runtime.common import read_state, state_path
-from integrations.claude_titan_plugin.runtime.daemon import RuntimeGateway, _compact_recall_payload
+from integrations.claude_titan_plugin.runtime.daemon import (
+    LEASE_TTL_SECONDS,
+    RuntimeGateway,
+    _compact_recall_payload,
+)
 from integrations.claude_titan_plugin.runtime.proxy import ensure_daemon
 
 
@@ -26,7 +31,8 @@ LAUNCHER = ROOT / "integrations" / "claude_titan_plugin" / "scripts" / "titan_cl
 def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, agent: str = "claude-runtime-test") -> dict[str, str]:
     env = os.environ.copy()
     values = {
-        "HOME": str(tmp_path / "home"),
+        "TITAN_HOME": str(tmp_path / "home"),
+        "TITAN_BASE_DIR": str(tmp_path / "home"),
         "TITAN_CLAUDE_DATA": str(tmp_path / "plugin-data"),
         "CLAUDE_PLUGIN_DATA": str(tmp_path / "plugin-data"),
         "TITAN_AGENT_NAME": agent,
@@ -39,26 +45,78 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, agent: str = "cl
     return env
 
 
-def _stop(state) -> None:
+_SHUTDOWN_REQUEST_TIMEOUT_SECONDS = 1.0
+_SHUTDOWN_RETRY_INTERVAL_SECONDS = 0.25
+_SHUTDOWN_SETTLE_GRACE_SECONDS = 2 * _SHUTDOWN_REQUEST_TIMEOUT_SECONDS
+
+
+def _shutdown_diagnostic(response: httpx.Response) -> str:
     try:
-        httpx.post(
-            f"http://127.0.0.1:{state.port}/shutdown",
-            headers={"X-Titan-Claude-Token": state.token},
-            timeout=1,
-        )
-    except httpx.HTTPError:
-        pass
-    deadline = time.monotonic() + 5
+        detail = response.json()
+    except ValueError:
+        detail = response.text[:200]
+    return f"{response.status_code} {detail}"
+
+
+def _stop(state) -> None:
+    # A proxy killed by the stdio transport may not close its lease. The daemon
+    # must therefore reject shutdown until the documented lease TTL expires.
+    # Wait for that contract, then give the authenticated shutdown request a
+    # small request-derived grace period to remove daemon.json.
+    deadline = time.monotonic() + LEASE_TTL_SECONDS + _SHUTDOWN_SETTLE_GRACE_SECONDS
+    retry_at = time.monotonic()
+    waiting_for_lease_expiry = False
+    accepted = False
+    diagnostics: list[str] = []
+
     while time.monotonic() < deadline:
+        now = time.monotonic()
+        if now >= retry_at and not accepted:
+            try:
+                response = httpx.post(
+                    f"http://127.0.0.1:{state.port}/shutdown",
+                    headers={"X-Titan-Claude-Token": state.token},
+                    timeout=_SHUTDOWN_REQUEST_TIMEOUT_SECONDS,
+                )
+                diagnostics.append(_shutdown_diagnostic(response))
+                if response.status_code == 200:
+                    accepted = True
+                elif response.status_code == 409 and not waiting_for_lease_expiry:
+                    # The lease timestamp is held by the daemon; retry only
+                    # after its full TTL instead of hammering /shutdown.
+                    waiting_for_lease_expiry = True
+                    retry_at = now + LEASE_TTL_SECONDS
+                elif response.status_code == 409:
+                    retry_at = now + _SHUTDOWN_RETRY_INTERVAL_SECONDS
+                else:
+                    raise AssertionError(
+                        "Unexpected Claude daemon shutdown response; "
+                        f"responses={diagnostics}"
+                    )
+            except httpx.HTTPError as exc:
+                diagnostics.append(f"{type(exc).__name__}: {exc}")
+                retry_at = now + _SHUTDOWN_RETRY_INTERVAL_SECONDS
+
         if read_state(state.agent_name) is None:
             return
-        time.sleep(0.05)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        sleep_for = min(_SHUTDOWN_RETRY_INTERVAL_SECONDS, remaining)
+        if not accepted:
+            sleep_for = min(sleep_for, max(0.0, retry_at - time.monotonic()))
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+
     if os.name != "nt":
         try:
             os.kill(state.pid, signal.SIGTERM)
         except ProcessLookupError:
             return
-    raise AssertionError("Claude test daemon did not shut down within five seconds")
+    raise AssertionError(
+        "Claude test daemon remained after the bounded lease-expiry shutdown budget; "
+        f"lease_ttl={LEASE_TTL_SECONDS}s responses={diagnostics}"
+    )
 
 
 async def _remote_tools(state) -> list[str]:
@@ -143,6 +201,78 @@ def test_stdio_proxy_mirrors_tools_and_blocks_external_pattern_paths(monkeypatch
         state = read_state("claude-proxy-test")
         if state:
             _stop(state)
+
+
+def test_shutdown_contract_protects_live_and_releases_closed_or_expired_leases():
+    async def exercise() -> None:
+        async def noop(scope, receive, send):
+            return None
+
+        gateway = RuntimeGateway(noop, token="token", module=object())
+        shutdown_calls = 0
+
+        def shutdown() -> None:
+            nonlocal shutdown_calls
+            shutdown_calls += 1
+
+        gateway.shutdown_callback = shutdown
+
+        async def request(path: str, payload: dict, token: str = "token") -> tuple[int, dict]:
+            sent = []
+            body = json.dumps(payload).encode()
+
+            async def receive():
+                return {"type": "http.request", "body": body, "more_body": False}
+
+            async def send(message):
+                sent.append(message)
+
+            await gateway(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": path,
+                    "headers": [(b"x-titan-claude-token", token.encode())],
+                },
+                receive,
+                send,
+            )
+            return sent[0]["status"], json.loads(sent[1]["body"])
+
+        try:
+            status, payload = await request("/shutdown", {}, token="wrong")
+            assert status == 401
+            assert payload == {"error": "unauthorized"}
+
+            status, payload = await request("/lease/open", {"lease_id": "live"})
+            assert status == 200
+            assert payload == {"ok": True}
+            status, payload = await request("/shutdown", {})
+            assert status == 409
+            assert payload == {"error": "active Claude clients are still connected", "ok": False}
+            assert shutdown_calls == 0
+
+            # An orderly proxy close removes its lease and permits shutdown.
+            status, payload = await request("/lease/close", {"lease_id": "live"})
+            assert status == 200
+            assert payload == {"ok": True}
+            status, payload = await request("/shutdown", {})
+            assert status == 200
+            assert payload == {"ok": True}
+            assert shutdown_calls == 1
+
+            # An abruptly terminated proxy is equivalent after the documented
+            # TTL: stale lease state is pruned and shutdown is permitted.
+            gateway.leases["expired"] = time.monotonic() - LEASE_TTL_SECONDS - 1
+            status, payload = await request("/shutdown", {})
+            assert status == 200
+            assert payload == {"ok": True}
+            assert shutdown_calls == 2
+            assert "expired" not in gateway.leases
+        finally:
+            gateway.close()
+
+    asyncio.run(exercise())
 
 
 def test_event_submission_uses_owner_or_private_fallback(monkeypatch, tmp_path):
