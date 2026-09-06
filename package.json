@@ -23,6 +23,9 @@
     ],
     "image": "https://raw.githubusercontent.com/kuwosaad/titan-pi-memory/main/assets/titan-pi-card.png"
   },
+  "scripts": {
+    "prepack": "node tools/release/audit_pi_package.js"
+  },
   "files": [
     "README.md",
     "LICENSE",
@@ -30,9 +33,15 @@
     "package.json",
     "app/**/*.py",
     "app/graph/ui/",
-    "entrypoints/**/*.py",
-    "entrypoints/overnight/scripts/",
-    "config/",
+    "entrypoints/__init__.py",
+    "entrypoints/main.py",
+    "entrypoints/mcp_server.py",
+    "config/__init__.py",
+    "config/.env.example",
+    "config/embedding_models.yaml",
+    "config/extraction_models.yaml",
+    "config/settings.yaml",
+    "config/visual_config.yaml",
     "tools/pi_extension/index.ts",
     "tools/pi_extension/server.py",
     "tools/pi_extension/titan_dashboard.py",

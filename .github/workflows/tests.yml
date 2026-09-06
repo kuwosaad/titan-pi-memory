@@ -40,6 +40,20 @@ jobs:
       - name: Prepare bundled runtime
         run: npm --prefix packages/titan-memory-cli run prepack
 
+      - name: Verify npm package policy and installed artifact
+        run: |
+          python scripts/package_gate.py --source
+          python scripts/verify_packed_artifact.py
+
+      - name: Build and audit Python distributions
+        run: |
+          python -m pip install build
+          python -m build --sdist --wheel --outdir dist
+          python tools/release/audit_python_artifact.py dist
+
+      - name: Verify installed Python distributions
+        run: python tools/release/verify_python_artifact.py dist
+
       - name: Install package and test runner
         run: |
           python -m pip install --upgrade pip

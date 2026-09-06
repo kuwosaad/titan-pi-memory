@@ -1,6 +1,6 @@
 {
   "name": "titan-memory-cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Titan Memory CLI and local-first memory runtime for coding agents",
   "keywords": [
     "memory",
@@ -32,8 +32,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "prepack": "node scripts/prepare-runtime.js && node scripts/audit-runtime.js",
-    "test": "node bin/titan.js codex list-tools --json"
+    "prepack": "node scripts/prepare-runtime.js && node scripts/audit-runtime.js && python ../../scripts/package_gate.py --pack",
+    "release:check": "python ../../scripts/package_gate.py --source",
+    "release:verify": "python ../../scripts/verify_packed_artifact.py --root ../..",
+    "test": "node bin/titan.js codex list-tools --json && python -m pytest ../../tests/test_release_artifact.py -q"
   },
   "engines": {
     "node": ">=18"

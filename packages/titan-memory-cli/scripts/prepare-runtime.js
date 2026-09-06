@@ -22,6 +22,7 @@ const runtimePaths = [
   'entrypoints/main.py',
   'entrypoints/mcp_server.py',
   'integrations/__init__.py',
+  'integrations/claude_titan_plugin',
   'integrations/codex_titan_plugin',
   'integrations/opencode_titan_plugin/dist/titan_v2_spool_plugin.ts',
   'tools/__init__.py',
@@ -40,10 +41,12 @@ const ignoredNames = new Set([
   'dist',
   'build',
 ]);
+const forbiddenAgentNoteNames = new Set(['AGENTS.md', 'CONTEXT.md']);
 
 function shouldSkip(src) {
   const base = path.basename(src);
   if (ignoredNames.has(base)) return true;
+  if (forbiddenAgentNoteNames.has(base) || /_agents\.md$/i.test(base)) return true;
   if (base.endsWith('.pyc')) return true;
   if (base.endsWith('.pyo')) return true;
   if (base.endsWith('.egg-info')) return true;
