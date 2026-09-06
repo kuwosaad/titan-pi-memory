@@ -104,7 +104,6 @@ titan-one-pager.pdf
 /tools/presentations/build_memory_cross_rerank_deck.py
 
 # Local checkout/report state; keep physical files out of future public adds.
-/AGENTS.md
 /completion/
 /.claude/worktrees/
 

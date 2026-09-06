@@ -135,6 +135,43 @@ federation introduces no new adapters or coordination layer.
 
 ---
 
+## BB memory explorer
+
+Open Titan beside your BB chat to explore existing memories in an interactive
+3D graph. Agent and type filters update the graph and memory list together;
+search and date filters narrow the results further. Hover over a node for a
+preview or click it for details. Memory text stays hidden on the idle graph.
+You can hide the list or jump directly to a numbered results page.
+
+From a source checkout, with BB, Node.js/npm, and Python 3.10+ available:
+
+```bash
+cd integrations/bb_titan_memory_plugin
+npm ci --ignore-scripts
+npm run check
+python3 scripts/install-local.py --install
+```
+
+In the plugin settings, set **Titan root on target host** to your Titan checkout,
+then open **Titan Memory** from a BB thread's panel actions. Set **Shared Titan
+home** only if your data lives outside `~/.titan`.
+
+The explorer is a read-only visual layer; your existing agent integrations
+continue capturing memories. It uses stored embeddings, renders at most 150
+memories and 450 connections, and pauses rendering after interaction. The graph
+is a bounded subset; the paginated list searches the matching stored records.
+Connections represent embedding similarity, not verified factual relationships.
+
+The installer builds outside the repository before switching BB to the new
+release. Use it for updates too: live builds from a checkout on a stalled
+filesystem can block BB's Tailwind scanner.
+
+See the [BB plugin guide](integrations/bb_titan_memory_plugin/README.md) for
+host settings, runtime limits, and development details. This plugin is installed
+separately from the Pi npm package.
+
+---
+
 ## Features
 
 ### Agent memory (always on)
