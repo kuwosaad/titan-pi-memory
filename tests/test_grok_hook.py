@@ -182,16 +182,15 @@ class GrokHookTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
             home.mkdir()
-            # Ensure TITAN_SPOOL_DIR is unset for this call.
-            env = {k: v for k, v in os.environ.items() if k != "TITAN_SPOOL_DIR"}
-            env["HOME"] = str(home)
-            # Drop agent overrides so default "grok" is used.
-            env.pop("TITAN_AGENT_NAME", None)
+            # Ensure TITAN_SPOOL_DIR and agent overrides are unset for this call.
+            env = {k: v for k, v in os.environ.items() if not k.startswith("TITAN_")}
+            env.pop("HOME", None)
             env.pop("GROK_PLUGIN_OPTION_agent_name", None)
 
             stdout = io.StringIO()
-            with patch.dict(os.environ, env, clear=True):
-                # Path.home() reads HOME on Unix.
+            with patch.dict(os.environ, env, clear=True), patch.object(
+                titan_grok_hook.Path, "home", return_value=home
+            ):
                 code = titan_grok_hook.main(
                     io.StringIO(
                         json.dumps(

@@ -32,7 +32,9 @@ class ExecCaptured(Exception):
 
 class GrokMcpLauncherTests(unittest.TestCase):
     def test_runtime_env_ignores_ambient_adapter_home(self):
-        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(os.environ, {"HOME": tmp_dir}):
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
+            launcher.Path, "home", return_value=Path(tmp_dir)
+        ):
             env = launcher.build_runtime_env(
                 "grok",
                 {
@@ -48,7 +50,7 @@ class GrokMcpLauncherTests(unittest.TestCase):
         self.assertEqual(env["TITAN_BASE_DIR"], expected_home)
 
     def test_runtime_env_honors_explicit_grok_home_override(self):
-        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(os.environ, {"HOME": tmp_dir}):
+        with tempfile.TemporaryDirectory() as tmp_dir:
             explicit_home = str(Path(tmp_dir) / "grok-work")
             env = launcher.build_runtime_env(
                 "grok",
@@ -65,7 +67,9 @@ class GrokMcpLauncherTests(unittest.TestCase):
         self.assertEqual(env["TITAN_BASE_DIR"], explicit_home)
 
     def test_launcher_default_agent_ignores_ambient_agent(self):
-        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(os.environ, {"HOME": tmp_dir}):
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
+            launcher.Path, "home", return_value=Path(tmp_dir)
+        ):
             def exec_fn(_file, argv, env):
                 raise ExecCaptured(argv, env)
 
@@ -73,7 +77,6 @@ class GrokMcpLauncherTests(unittest.TestCase):
                 launcher.run(
                     [],
                     base_env={
-                        "HOME": tmp_dir,
                         "TITAN_AGENT_NAME": "codex",
                         "TITAN_HOME": str(Path(tmp_dir) / "codex-home"),
                     },

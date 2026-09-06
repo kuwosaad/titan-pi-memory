@@ -85,10 +85,11 @@ class TestIsolationEnv(unittest.TestCase):
         assert "TITAN_OVERNIGHT_LABEL" in env
 
     def test_isolation_env_custom_label(self):
-        raw = {"isolation": {"label": "custom-label-42", "base_dir": "/tmp/test-overnight"}}
+        base_dir = Path(tempfile.gettempdir()) / "test-overnight"
+        raw = {"isolation": {"label": "custom-label-42", "base_dir": str(base_dir)}}
         m = _resolve_defaults(raw)
         env = isolation_env(m)
-        assert env["TITAN_BASE_DIR"] == "/tmp/test-overnight"
+        assert Path(env["TITAN_BASE_DIR"]) == base_dir
         assert env["TITAN_OVERNIGHT_LABEL"] == "custom-label-42"
 
 

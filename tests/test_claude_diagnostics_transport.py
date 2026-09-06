@@ -32,8 +32,8 @@ class ClaudeDiagnosticsTransportTests(unittest.TestCase):
 
         self.assertEqual(contract["command"], "node")
         self.assertEqual(
-            contract["args"],
-            [str(PLUGIN_ROOT.resolve() / "scripts" / "titan_claude_mcp.js")],
+            [Path(item) for item in contract["args"]],
+            [PLUGIN_ROOT.resolve() / "scripts" / "titan_claude_mcp.js"],
         )
         self.assertEqual(contract["env"]["TITAN_CLAUDE_DATA"], str(data.resolve()))
         self.assertEqual(contract["env"]["TITAN_AGENT_NAME"], CLAUDE_AGENT_NAME)

@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -172,8 +173,11 @@ class CodexHookTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             trace_dir = Path(tmp_dir)
             self._run_hook({"hook_event_name": "UserPromptSubmit", "session_id": "private", "prompt": "hello"}, trace_dir)
-            self.assertEqual(trace_dir.stat().st_mode & 0o777, 0o700)
-            self.assertEqual((trace_dir / "private.jsonl").stat().st_mode & 0o777, 0o600)
+            self.assertTrue(trace_dir.is_dir())
+            self.assertTrue((trace_dir / "private.jsonl").is_file())
+            if os.name == "posix":
+                self.assertEqual(trace_dir.stat().st_mode & 0o777, 0o700)
+                self.assertEqual((trace_dir / "private.jsonl").stat().st_mode & 0o777, 0o600)
 
 
 if __name__ == "__main__":

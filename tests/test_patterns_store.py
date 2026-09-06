@@ -1,4 +1,3 @@
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +6,7 @@ from app.patterns.models import Pattern, PatternEvidence
 from app.patterns.processing import PatternProcessingLedger
 from app.patterns.store import PatternStore, PatternValidationError
 from app.storage.memories import SqliteMemoryRepository
+from app.storage.sqlite import sqlite_connection
 from app.storage.sqlite_schema import ensure_pattern_tables
 
 
@@ -88,7 +88,7 @@ class PatternStoreTests(unittest.TestCase):
     def test_old_application_table_migrates_and_retains_compatibility_fields(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             sqlite_file = Path(tmp_dir) / "memory_store.db"
-            with sqlite3.connect(sqlite_file) as conn:
+            with sqlite_connection(sqlite_file) as conn:
                 conn.execute(
                     """
                     CREATE TABLE pattern_applications (
@@ -120,7 +120,7 @@ class PatternStoreTests(unittest.TestCase):
     def test_pattern_tables_are_created_idempotently(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             sqlite_file = Path(tmp_dir) / "memory_store.db"
-            with sqlite3.connect(sqlite_file) as conn:
+            with sqlite_connection(sqlite_file) as conn:
                 ensure_pattern_tables(conn)
                 ensure_pattern_tables(conn)
                 table_names = {

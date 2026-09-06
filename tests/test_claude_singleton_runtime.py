@@ -39,18 +39,26 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, agent: str = "cl
     return env
 
 
-def _stop(pid: int) -> None:
+def _stop(state) -> None:
     try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
+        httpx.post(
+            f"http://127.0.0.1:{state.port}/shutdown",
+            headers={"X-Titan-Claude-Token": state.token},
+            timeout=1,
+        )
+    except httpx.HTTPError:
+        pass
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
+        if read_state(state.agent_name) is None:
             return
         time.sleep(0.05)
+    if os.name != "nt":
+        try:
+            os.kill(state.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+    raise AssertionError("Claude test daemon did not shut down within five seconds")
 
 
 async def _remote_tools(state) -> list[str]:
@@ -73,7 +81,8 @@ def test_one_daemon_serves_multiple_mcp_clients(monkeypatch, tmp_path):
             assert first == second
             assert len(first) == 18
             assert {"query_memories", "store_trace_event", "get_scene_context"}.issubset(first)
-            assert state_path(state.agent_name).stat().st_mode & 0o077 == 0
+            if os.name != "nt":
+                assert state_path(state.agent_name).stat().st_mode & 0o077 == 0
             unauthorized = httpx.get(f"http://127.0.0.1:{state.port}/health", timeout=1)
             assert unauthorized.status_code == 401
             event = {
@@ -108,7 +117,7 @@ def test_one_daemon_serves_multiple_mcp_clients(monkeypatch, tmp_path):
             )
             assert compact is not None and compact["limit"] == 8
         finally:
-            _stop(state.pid)
+            _stop(state)
 
     asyncio.run(exercise())
 
@@ -133,7 +142,7 @@ def test_stdio_proxy_mirrors_tools_and_blocks_external_pattern_paths(monkeypatch
     finally:
         state = read_state("claude-proxy-test")
         if state:
-            _stop(state.pid)
+            _stop(state)
 
 
 def test_event_submission_uses_owner_or_private_fallback(monkeypatch, tmp_path):
@@ -148,7 +157,8 @@ def test_event_submission_uses_owner_or_private_fallback(monkeypatch, tmp_path):
     assert submit_events([event], name="claude-event-test", timeout=0.05) is False
     files = list((tmp_path / "plugin-data" / "runtime" / "claude-event-test" / "fallback").glob("*.jsonl"))
     assert len(files) == 1
-    assert files[0].stat().st_mode & 0o077 == 0
+    if os.name != "nt":
+        assert files[0].stat().st_mode & 0o077 == 0
 
 
 def test_recall_helper_is_fail_open_and_never_starts_owner(monkeypatch, tmp_path):

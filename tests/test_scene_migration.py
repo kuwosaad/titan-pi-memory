@@ -1,6 +1,5 @@
 import json
 import os
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +7,7 @@ from unittest.mock import patch
 
 from app.runtime.context import reset_runtime_context_cache
 from app.storage.scene_migration import backfill_scene_evidence
+from app.storage.sqlite import sqlite_connection
 from tools.cli.titan import main
 
 
@@ -200,7 +200,7 @@ class SceneEvidenceMigrationTests(unittest.TestCase):
             db_path = root / "out" / "memories" / "memory_store.db"
             db_path.parent.mkdir(parents=True, exist_ok=True)
             self._use_runtime(root, backend="sqlite", db_path=db_path)
-            with sqlite3.connect(db_path) as conn:
+            with sqlite_connection(db_path) as conn:
                 conn.execute(
                     """
                     CREATE TABLE scenes (
@@ -240,7 +240,7 @@ class SceneEvidenceMigrationTests(unittest.TestCase):
 
             report = backfill_scene_evidence(apply=True)
 
-            with sqlite3.connect(db_path) as conn:
+            with sqlite_connection(db_path) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(scenes)").fetchall()}
                 row = conn.execute(
                     "SELECT evidence_version, evidence_status, missing_source_event_ids_json, raw_events_json FROM scenes WHERE scene_id = ?",
@@ -258,7 +258,7 @@ class SceneEvidenceMigrationTests(unittest.TestCase):
             db_path = root / "out" / "memories" / "memory_store.db"
             db_path.parent.mkdir(parents=True, exist_ok=True)
             self._use_runtime(root, backend="sqlite", db_path=db_path)
-            with sqlite3.connect(db_path) as conn:
+            with sqlite_connection(db_path) as conn:
                 conn.execute(
                     """
                     CREATE TABLE scenes (
@@ -292,7 +292,7 @@ class SceneEvidenceMigrationTests(unittest.TestCase):
 
             backfill_scene_evidence(apply=True)
 
-            with sqlite3.connect(db_path) as conn:
+            with sqlite_connection(db_path) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(scenes)").fetchall()}
                 schema_version = conn.execute("SELECT value FROM metadata WHERE key = 'schema_version'").fetchone()[0]
                 views = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'view'")}

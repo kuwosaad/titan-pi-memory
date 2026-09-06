@@ -1,3 +1,5 @@
+import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -5,10 +7,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "integrations" / "grok_titan_plugin" / "scripts" / "titan_grok_tools.py"
+_tools_spec = importlib.util.spec_from_file_location("titan_grok_tools", CLI)
+assert _tools_spec and _tools_spec.loader
+_titan_grok_tools = importlib.util.module_from_spec(_tools_spec)
+_tools_spec.loader.exec_module(_titan_grok_tools)
 
 
 class GrokToolsCliTests(unittest.TestCase):
@@ -50,24 +57,22 @@ class GrokToolsCliTests(unittest.TestCase):
 
     def test_doctor_ignores_ambient_titan_home(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
+            expected_home = Path(tmp_dir) / ".titan" / "agents" / "grok"
             env = {
-                **os.environ,
-                "HOME": tmp_dir,
                 "TITAN_HOME": str(Path(tmp_dir) / "shared-agent-home"),
                 "TITAN_AGENT_NAME": "codex",
             }
-            env.pop("GROK_TITAN_HOME", None)
-            result = subprocess.run(
-                [sys.executable, str(CLI), "--json", "doctor"],
-                check=False,
-                capture_output=True,
-                text=True,
-                env=env,
-            )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads(result.stdout)
+            stdout = io.StringIO()
+            with patch.dict(os.environ, env, clear=True), patch.object(
+                _titan_grok_tools.Path, "home", return_value=Path(tmp_dir)
+            ), patch("sys.stdout", stdout):
+                os.environ.pop("GROK_TITAN_HOME", None)
+                code = _titan_grok_tools.main(["--json", "doctor"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["agent_name"], "grok")
-        self.assertEqual(payload["workspace"], str(Path(tmp_dir) / ".titan" / "agents" / "grok"))
+        self.assertEqual(Path(payload["workspace"]), expected_home)
 
     def test_doctor_honors_explicit_grok_home_override(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

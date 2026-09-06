@@ -187,7 +187,7 @@ def test_fallback_drain_orders_events_by_timestamp_not_filename(monkeypatch, tmp
 def test_pattern_bundle_paths_are_limited_to_dedicated_json_directories(monkeypatch, tmp_path):
     home = tmp_path / "home"
     plugin_data = tmp_path / "plugin-data"
-    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(plugin_data))
     allowed_import = plugin_data / "bundles" / "input.json"
     allowed_import.parent.mkdir(parents=True)

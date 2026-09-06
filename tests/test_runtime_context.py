@@ -83,7 +83,7 @@ def test_hydrated_adapter_identity_survives_later_context_lookups(tmp_path: Path
             "TITAN_PI_DEFAULT_HOME": str(pi_home),
         },
         clear=True,
-    ):
+    ), patch("app.runtime.context.Path.home", return_value=pi_home):
         initial = RuntimeContext.from_environment(
             root_dir=tmp_path,
             adapter_defaults=adapter_defaults,

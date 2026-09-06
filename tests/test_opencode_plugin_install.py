@@ -16,7 +16,10 @@ class OpenCodePluginInstallTests(unittest.TestCase):
             result = install_opencode_plugin(scope="project", root_dir=root)
 
             self.assertEqual(result["status"], "installed")
-            self.assertTrue(result["target_path"].endswith(".opencode/plugins/titan_v2_spool_plugin.ts"))
+            self.assertEqual(
+                Path(result["target_path"]),
+                root / ".opencode" / "plugins" / "titan_v2_spool_plugin.ts",
+            )
             self.assertTrue(Path(result["target_path"]).exists())
 
     def test_global_install_and_idempotency(self):
@@ -33,7 +36,10 @@ class OpenCodePluginInstallTests(unittest.TestCase):
 
             self.assertEqual(first["status"], "installed")
             self.assertEqual(second["status"], "already_up_to_date")
-            self.assertTrue(first["target_path"].startswith(str(global_root)))
+            self.assertEqual(
+                Path(first["target_path"]),
+                global_root / "plugins" / "titan_v2_spool_plugin.ts",
+            )
 
             template.write_text("version-two\n", encoding="utf-8")
             third = install_opencode_plugin(scope="global", root_dir=root, global_config_root=global_root)

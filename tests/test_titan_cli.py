@@ -50,6 +50,9 @@ from tools.cli.titan import (
 )
 
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+
+
 class TitanCliTests(unittest.TestCase):
     def setUp(self):
         # The CLI captures TITAN_HOME when it is imported.  Give every test a
@@ -202,13 +205,14 @@ class TitanCliTests(unittest.TestCase):
         self.assertLess(elapsed, 1.0)
 
     def test_codex_effective_mcp_transport_parses_codex_json_contract(self):
+        effective_cwd = Path(tempfile.gettempdir()) / "titan-cache"
         completed = SimpleNamespace(
             returncode=0,
             stdout=json.dumps({"name": "titan-memory", "transport": {
                 "type": "stdio",
                 "command": "python3",
                 "args": ["./scripts/titan_mcp_launcher.py", "--agent", "codex"],
-                "cwd": "/tmp/titan-cache/.",
+                "cwd": str(effective_cwd),
                 "env": {"TITAN_AGENT_NAME": "codex", "TITAN_CONTRACT_TEST": "yes"},
             }}),
             stderr="",
@@ -223,19 +227,20 @@ class TitanCliTests(unittest.TestCase):
 
         self.assertEqual(transport["command"], "python3")
         self.assertEqual(transport["args"], ["./scripts/titan_mcp_launcher.py", "--agent", "codex"])
-        self.assertEqual(transport["cwd"], "/tmp/titan-cache/.")
+        self.assertEqual(Path(transport["cwd"]), effective_cwd)
         self.assertEqual(transport["env"]["TITAN_CONTRACT_TEST"], "yes")
         # The injected runner receives Codex's exact MCP lookup command.
         self.assertEqual(calls[0], ["codex", "mcp", "get", "titan-memory", "--json"])
 
     def test_codex_effective_mcp_transport_rejects_legacy_placeholder(self):
+        effective_cwd = Path(tempfile.gettempdir()) / "titan-cache"
         completed = SimpleNamespace(
             returncode=0,
             stdout=json.dumps({"transport": {
                 "type": "stdio",
                 "command": "python3",
                 "args": ["${PLUGIN_ROOT}/scripts/titan_mcp_launcher.py"],
-                "cwd": "/tmp/titan-cache/.",
+                "cwd": str(effective_cwd),
                 "env": {},
             }}),
             stderr="",
@@ -339,7 +344,7 @@ class TitanCliTests(unittest.TestCase):
         self.assertEqual(titan["type"], "local")
         self.assertEqual(titan["enabled"], True)
         self.assertEqual(titan["command"][0], "python3")
-        self.assertIn("tools/cli/titan.py", titan["command"][1])
+        self.assertEqual(Path(titan["command"][1]), ROOT_DIR / "tools" / "cli" / "titan.py")
         self.assertEqual(titan["command"][2:], ["mcp", "--agent", "opencode"])
 
     def test_generate_mcp_block_uses_wrapper_command_when_available(self):

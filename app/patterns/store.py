@@ -5,7 +5,7 @@ import threading
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Optional, Sequence
+from typing import Any, ContextManager, List, Optional, Sequence
 
 from app.storage.sqlite_schema import ensure_pattern_tables
 
@@ -43,7 +43,7 @@ class PatternStore:
         self._lock = threading.RLock()
         self._init_schema()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self) -> ContextManager[sqlite3.Connection]:
         return connect_pattern_db(self.db_path)
 
     def _init_schema(self) -> None:

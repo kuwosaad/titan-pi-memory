@@ -21,6 +21,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from app.runtime.context import get_runtime_context
 from .sessions import read_json, write_json
+from .sqlite import sqlite_connection
 from .sqlite_schema import ensure_memory_store_metadata, ensure_scene_readable_views
 
 
@@ -229,8 +230,7 @@ def _load_sqlite_scenes(path: Path) -> List[_SceneRecord]:
     if not path.exists():
         return []
     try:
-        with sqlite3.connect(path) as conn:
-            conn.row_factory = sqlite3.Row
+        with sqlite_connection(path, read_only=True) as conn:
             table = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='scenes'"
             ).fetchone()
@@ -457,8 +457,7 @@ def _ensure_sqlite_evidence_columns(conn: sqlite3.Connection) -> None:
 
 
 def _write_sqlite_scenes(path: Path, updates: Mapping[str, Dict[str, Any]]) -> None:
-    with sqlite3.connect(path) as conn:
-        conn.row_factory = sqlite3.Row
+    with sqlite_connection(path) as conn:
         _ensure_sqlite_evidence_columns(conn)
         for scene_id, scene in updates.items():
             conn.execute(
@@ -509,7 +508,7 @@ def _write_migration_receipt(
         return
     if not sqlite_path.exists():
         return
-    with sqlite3.connect(sqlite_path) as conn:
+    with sqlite_connection(sqlite_path) as conn:
         conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {MIGRATION_TABLE} (

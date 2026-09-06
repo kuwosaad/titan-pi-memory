@@ -1,5 +1,4 @@
 import tempfile
-import sqlite3
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -7,6 +6,7 @@ from unittest.mock import patch
 import app.storage.scenes as scenes
 from app.save_pipeline.pipeline import get_scene_context
 from app.storage.models import SceneReference
+from app.storage.sqlite import sqlite_connection
 
 
 def _sample_scene() -> dict:
@@ -314,7 +314,7 @@ class SceneStoreTests(unittest.TestCase):
     def test_sqlite_repository_migrates_legacy_scene_table_before_indexing(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             sqlite_file = Path(tmp_dir) / "memory_store.db"
-            with sqlite3.connect(sqlite_file) as conn:
+            with sqlite_connection(sqlite_file) as conn:
                 conn.execute(
                     """
                     CREATE TABLE scenes (
@@ -345,8 +345,7 @@ class SceneStoreTests(unittest.TestCase):
             repo = scenes.SqliteSceneRepository(sqlite_file)
             repo.append_scenes([_sample_scene_with_seq("s1:scene:e-1", 1)])
 
-            with sqlite3.connect(sqlite_file) as conn:
-                conn.row_factory = sqlite3.Row
+            with sqlite_connection(sqlite_file) as conn:
                 readable = conn.execute("SELECT * FROM readable_scenes WHERE scene_id = ?", ("s1:scene:e-1",)).fetchone()
                 timeline = conn.execute("SELECT * FROM conversation_timeline WHERE conversation_id = ?", ("s1",)).fetchone()
 

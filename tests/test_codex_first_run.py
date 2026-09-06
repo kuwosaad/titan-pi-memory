@@ -4,6 +4,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -39,12 +40,14 @@ class CodexFirstRunTests(unittest.TestCase):
 
     def test_json_onboarding_is_machine_readable(self):
         stdout = io.StringIO()
-        result = first_run.run(["--agent", "codex", "--json"], stdout=stdout)
+        home = ROOT_DIR / "synthetic-home"
+        with patch.object(first_run.Path, "home", return_value=home):
+            result = first_run.run(["--agent", "codex", "--json"], stdout=stdout)
 
         payload = json.loads(stdout.getvalue())
         self.assertEqual(result, 0)
         self.assertEqual(payload["agent"], "codex")
-        self.assertTrue(payload["agent_home"].endswith("/.titan/agents/codex"))
+        self.assertEqual(Path(payload["agent_home"]), home / ".titan" / "agents" / "codex")
         self.assertGreaterEqual(len(payload["first_prompts"]), 5)
         self.assertEqual(payload["manual_steps"][0]["command"], "/hooks")
 

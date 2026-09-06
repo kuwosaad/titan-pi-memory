@@ -6,7 +6,7 @@ import logging
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ContextManager, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -14,7 +14,7 @@ from .models import Memory
 from .repository import CandidateFilters, MemoryRepository, MemoryStore, LnnStateStore, get_lnn_state_store
 from .sessions import BASE_DIR, MEMORIES_DIR, read_json, write_json
 from . import sessions as _sessions
-from .sqlite import connect_sqlite
+from .sqlite import sqlite_connection
 from .sqlite_schema import ensure_memory_readable_views, ensure_memory_store_metadata, ensure_pattern_tables
 
 
@@ -485,8 +485,8 @@ class SqliteMemoryRepository:
         if initialize:
             self._init_schema()
 
-    def _connect(self) -> sqlite3.Connection:
-        return connect_sqlite(self.db_path, read_only=self._read_only)
+    def _connect(self) -> ContextManager[sqlite3.Connection]:
+        return sqlite_connection(self.db_path, read_only=self._read_only)
 
     def _init_schema(self) -> None:
         ddl = """

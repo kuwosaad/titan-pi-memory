@@ -9,8 +9,9 @@ architecture migration.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 SQLITE_TIMEOUT_SECONDS = 30.0
 
@@ -50,3 +51,21 @@ def connect_sqlite(path: Path, *, read_only: bool = False) -> sqlite3.Connection
     conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     return conn
+
+
+@contextmanager
+def sqlite_connection(path: Path, *, read_only: bool = False) -> Iterator[sqlite3.Connection]:
+    """Use a SQLite connection transactionally and close it deterministically.
+
+    ``sqlite3.Connection`` itself commits or rolls back when used as a context
+    manager, but it deliberately leaves the connection open.  Keep that
+    transaction behavior while ensuring every storage operation releases its
+    database handle on both success and error.
+    """
+
+    conn = connect_sqlite(path, read_only=read_only)
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()

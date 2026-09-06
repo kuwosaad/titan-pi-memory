@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from app.patterns.api import PatternEvidencePacketRequest
 from app.patterns.processing import PatternProcessingLedger
 from app.storage.memories import SqliteMemoryRepository
+from app.storage.sqlite import sqlite_connection
 from entrypoints.main import app
 
 
@@ -398,7 +399,7 @@ class PatternApiTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 400)
             run_id = response.json()["detail"]["run_id"]
-            with sqlite3.connect(sqlite_file) as conn:
+            with sqlite_connection(sqlite_file) as conn:
                 row = conn.execute("SELECT status, error FROM pattern_mining_runs WHERE id = ?", (run_id,)).fetchone()
             self.assertEqual(row[0], "failed")
             self.assertIn("Invalid pattern memory processing status", row[1])

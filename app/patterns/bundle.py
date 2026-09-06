@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from pydantic import ValidationError
 
+from app.storage.sqlite import sqlite_connection
 from app.storage.sqlite_schema import ensure_pattern_tables
 
 from .models import Pattern, PatternEvidence
@@ -178,8 +179,7 @@ def _memory_summaries(path: Path, memory_ids: Sequence[str], redaction_counts: D
     if not memory_ids:
         return []
     placeholders = ",".join("?" for _ in memory_ids)
-    with sqlite3.connect(path) as conn:
-        conn.row_factory = sqlite3.Row
+    with sqlite_connection(path, read_only=True) as conn:
         if not _table_exists(conn, "memories"):
             return []
         rows = conn.execute(
@@ -241,8 +241,7 @@ def _export_progress(path: Path, memory_ids: Sequence[str], pattern_ids: Sequenc
     if not memory_ids and not pattern_ids:
         return {"mining_runs": [], "memory_processing": []}
     processing_rows: list[dict[str, Any]] = []
-    with sqlite3.connect(path) as conn:
-        conn.row_factory = sqlite3.Row
+    with sqlite_connection(path) as conn:
         ensure_pattern_tables(conn)
         clauses: list[str] = []
         params: list[Any] = []
@@ -290,7 +289,7 @@ def _import_progress(path: Path, progress: Dict[str, Any]) -> int:
     runs = progress.get("mining_runs") if isinstance(progress.get("mining_runs"), list) else []
     records = progress.get("memory_processing") if isinstance(progress.get("memory_processing"), list) else []
     imported = 0
-    with sqlite3.connect(path) as conn:
+    with sqlite_connection(path) as conn:
         ensure_pattern_tables(conn)
         for run in runs:
             if not isinstance(run, dict) or not run.get("id"):
@@ -378,7 +377,7 @@ def _processing_row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
 
 
 def _delete_pattern(path: Path, pattern_id: str) -> None:
-    with sqlite3.connect(path) as conn:
+    with sqlite_connection(path) as conn:
         ensure_pattern_tables(conn)
         conn.execute("DELETE FROM patterns WHERE id = ?", (pattern_id,))
         conn.commit()

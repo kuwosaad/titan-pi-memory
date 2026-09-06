@@ -8,6 +8,7 @@ import numpy as np
 
 import app.storage.memories as memories
 from app.storage.repository import CandidateFilters
+from app.storage.sqlite import sqlite_connection
 
 
 def _sample_records() -> list[dict]:
@@ -142,6 +143,42 @@ class MemoryStoreSqliteTests(unittest.TestCase):
         decoded = memories.unpack_embedding(blob, dim, dtype)
         self.assertTrue(np.allclose(decoded, vector, atol=1e-7))
 
+    def test_sqlite_connection_commits_and_closes_on_success(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            with sqlite_connection(sqlite_file) as conn:
+                conn.execute("CREATE TABLE values_table (value INTEGER NOT NULL)")
+                conn.execute("INSERT INTO values_table VALUES (1)")
+
+            with self.assertRaises(sqlite3.ProgrammingError):
+                conn.execute("SELECT 1")
+
+            verification = sqlite3.connect(sqlite_file)
+            try:
+                self.assertEqual(verification.execute("SELECT value FROM values_table").fetchone()[0], 1)
+            finally:
+                verification.close()
+
+    def test_sqlite_connection_rolls_back_and_closes_on_error(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            with sqlite_connection(sqlite_file) as conn:
+                conn.execute("CREATE TABLE values_table (value INTEGER NOT NULL)")
+
+            with self.assertRaisesRegex(RuntimeError, "abort transaction"):
+                with sqlite_connection(sqlite_file) as failed_conn:
+                    failed_conn.execute("INSERT INTO values_table VALUES (1)")
+                    raise RuntimeError("abort transaction")
+
+            with self.assertRaises(sqlite3.ProgrammingError):
+                failed_conn.execute("SELECT 1")
+
+            verification = sqlite3.connect(sqlite_file)
+            try:
+                self.assertEqual(verification.execute("SELECT COUNT(*) FROM values_table").fetchone()[0], 0)
+            finally:
+                verification.close()
+
     def test_json_and_sqlite_repository_parity_for_recent_and_count(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
@@ -185,7 +222,7 @@ class MemoryStoreSqliteTests(unittest.TestCase):
             repo = memories.SqliteMemoryRepository(sqlite_file)
             repo.append_memories(_sample_records())
 
-            with sqlite3.connect(sqlite_file) as conn:
+            with sqlite_connection(sqlite_file) as conn:
                 conn.row_factory = sqlite3.Row
                 metadata = {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM metadata")}
                 row = conn.execute("SELECT * FROM readable_memories WHERE memory_id = ?", ("s1:1:0",)).fetchone()

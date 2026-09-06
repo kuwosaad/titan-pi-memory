@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -13,6 +14,12 @@ PACKAGE_VERSION = json.loads((PACKAGE_DIR / "package.json").read_text(encoding="
 
 
 class NpmTitanMemoryCliPackageTests(unittest.TestCase):
+    def _npm_executable(self) -> str:
+        npm = shutil.which("npm") or shutil.which("npm.cmd")
+        self.assertTrue(npm, "npm executable not found on PATH")
+        assert npm is not None
+        return npm
+
     def test_mcp_dependency_is_pinned_to_supported_fastmcp_v1_api(self):
         expected = "mcp>=1.5.0,<2"
         self.assertIn(expected, (ROOT_DIR / "requirements.txt").read_text(encoding="utf-8"))
@@ -142,7 +149,7 @@ class NpmTitanMemoryCliPackageTests(unittest.TestCase):
         self.assertEqual(prepared.returncode, 0, prepared.stderr)
 
         packed = subprocess.run(
-            ["npm", "pack", "--dry-run", "--json", "--ignore-scripts"],
+            [self._npm_executable(), "pack", "--dry-run", "--json", "--ignore-scripts"],
             cwd=PACKAGE_DIR,
             capture_output=True,
             text=True,
@@ -274,7 +281,7 @@ class NpmTitanMemoryCliPackageTests(unittest.TestCase):
             current.write_text(json.dumps(legacy, indent=2) + "\n", encoding="utf-8")
             env = os.environ.copy()
             env.update({
-                "HOME": str(root / "home"),
+                "TITAN_HOME": str(root / "titan-home"),
                 "CODEX_HOME": str(root / "codex"),
                 "TITAN_RUNTIME_HOME": str(runtime_home),
                 "TITAN_NPM_NO_VENV": "1",
@@ -295,7 +302,7 @@ class NpmTitanMemoryCliPackageTests(unittest.TestCase):
             runtime_home = root / "runtime"
             env = os.environ.copy()
             env.update({
-                "HOME": str(root / "home"),
+                "TITAN_HOME": str(root / "titan-home"),
                 "CODEX_HOME": str(root / "codex"),
                 "TITAN_RUNTIME_HOME": str(runtime_home),
                 "TITAN_NPM_NO_VENV": "1",
