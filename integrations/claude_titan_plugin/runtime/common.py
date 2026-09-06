@@ -25,6 +25,47 @@ except ImportError:  # pragma: no cover - POSIX
     msvcrt = None
 
 
+if os.name == "nt":  # pragma: no cover - Windows CI
+    import ctypes
+    from ctypes import wintypes
+
+    _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    _WINDOWS_PROCESS_MISSING_ERRORS = {6, 87, 1168}  # invalid handle/parameter, not found
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _open_process = _kernel32.OpenProcess
+    _open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _open_process.restype = wintypes.HANDLE
+    _get_exit_code_process = _kernel32.GetExitCodeProcess
+    _get_exit_code_process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    _get_exit_code_process.restype = wintypes.BOOL
+    _close_handle = _kernel32.CloseHandle
+    _close_handle.argtypes = [wintypes.HANDLE]
+    _close_handle.restype = wintypes.BOOL
+
+    def _windows_process_alive(pid: int) -> bool:
+        # os.kill(pid, 0) is not a safe Windows liveness probe: it can
+        # send a console control event or fall through to TerminateProcess.
+        if pid > 0xFFFFFFFF:
+            return False
+        handle = _open_process(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            # Access/query failures are deliberately treated as alive. Only
+            # errors proving that the process object is gone may report dead.
+            return ctypes.get_last_error() not in _WINDOWS_PROCESS_MISSING_ERRORS
+        try:
+            exit_code = wintypes.DWORD()
+            if not _get_exit_code_process(handle, ctypes.byref(exit_code)):
+                return True
+            return exit_code.value == 259  # STILL_ACTIVE
+        finally:
+            _close_handle(handle)
+else:
+
+    def _windows_process_alive(pid: int) -> bool:  # pragma: no cover - defensive
+        raise AssertionError("Windows process probe called on POSIX")
+
+
 @dataclass(frozen=True)
 class RuntimeState:
     pid: int
@@ -124,6 +165,8 @@ def read_state(name: str | None = None) -> RuntimeState | None:
 def process_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        return _windows_process_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

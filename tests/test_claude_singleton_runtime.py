@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -15,7 +16,14 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
 from integrations.claude_titan_plugin.runtime.client import recall_context, submit_events
-from integrations.claude_titan_plugin.runtime.common import read_state, state_path
+from integrations.claude_titan_plugin.runtime.common import (
+    RuntimeState,
+    atomic_write_state,
+    ownership_lock,
+    process_alive,
+    read_state,
+    state_path,
+)
 from integrations.claude_titan_plugin.runtime.daemon import (
     LEASE_TTL_SECONDS,
     RuntimeGateway,
@@ -58,6 +66,20 @@ def _shutdown_diagnostic(response: httpx.Response) -> str:
     return f"{response.status_code} {detail}"
 
 
+def _discard_proven_dead_state(state) -> bool:
+    """Remove only this owner's stale state, never a replacement or live PID."""
+    with ownership_lock(state.agent_name):
+        current = read_state(state.agent_name)
+        if current is None:
+            return True
+        if current.pid != state.pid or current.owner_nonce != state.owner_nonce:
+            return True
+        if process_alive(current.pid):
+            return False
+        state_path(state.agent_name).unlink(missing_ok=True)
+        return True
+
+
 def _stop(state) -> None:
     # A proxy killed by the stdio transport may not close its lease. The daemon
     # must therefore reject shutdown until the documented lease TTL expires.
@@ -70,6 +92,10 @@ def _stop(state) -> None:
     diagnostics: list[str] = []
 
     while time.monotonic() < deadline:
+        # A Windows host job can kill the daemon while leaving daemon.json
+        # behind. A stale file is not evidence that the daemon survived.
+        if _discard_proven_dead_state(state):
+            return
         now = time.monotonic()
         if now >= retry_at and not accepted:
             try:
@@ -108,6 +134,8 @@ def _stop(state) -> None:
         if sleep_for > 0:
             time.sleep(sleep_for)
 
+    if _discard_proven_dead_state(state):
+        return
     if os.name != "nt":
         try:
             os.kill(state.pid, signal.SIGTERM)
@@ -117,6 +145,80 @@ def _stop(state) -> None:
         "Claude test daemon remained after the bounded lease-expiry shutdown budget; "
         f"lease_ttl={LEASE_TTL_SECONDS}s responses={diagnostics}"
     )
+
+
+def test_process_alive_does_not_terminate_a_live_process():
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert process_alive(process.pid)
+        with pytest.raises(subprocess.TimeoutExpired):
+            process.wait(timeout=0.2)
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+    assert not process_alive(process.pid)
+
+
+def test_process_alive_reports_a_dead_process():
+    process = subprocess.Popen([sys.executable, "-c", "pass"])
+    process.wait(timeout=5)
+    assert not process_alive(process.pid)
+
+
+def test_dead_state_cleanup_refuses_live_or_replacement_state(monkeypatch, tmp_path):
+    _configure(monkeypatch, tmp_path, "claude-cleanup-test")
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait(timeout=5)
+    stale = RuntimeState(
+        pid=dead.pid,
+        port=1,
+        token="stale-token",
+        version="test",
+        agent_name="claude-cleanup-test",
+        owner_nonce="stale-owner",
+    )
+    atomic_write_state(stale)
+    assert _discard_proven_dead_state(stale)
+    assert read_state(stale.agent_name) is None
+
+    live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    live_state = RuntimeState(
+        pid=live.pid,
+        port=2,
+        token="live-token",
+        version="test",
+        agent_name="claude-cleanup-test",
+        owner_nonce="live-owner",
+    )
+    try:
+        atomic_write_state(live_state)
+        assert not _discard_proven_dead_state(live_state)
+        assert read_state(live_state.agent_name) == live_state
+    finally:
+        live.terminate()
+        try:
+            live.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            live.kill()
+            live.wait(timeout=5)
+
+    replacement = RuntimeState(
+        pid=dead.pid,
+        port=3,
+        token="replacement-token",
+        version="test",
+        agent_name="claude-cleanup-test",
+        owner_nonce="replacement-owner",
+    )
+    atomic_write_state(stale)
+    atomic_write_state(replacement)
+    assert _discard_proven_dead_state(stale)
+    assert read_state(replacement.agent_name) == replacement
+    state_path(replacement.agent_name).unlink(missing_ok=True)
 
 
 async def _remote_tools(state) -> list[str]:
