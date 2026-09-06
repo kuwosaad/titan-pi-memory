@@ -319,7 +319,9 @@ step1:
 # Deduplication Buffer
 # ──────────────────────────────────────────────
 dedup:
-  enabled: true
+  # Save-time LLM deduplication is intentionally disabled. Memories are
+  # persisted as extracted; retrieval-time display dedup remains enabled.
+  enabled: false
   buffer_window_seconds: 300
   min_buffer_size: 5
   dedup_model: dedup

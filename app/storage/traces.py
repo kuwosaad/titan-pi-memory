@@ -448,6 +448,56 @@ def set_pending_scene_events(session_id: str, events: List[Dict[str, Any]]) -> N
         write_json(PENDING_USER_MESSAGES_FILE, pending)
 
 
+def remove_pending_scene_events(session_id: str, event_ids: List[str]) -> int:
+    """Remove selected pending evidence events for one session.
+
+    The read, filter, and atomic replacement are one locked transaction so a
+    hook and the ingest process cannot overwrite each other's pending events.
+    Missing sessions and event IDs are harmless.  The return value is the
+    number of events actually removed.
+    """
+
+    ids_to_remove = {str(event_id) for event_id in (event_ids or [])}
+    if not ids_to_remove:
+        return 0
+
+    lock_path = PENDING_USER_MESSAGES_FILE.with_name(f".{PENDING_USER_MESSAGES_FILE.name}.lock")
+    with _LOCK, interprocess_lock(lock_path):
+        pending = load_pending_user_messages()
+        record = pending.get(session_id)
+        if not isinstance(record, dict):
+            return 0
+
+        evidence = record.get("scene_evidence")
+        events = evidence.get("events") if isinstance(evidence, dict) else None
+        if not isinstance(events, list):
+            return 0
+
+        remaining = []
+        removed = 0
+        for event in events:
+            event_id = event.get("event_id") if isinstance(event, dict) else None
+            if event_id is not None and str(event_id) in ids_to_remove:
+                removed += 1
+            else:
+                remaining.append(event)
+
+        if not removed:
+            return 0
+
+        if remaining:
+            evidence["events"] = remaining
+        else:
+            record.pop("scene_evidence", None)
+
+        if record:
+            pending[session_id] = record
+        else:
+            pending.pop(session_id, None)
+        write_json(PENDING_USER_MESSAGES_FILE, pending)
+        return removed
+
+
 def clear_pending_user_message(session_id: str) -> None:
     with _LOCK, interprocess_lock(PENDING_USER_MESSAGES_FILE.with_name(f".{PENDING_USER_MESSAGES_FILE.name}.lock")):
         pending = load_pending_user_messages()

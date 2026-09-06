@@ -35,7 +35,8 @@ gemini:
   request_timeout: 300
 
 dedup:
-  enabled: true
+  # Model settings only; activation is controlled by config/settings.yaml.
+  enabled: false
   backend: opencode_go
   api_key_env: OPENCODE_GO_API_KEY
   base_url: https://opencode.ai/zen/go/v1

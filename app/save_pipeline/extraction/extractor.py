@@ -262,6 +262,21 @@ def infer_stream(text: str, mem_type: str | None = None) -> str:
     return "learnings"
 
 
+def _normalize_evidence_refs(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple, set)):
+        value = [value]
+    refs: List[str] = []
+    seen: set[str] = set()
+    for item in value:
+        ref = str(item or "").strip()
+        if ref and ref not in seen:
+            refs.append(ref)
+            seen.add(ref)
+    return refs
+
+
 def sanitize_memories(
     memories: List[dict],
     *,
@@ -308,6 +323,7 @@ def sanitize_memories(
                 "reliability": mem.get("reliability"),
                 "speaker_focus": speaker_focus,
                 "memory_kind": mem.get("memory_kind") or memory_kind,
+                "evidence_refs": _normalize_evidence_refs(mem.get("evidence_refs")),
             }
         )
         seen.add(normalized_text)
@@ -426,6 +442,7 @@ def extract_atomic_memories(user_text: str, assistant_text: str, adapter: Extrac
                     "reliability": reliability,
                     "speaker_focus": item.get("speaker_focus") or (source if source in {"user", "assistant"} else None),
                     "memory_kind": item.get("memory_kind"),
+                    "evidence_refs": _normalize_evidence_refs(item.get("evidence_refs")),
                 }
             )
         else:
@@ -439,6 +456,7 @@ def extract_atomic_memories(user_text: str, assistant_text: str, adapter: Extrac
                     "reliability": reliability,
                     "speaker_focus": None,
                     "memory_kind": None,
+                    "evidence_refs": [],
                 }
             )
 

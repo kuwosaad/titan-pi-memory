@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Dict, List
+from typing import Callable, Dict, List
 
 from fastapi import FastAPI
 
@@ -45,7 +45,12 @@ def ingest_available_sessions(spool_dir: Path) -> Dict[str, Dict[str, int]]:
     return results
 
 
-def _auto_ingest_loop(stop_event: threading.Event, spool_dir: Path, interval_seconds: float) -> None:
+def _auto_ingest_loop(
+    stop_event: threading.Event,
+    spool_dir: Path,
+    interval_seconds: float,
+    maintenance_callback: Callable[[], object] | None = None,
+) -> None:
     while not stop_event.is_set():
         results = ingest_available_sessions(spool_dir)
         for session_id, counts in results.items():
@@ -61,14 +66,24 @@ def _auto_ingest_loop(stop_event: threading.Event, spool_dir: Path, interval_sec
                 counts.get("skipped_low_signal", 0),
                 counts.get("retry_queue_size", 0),
             )
+        if maintenance_callback is not None:
+            try:
+                maintenance_callback()
+            except Exception:
+                logger.exception("Auto-ingest maintenance callback failed")
         stop_event.wait(interval_seconds)
 
 
-def start_auto_ingest_worker(app, spool_dir: Path, interval_seconds: float = 3.0) -> None:
+def start_auto_ingest_worker(
+    app,
+    spool_dir: Path,
+    interval_seconds: float = 3.0,
+    maintenance_callback: Callable[[], object] | None = None,
+) -> None:
     stop_event = threading.Event()
     worker = threading.Thread(
         target=_auto_ingest_loop,
-        args=(stop_event, spool_dir, interval_seconds),
+        args=(stop_event, spool_dir, interval_seconds, maintenance_callback),
         daemon=True,
         name="titan-auto-ingest",
     )

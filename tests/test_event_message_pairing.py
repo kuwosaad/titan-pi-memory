@@ -1,4 +1,5 @@
 import unittest
+from contextlib import ExitStack
 from unittest.mock import patch
 
 from app.save_pipeline import pipeline
@@ -43,6 +44,35 @@ def _message_part_event(seq: int, event_id: str, message_id: str, text: str) -> 
 
 
 class EventMessagePairingTests(unittest.TestCase):
+    def setUp(self):
+        # Pairing tests exercise projection only. Keep retries, pending evidence,
+        # and scene persistence in-memory so test event IDs cannot touch a
+        # developer's or another worker's Titan namespace.
+        self._state_patches = ExitStack()
+        for name, value in (
+            ("append_scene", None),
+            ("_retry_failed_extractions", {"retried_memories": 0, "recovered_retries": 0, "fallback_memories": 0}),
+            ("_load_pending_scene_events", []),
+            ("_save_pending_scene_events", None),
+            ("load_events_for_session", []),
+            ("get_pending_user_message", ""),
+            ("get_pending_user_message_seq", 0),
+            ("set_pending_user_message", None),
+            ("clear_pending_user_message", None),
+            ("set_pending_scene_events", None),
+            ("mark_scene_events_finalized", None),
+            ("append_retry_entry", None),
+            ("remove_retry_entries", None),
+        ):
+            if isinstance(value, dict):
+                replacement = patch.object(pipeline, name, return_value=value)
+            elif value is None:
+                replacement = patch.object(pipeline, name)
+            else:
+                replacement = patch.object(pipeline, name, return_value=value)
+            self._state_patches.enter_context(replacement)
+        self.addCleanup(self._state_patches.close)
+
     def test_processes_final_assistant_reply_with_parent_user_message(self):
         events = [
             _message_updated_event(1, "e1", "u1", "user"),
@@ -96,7 +126,7 @@ class EventMessagePairingTests(unittest.TestCase):
         self.assertEqual(result["stored_memories"], 1)
         self.assertEqual(
             captured_prompts,
-            [("[approximate prior user context] I need help with a sensitive issue.", "I hear you, and I can help.")],
+            [("I need help with a sensitive issue.", "I hear you, and I can help.")],
         )
 
     def test_skips_assistant_text_when_parent_and_user_context_missing(self):

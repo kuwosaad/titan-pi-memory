@@ -64,8 +64,9 @@ Each memory must:
 - include available anchors such as project, module, file path, command, flag, schema field, event, model, test count, date, or version
 - preserve causality or a tradeoff when it is the useful part of the claim
 - label uncertain inference with the exact prefix "Hypothesis:"
+- when scene evidence references are present, include only the short local labels that support the claim in `evidence_refs`
 
-Keep mechanism, execution outcome, and verification as separate memories only when each is independently useful. Prefer direct wording over pronouns, transcript language, semicolon chains, and bundled summaries. Emit no paraphrase duplicates.
+Keep mechanism, execution outcome, and verification as separate memories only when each is independently useful. Prefer direct wording over pronouns, transcript language, semicolon chains, and bundled summaries. Emit no paraphrase duplicates. Never cite a tool reference for a claim unless the tool evidence directly supports that claim.
 </memory_contract>"""
 
 
@@ -93,9 +94,9 @@ If an exchange contradicts an older state, write an explicit update containing "
 
 OUTPUT_BLOCK = """<output_format>
 Return strict JSON exactly matching:
-{"memories": [{"text": string, "type": string, "stream": "rough"|"learnings", "source": "user"|"assistant"|"mixed", "speaker_focus": "user"|"assistant"|"shared"|"system", "memory_kind": "user_fact"|"user_preference"|"task"|"decision"|"commitment"|"outcome"|"relationship"|"workflow"|"issue"}]}
+{"memories": [{"text": string, "type": string, "stream": "rough"|"learnings", "source": "user"|"assistant"|"mixed", "speaker_focus": "user"|"assistant"|"shared"|"system", "memory_kind": "user_fact"|"user_preference"|"task"|"decision"|"commitment"|"outcome"|"relationship"|"workflow"|"issue", "evidence_refs": [string]}]}
 
-Use the smallest useful set, usually 0 to 4 memories and never more than 10. Use {"memories": []} when nothing qualifies. Add no keys, commentary, reasoning, or Markdown.
+`evidence_refs` uses only the short labels shown in the scene projection, such as `m1` for a projected message or `t1` for compact tool evidence. Omit it only when no label can honestly support the memory. Never invent labels or use event IDs that are not shown. Use the smallest useful set, usually 0 to 4 memories and never more than 10. Use {"memories": []} when nothing qualifies. Add no keys, commentary, reasoning, or Markdown.
 </output_format>"""
 
 

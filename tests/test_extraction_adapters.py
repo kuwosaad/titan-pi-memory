@@ -26,7 +26,14 @@ class GeminiExtractionAdapterTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "sk-test"}, clear=False):
+            with patch.dict(
+                os.environ,
+                {
+                    "OPENCODE_GO_API_KEY": "sk-test",
+                    "TITAN_EXTRACTION_CONFIG_PATH": str(config_path),
+                },
+                clear=False,
+            ):
                 adapter = get_extraction_adapter(str(config_path))
 
         self.assertEqual(adapter.model, "deepseek-v4-flash")
@@ -55,7 +62,14 @@ class GeminiExtractionAdapterTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "sk-test"}, clear=False):
+            with patch.dict(
+                os.environ,
+                {
+                    "OPENCODE_GO_API_KEY": "sk-test",
+                    "TITAN_EXTRACTION_CONFIG_PATH": str(config_path),
+                },
+                clear=False,
+            ):
                 adapter = get_dedup_adapter(str(config_path))
 
         self.assertEqual(adapter.model, "deepseek-v4-flash")

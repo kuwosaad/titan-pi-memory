@@ -81,7 +81,6 @@ from app.storage.traces import (
     clear_pending_user_message,
 )
 from app.storage.verifier import get_verifier
-from app.save_pipeline.dedup_buffer import add_to_dedup_buffer
 import logging
 
 
@@ -104,16 +103,6 @@ Context: $context_block
 )
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _is_dedup_active(settings: Optional[Dict[str, Any]] = None) -> bool:
-    env_val = os.getenv("TITAN_DEDUP_ENABLED")
-    if env_val is not None:
-        return env_val.strip().lower() not in {"0", "false", "no", "off"}
-    if settings is not None:
-        return bool(settings.get("dedup", {}).get("enabled", False))
-    from app.retrieval_pipeline.config import load_settings
-    return bool(load_settings().get("dedup", {}).get("enabled", False))
 
 
 def run_memory_pipeline(
@@ -216,6 +205,11 @@ def run_memory_pipeline_outcome(
         vector = vectors[idx] if idx < len(vectors) else None
         source_type = mem.get("source", "unknown")
         source_reliability = mem.get("reliability", 0.5)
+        memory_source_event_ids = _source_event_ids_for_memory(
+            mem,
+            scene=scene,
+            fallback_source_event_ids=source_event_ids,
+        )
 
         verification_status = "unverified"
         if verification_enabled and source_type != "user":
@@ -236,7 +230,7 @@ def run_memory_pipeline_outcome(
                 memory_type=mem.get("type"),
                 stream=mem.get("stream", "rough"),
                 embedding=vector.tolist() if vector is not None else None,
-                source_event_ids=source_event_ids,
+                source_event_ids=memory_source_event_ids,
                 source_type=source_type,
                 source_reliability=source_reliability,
                 verification_status=verification_status,
@@ -247,8 +241,6 @@ def run_memory_pipeline_outcome(
         )
 
     append_memories(records)
-    if _is_dedup_active(settings):
-        add_to_dedup_buffer(records)
     if scene is not None and persist_scene:
         append_scene(scene)
     append_memory_notes(records)
@@ -732,11 +724,37 @@ def _pending_scene_waits_for_assistant(
 
 
 def _is_explicit_scene_boundary_event(event: Dict[str, Any]) -> bool:
-    boundary_types = {"session_end", "session_ended", "session_idle", "session_complete", "session_completed"}
-    if str(event.get("event_type") or "").lower() in boundary_types:
+    """Recognize genuine session/lifecycle boundaries, not turn completion.
+
+    Adapters use both canonical event types and provider-specific raw names for
+    session close.  Normalize those spellings here so an unmatched evidence
+    buffer is flushed consistently.  ``turn_complete`` is deliberately not a
+    session boundary: a later event may still arrive for the same session.
+    """
+
+    boundary_types = {
+        "session_end",
+        "session_ended",
+        "session_idle",
+        "session_complete",
+        "session_completed",
+        "session_closed",
+        "session_shutdown",
+    }
+    if str(event.get("event_type") or "").strip().lower() in boundary_types:
         return True
-    raw_type = str((event.get("payload") or {}).get("raw_type") or "").lower()
-    return raw_type in {"session.idle", "session.ended", "session.completed"}
+    raw_type = str((event.get("payload") or {}).get("raw_type") or "").strip().lower()
+    return raw_type in {
+        "session.idle",
+        "session.ended",
+        "session.completed",
+        "session.end",
+        "session_end",
+        "session.closed",
+        "session_closed",
+        "session.shutdown",
+        "session_shutdown",
+    }
 
 
 class SceneEvidenceAssembler:
@@ -923,6 +941,58 @@ def _source_event_ids_by_message_id(events: List[Dict[str, Any]]) -> Dict[str, s
     return {message_id: value[1] for message_id, value in result.items()}
 
 
+def _discard_message_context_before_boundary(
+    role_by_message_id: Dict[str, str],
+    parent_by_message_id: Dict[str, str],
+    latest_text_by_message_id: Dict[str, str],
+    session_events: List[Dict[str, Any]],
+    source_event_id_by_message_id: Dict[str, str],
+    event_lower_bound: Optional[int] = None,
+) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+    """Prevent historical provider context from crossing a closed boundary.
+
+    Message context is reconstructed from the session ledger, which can still
+    contain events from before a close when direct ingestion is used.  Keep
+    provider role classification available for late text-part snapshots, but
+    discard parent/text pairing data unless its carrying event follows the
+    latest recognized boundary.  Once the ledger is pruned, those old IDs
+    disappear naturally.
+    """
+
+    boundary_seqs = [
+        int(event.get("seq") or 0)
+        for event in session_events
+        if _is_explicit_scene_boundary_event(event)
+        and (event_lower_bound is None or int(event.get("seq") or 0) < event_lower_bound)
+    ]
+    if not boundary_seqs:
+        return role_by_message_id, parent_by_message_id, latest_text_by_message_id
+
+    latest_boundary_seq = max(boundary_seqs)
+    event_seq_by_id = {
+        str(event.get("event_id") or ""): int(event.get("seq") or 0)
+        for event in session_events
+        if str(event.get("event_id") or "").strip()
+    }
+
+    def is_after_boundary(message_id: str) -> bool:
+        event_id = source_event_id_by_message_id.get(str(message_id))
+        return bool(event_id and event_seq_by_id.get(event_id, 0) > latest_boundary_seq)
+
+    active_ids = {
+        message_id
+        for message_id in set(role_by_message_id) | set(parent_by_message_id) | set(latest_text_by_message_id)
+        if is_after_boundary(message_id)
+    }
+    return (
+        # Role is classification metadata, not user context; retain it so a
+        # late text-part snapshot can still be recognized after the boundary.
+        dict(role_by_message_id),
+        {message_id: parent for message_id, parent in parent_by_message_id.items() if message_id in active_ids},
+        {message_id: text for message_id, text in latest_text_by_message_id.items() if message_id in active_ids},
+    )
+
+
 _PATH_PATTERN = re.compile(r"(?<![A-Za-z0-9_./-])(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+")
 
 
@@ -1083,6 +1153,297 @@ def _trace_packet_tool_calls(event: Dict[str, Any]) -> List[Dict[str, Any]]:
     return summaries
 
 
+_MAX_SCENE_EXTRACTION_TOOL_BLOCKS = 12
+_MAX_SCENE_EXTRACTION_TOOL_CHARS = 6000
+
+
+def _item_value(item: Any, key: str, default: Any = None) -> Any:
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def _provider_message_id(event: Dict[str, Any]) -> Optional[str]:
+    payload = event.get("payload") or {}
+    body = payload.get("body") or {}
+    properties = body.get("properties") or {}
+    info = properties.get("info") or {}
+    part = properties.get("part") or {}
+    message_id = info.get("id") or part.get("messageID") or part.get("id")
+    return str(message_id) if message_id else None
+
+
+def _strip_trace_tool_block(text: str) -> str:
+    """Remove the unbounded legacy tool JSON from a trace text projection."""
+
+    return re.sub(r"\nTool Calls:.*?(?=\nIntent Phrase:)", "", str(text or ""), flags=re.DOTALL)
+
+
+def _scene_message_projection(
+    raw_events: List[Dict[str, Any]],
+    prompt: Dict[str, Any],
+    *,
+    role_by_message_id: Optional[Dict[str, str]] = None,
+) -> List[SceneMessage]:
+    """Project text-bearing raw evidence into ordered, de-duplicated messages."""
+
+    if str(prompt.get("trace_mode") or "") in {"generic_trace", "telegram_legacy_bridge", "transport_bridge"}:
+        event_id = str(raw_events[-1].get("event_id") or "").strip() or None if raw_events else None
+        return [
+            SceneMessage(
+                role="system",
+                content=_strip_trace_tool_block(str(prompt.get("user_text") or "")),
+                event_id=event_id,
+            ),
+            SceneMessage(role="assistant", content=str(prompt.get("assistant_text") or ""), event_id=event_id),
+        ]
+
+    provider_roles = dict(role_by_message_id or {})
+    provider_text: Dict[str, Dict[str, Any]] = {}
+    candidates: List[Dict[str, Any]] = []
+
+    for event in raw_events:
+        event_type = str(event.get("event_type") or "")
+        payload = event.get("payload") or {}
+        seq = int(event.get("seq") or 0)
+        event_id = str(event.get("event_id") or "").strip() or None
+
+        if event_type in {"user_message", "assistant_message"}:
+            content = str(payload.get("content") or "").strip()
+            if content:
+                candidates.append(
+                    {
+                        "seq": seq,
+                        "role": "user" if event_type == "user_message" else "assistant",
+                        "content": content,
+                        "message_id": payload.get("message_id"),
+                        "event_id": event_id,
+                    }
+                )
+            continue
+
+        message_id = _provider_message_id(event)
+        if not message_id:
+            continue
+        message_id = str(message_id)
+        metadata_message_id, metadata_role, _parent_id = _extract_message_updated_metadata(event)
+        if metadata_message_id and metadata_role:
+            provider_roles[metadata_message_id] = metadata_role
+        role = _event_message_role(event, provider_roles)
+        if role not in {"user", "assistant"}:
+            continue
+
+        _part_message_id, part_text = _extract_message_part(event)
+        text = _extract_message_updated_text(event) or part_text or ""
+        text = str(text).strip()
+        if not text:
+            continue
+        current = provider_text.get(message_id)
+        if current is None:
+            provider_text[message_id] = {
+                "seq": seq,
+                "role": role,
+                "content": text,
+                "message_id": message_id,
+                "event_id": event_id,
+            }
+        elif seq >= int(current.get("seq") or 0):
+            current.update({"seq": seq, "role": role, "content": text, "event_id": event_id})
+
+    candidates.extend(provider_text.values())
+    candidates.sort(key=lambda item: (int(item.get("seq") or 0), str(item.get("event_id") or "")))
+
+    projected: List[SceneMessage] = []
+    seen_messages: set[Tuple[str, str, str]] = set()
+    for candidate in candidates:
+        role = str(candidate.get("role") or "")
+        content = str(candidate.get("content") or "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        message_id = str(candidate.get("message_id") or "")
+        event_id = str(candidate.get("event_id") or "")
+        key = (role, "message" if message_id else "event", message_id or event_id)
+        if (message_id or event_id) and key in seen_messages:
+            continue
+        projected.append(
+            SceneMessage(
+                role=role,
+                content=content,
+                message_id=str(candidate.get("message_id") or "") or None,
+                event_id=str(candidate.get("event_id") or "") or None,
+            )
+        )
+        seen_messages.add(key)
+
+    fallback_user = str(prompt.get("user_text") or "").strip()
+    fallback_assistant = str(prompt.get("assistant_text") or "").strip()
+    if fallback_user and not any(message.role == "user" for message in projected):
+        projected.insert(
+            0,
+            SceneMessage(role="user", content=fallback_user, message_id=None, event_id=None),
+        )
+    if fallback_assistant and not any(message.role == "assistant" for message in projected):
+        projected.append(
+            SceneMessage(role="assistant", content=fallback_assistant, message_id=None, event_id=None),
+        )
+    return projected
+
+
+def _is_tool_evidence_event(event: Dict[str, Any]) -> bool:
+    event_type = str(event.get("event_type") or "").strip()
+    if event_type in {"tool_call", "tool_execution", "tool_result", "file_edit"}:
+        return True
+    raw_type = str((event.get("payload") or {}).get("raw_type") or "").strip()
+    return raw_type.startswith(("tool.", "file."))
+
+
+def _scene_tool_projection_entries(
+    raw_events: List[Dict[str, Any]],
+    tool_calls: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return compact tool evidence plus explicit entries for omitted tools."""
+
+    seq_by_event_id = {
+        str(event.get("event_id") or ""): int(event.get("seq") or 0)
+        for event in raw_events
+        if str(event.get("event_id") or "").strip()
+    }
+    entries: List[Dict[str, Any]] = []
+    seen_event_ids: set[str] = set()
+    for tool_call in tool_calls:
+        event_id = str(_item_value(tool_call, "event_id") or "").strip()
+        if event_id and event_id in seen_event_ids:
+            continue
+        if event_id:
+            seen_event_ids.add(event_id)
+        entries.append(
+            {
+                "event_id": event_id or None,
+                "seq": seq_by_event_id.get(event_id, 0),
+                "name": str(_item_value(tool_call, "name") or "tool"),
+                "status": str(_item_value(tool_call, "status") or "unknown"),
+                "summary": str(_item_value(tool_call, "summary") or "").strip(),
+                "file_paths": list(_item_value(tool_call, "file_paths") or []),
+                "excerpt": str(_item_value(tool_call, "excerpt") or "").strip(),
+                "omitted": not bool(str(_item_value(tool_call, "summary") or "").strip()),
+            }
+        )
+
+    for event in raw_events:
+        if not _is_tool_evidence_event(event):
+            continue
+        event_id = str(event.get("event_id") or "").strip()
+        if not event_id or event_id in seen_event_ids:
+            continue
+        seen_event_ids.add(event_id)
+        entries.append(
+            {
+                "event_id": event_id,
+                "seq": int(event.get("seq") or 0),
+                "name": str((event.get("payload") or {}).get("tool") or "tool"),
+                "status": "unknown",
+                "summary": "",
+                "file_paths": [],
+                "excerpt": "",
+                "omitted": True,
+            }
+        )
+
+    entries.sort(key=lambda item: (int(item.get("seq") or 0), str(item.get("event_id") or "")))
+    return entries
+
+
+def _format_scene_tool_block(index: int, tool: Dict[str, Any]) -> str:
+    ref = f"t{index}"
+    seq = int(tool.get("seq") or 0)
+    event_id = str(tool.get("event_id") or "")
+    summary = _compact_text(tool.get("summary"), limit=300)
+    paths = [_compact_text(path, limit=160) for path in (tool.get("file_paths") or []) if str(path).strip()][:8]
+    path_text = f" paths={', '.join(paths)}" if paths else ""
+    excerpt = _compact_text(tool.get("excerpt"), limit=500)
+    excerpt_text = f" output={excerpt}" if excerpt else ""
+    return f"[scene_tool {ref} seq={seq} event={event_id} status={tool.get('status')}{path_text}] {summary}{excerpt_text}"
+
+
+def _bounded_scene_tool_blocks(tools: List[Dict[str, Any]]) -> Tuple[List[Tuple[int, str]], int]:
+    """Select visible compact tool blocks and one bounded aggregate omission notice."""
+
+    visible: List[Tuple[int, str]] = []
+    omitted_count = sum(1 for tool in tools if tool.get("omitted"))
+    used_chars = 0
+    omission_reserve = 160
+    for index, tool in enumerate(tools, start=1):
+        if tool.get("omitted") or len(visible) >= _MAX_SCENE_EXTRACTION_TOOL_BLOCKS:
+            omitted_count += 0 if tool.get("omitted") else 1
+            continue
+        block = _format_scene_tool_block(index, tool)
+        separator_chars = 2 if visible else 0
+        if used_chars + separator_chars + len(block) + omission_reserve <= _MAX_SCENE_EXTRACTION_TOOL_CHARS:
+            visible.append((index, block))
+            used_chars += separator_chars + len(block)
+        else:
+            omitted_count += 1
+
+    if omitted_count:
+        notice = (
+            f"[scene_tools omitted: {omitted_count} admitted tool records were excluded by the bounded extraction projection; "
+            "raw evidence retained]"
+        )
+        while visible and used_chars + 2 + len(notice) > _MAX_SCENE_EXTRACTION_TOOL_CHARS:
+            _index, block = visible.pop()
+            used_chars -= len(block) + (2 if visible else 0)
+            omitted_count += 1
+            notice = (
+                f"[scene_tools omitted: {omitted_count} admitted tool records were excluded by the bounded extraction projection; "
+                "raw evidence retained]"
+            )
+        visible.append((0, notice))
+    return visible, omitted_count
+
+
+def _build_scene_extraction_projection(
+    messages: List[SceneMessage],
+    tool_calls: List[Dict[str, Any]],
+    raw_events: List[Dict[str, Any]],
+) -> Tuple[str, str]:
+    """Build the exact bounded text projection used by Scene and extraction."""
+
+    tools = _scene_tool_projection_entries(raw_events, tool_calls)
+    user_messages = [message for message in messages if message.role in {"user", "system"} and message.content.strip()]
+    assistant_messages = [message for message in messages if message.role == "assistant" and message.content.strip()]
+
+    # Preserve the compatibility shape for the ordinary one-message exchange.
+    if len(user_messages) == 1 and len(assistant_messages) == 1 and not tools:
+        return user_messages[0].content, assistant_messages[0].content
+
+    event_seq_by_id = {
+        str(event.get("event_id") or ""): int(event.get("seq") or 0)
+        for event in raw_events
+        if str(event.get("event_id") or "").strip()
+    }
+
+    def message_block(ref: str, message: SceneMessage) -> str:
+        seq = event_seq_by_id.get(str(message.event_id or ""), 0)
+        return f"[scene_message {ref} seq={seq} role={message.role}]\n{message.content}"
+
+    user_blocks = [message_block(f"m{index}", message) for index, message in enumerate(messages, start=1) if message.role in {"user", "system"} and message.content.strip()]
+
+    bounded_tool_blocks, _omitted_count = _bounded_scene_tool_blocks(tools)
+
+    # Tool blocks are placed in the assistant-side context because they are
+    # execution evidence, while their sequence numbers preserve their position
+    # relative to the ordered message projection. Raw payloads stay in Scene.
+    assistant_blocks = [message_block(f"m{index}", message) for index, message in enumerate(messages, start=1) if message.role == "assistant" and message.content.strip()]
+    assistant_blocks.extend(block for _index, block in bounded_tool_blocks)
+    if not assistant_blocks:
+        assistant_blocks = ["[scene_assistant_evidence omitted: no assistant text was captured]"]
+
+    user_text = "\n\n".join(user_blocks) or "[scene_user_evidence omitted: no user text was captured]"
+    assistant_text = "\n\n".join(assistant_blocks)
+
+    return user_text, assistant_text
+
+
 def _build_scene_candidate(
     event: Dict[str, Any],
     turn: int,
@@ -1123,10 +1484,11 @@ def _build_scene_candidate(
 
     missing_source_event_ids: List[str] = []
     if event_type == "trace_packet":
-        messages = [
-            SceneMessage(role="system", content=user_text, message_id=None, event_id=event_id),
-            SceneMessage(role="assistant", content=assistant_text, message_id=None, event_id=assistant_event_id),
-        ]
+        messages = _scene_message_projection(
+            raw_events,
+            prompt,
+            role_by_message_id=role_by_message_id,
+        )
         kind = "trace_packet"
     else:
         if not user_message_event_id:
@@ -1135,24 +1497,30 @@ def _build_scene_candidate(
             ).strip()
             if missing_user_event_id:
                 missing_source_event_ids.append(missing_user_event_id)
-        messages = [
-            SceneMessage(role="user", content=user_text, message_id=parent_message_id, event_id=user_message_event_id),
-            SceneMessage(role="assistant", content=assistant_text, message_id=assistant_message_id, event_id=assistant_event_id),
-        ]
+        messages = _scene_message_projection(
+            raw_events,
+            prompt,
+            role_by_message_id=role_by_message_id,
+        )
         kind = "message_exchange"
 
     compact_tool_calls = list(tool_calls or []) + _trace_packet_tool_calls(event)
-    source_event_ids = list(raw_event_ids)
-    for tool_call in compact_tool_calls:
-        tool_event_id = str(tool_call.get("event_id") or "").strip()
-        if tool_event_id and tool_event_id not in source_event_ids:
-            source_event_ids.append(tool_event_id)
-
-    source_event_ids = [event_id for event_id in source_event_ids if event_id]
+    # Scene lineage is the admitted raw-event sequence. A compact tool summary
+    # cannot introduce a source ID that is absent from durable raw evidence.
+    source_event_ids = [event_id for event_id in raw_event_ids if event_id]
     if not source_event_ids and event_id:
         source_event_ids = [event_id]
+    extraction_user_text, extraction_assistant_text = _build_scene_extraction_projection(
+        messages,
+        compact_tool_calls,
+        raw_events,
+    )
     complete_evidence = bool(raw_events) and not missing_source_event_ids and all(
-        message.event_id and message.event_id in source_event_ids for message in messages
+        message.role == "system" or (message.event_id and message.event_id in source_event_ids)
+        for message in messages
+    ) and all(
+        _item_value(tool, "event_id") in source_event_ids
+        for tool in compact_tool_calls
     )
     if complete_evidence:
         start_event_seq = int(raw_events[0].get("seq") or seq or 0) or None
@@ -1177,8 +1545,8 @@ def _build_scene_candidate(
         missing_source_event_ids=missing_source_event_ids,
         messages=messages,
         tool_calls=compact_tool_calls,
-        extraction_user_text=user_text,
-        extraction_assistant_text=assistant_text,
+        extraction_user_text=extraction_user_text,
+        extraction_assistant_text=extraction_assistant_text,
         used_context_fallback=used_context_fallback,
         ts=timestamp,
     )
@@ -1248,6 +1616,79 @@ def _build_pending_raw_event_scene(session_id: str, events: List[Dict[str, Any]]
     )
 
 
+def _scene_evidence_ref_map(scene: Scene) -> Dict[str, str]:
+    """Map prompt-local evidence labels to real event IDs for one Scene."""
+
+    references: Dict[str, str] = {}
+    for index, message in enumerate(scene.messages, start=1):
+        event_id = str(message.event_id or "").strip()
+        if event_id:
+            references[f"m{index}"] = event_id
+
+    tool_entries = _scene_tool_projection_entries(scene.raw_events, scene.tool_calls)
+    visible_tool_blocks, _omitted_count = _bounded_scene_tool_blocks(tool_entries)
+    visible_tool_indexes = {index for index, _block in visible_tool_blocks if index}
+    for index, tool in enumerate(tool_entries, start=1):
+        # Omitted tool markers are deliberately not citeable: they prove only
+        # that evidence was unavailable, not the contents of that evidence.
+        event_id = str(tool.get("event_id") or "").strip()
+        if event_id and index in visible_tool_indexes and not tool.get("omitted"):
+            references[f"t{index}"] = event_id
+
+    # The model sees only local m*/t* labels. Do not accept invented eN labels
+    # or raw event IDs that were never included in the extraction projection.
+    if not (
+        len([message for message in scene.messages if message.role in {"user", "system"} and message.content.strip()]) == 1
+        and len([message for message in scene.messages if message.role == "assistant" and message.content.strip()]) == 1
+        and not tool_entries
+    ):
+        return references
+    return {}
+
+
+def _scene_default_memory_event_ids(scene: Scene) -> List[str]:
+    """Use the latest projected user/assistant messages as conservative support."""
+
+    selected: List[str] = []
+    for role in ("user", "assistant"):
+        for message in reversed(scene.messages):
+            if message.role == role and message.event_id and message.event_id in scene.source_event_ids:
+                selected.append(message.event_id)
+                break
+    if selected:
+        return list(dict.fromkeys(selected))
+    return [str(event_id) for event_id in scene.source_event_ids if str(event_id).strip()]
+
+
+def _source_event_ids_for_memory(
+    memory: Dict[str, Any],
+    *,
+    scene: Optional[Scene],
+    fallback_source_event_ids: Optional[List[str]],
+) -> List[str]:
+    """Resolve model-local refs into a truthful subset of scene event IDs."""
+
+    if scene is None:
+        return list(dict.fromkeys(str(event_id) for event_id in (fallback_source_event_ids or []) if str(event_id).strip()))
+
+    known_ids = {str(event_id).strip() for event_id in scene.source_event_ids if str(event_id).strip()}
+    ref_map = _scene_evidence_ref_map(scene)
+    refs = memory.get("evidence_refs")
+    resolved: List[str] = []
+    if isinstance(refs, (list, tuple, set)):
+        normalized_refs = [str(ref or "").strip() for ref in refs if str(ref or "").strip()]
+        for normalized in normalized_refs:
+            event_id = ref_map.get(normalized)
+            if event_id and event_id in known_ids and event_id not in resolved:
+                resolved.append(event_id)
+        # An explicit but invalid reference is not equivalent to an omitted
+        # reference. Preserve the lack of support instead of silently attaching
+        # the claim to the latest message pair.
+        if normalized_refs:
+            return resolved
+    return [event_id for event_id in _scene_default_memory_event_ids(scene) if event_id in known_ids]
+
+
 def _recap_from_records(records: List[Dict[str, Any]]) -> str:
     texts = [str(record.get("text")) for record in records if record.get("text")]
     if not texts:
@@ -1303,8 +1744,20 @@ def _process_session_events_impl(session_id: str, limit: int = 200) -> Dict[str,
     skip_reasons: Dict[str, int] = {}
     turn = get_next_trace_turn(session_id)
 
+    session_events = load_events_for_session(session_id)
     role_by_message_id, parent_by_message_id, latest_text_by_message_id = load_message_context(session_id)
-    source_event_id_by_message_id = _source_event_ids_by_message_id(load_events_for_session(session_id))
+    source_event_id_by_message_id = _source_event_ids_by_message_id(session_events)
+    role_by_message_id, parent_by_message_id, latest_text_by_message_id = _discard_message_context_before_boundary(
+        role_by_message_id,
+        parent_by_message_id,
+        latest_text_by_message_id,
+        session_events,
+        source_event_id_by_message_id,
+        event_lower_bound=min(
+            (int(item.get("seq") or 0) for item in events),
+            default=None,
+        ),
+    )
     recent_user_text = get_pending_user_message(session_id)
     if not recent_user_text:
         recent_user_text = _latest_pending_user_text(evidence_assembler.events, role_by_message_id)
@@ -1313,11 +1766,19 @@ def _process_session_events_impl(session_id: str, limit: int = 200) -> Dict[str,
     # sessions, this keeps replay/tests isolated from an existing on-disk
     # pending-state file while preserving cross-batch pairing.
     pending_seq = get_pending_user_message_seq(session_id)
+    first_event_seq = min((int(item.get("seq") or 0) for item in events), default=0)
+    pending_crosses_close = any(
+        pending_seq < int(item.get("seq") or 0) < first_event_seq
+        and _is_explicit_scene_boundary_event(item)
+        for item in session_events
+    )
     pending_context_is_stale = bool(
-        pending_seq and events and pending_seq >= min(int(item.get("seq") or 0) for item in events)
+        (pending_seq and events and pending_seq >= first_event_seq) or pending_crosses_close
     )
     if pending_context_is_stale:
         recent_user_text = ""
+        if pending_crosses_close:
+            clear_pending_user_message(session_id)
     pending_tool_calls: List[Dict[str, Any]] = [
         summary
         for pending_event in evidence_assembler.events
@@ -1341,13 +1802,29 @@ def _process_session_events_impl(session_id: str, limit: int = 200) -> Dict[str,
             # checkpoint is advanced later, only after append_scene succeeds.
             update_session_checkpoint(session_id, seq)
         else:
-            if _is_explicit_scene_boundary_event(event) and evidence_assembler.events:
-                boundary_scene = _build_pending_raw_event_scene(session_id, evidence_assembler.events, turn)
-                if boundary_scene is not None:
-                    persisted = append_scene(boundary_scene)
-                    if isinstance(persisted, dict):
-                        boundary_scene = Scene(**persisted)
-                    evidence_assembler.commit(boundary_scene)
+            if _is_explicit_scene_boundary_event(event):
+                if evidence_assembler.events:
+                    boundary_scene = _build_pending_raw_event_scene(session_id, evidence_assembler.events, turn)
+                    if boundary_scene is not None:
+                        persisted = append_scene(boundary_scene)
+                        if isinstance(persisted, dict):
+                            boundary_scene = Scene(**persisted)
+                        evidence_assembler.commit(boundary_scene)
+
+                # A recognized lifecycle boundary closes both durable and
+                # in-memory pairing state.  Without clearing these values, a
+                # later same-session assistant/tool event can inherit context
+                # from the closed episode even when no pending evidence remains.
+                recent_user_text = ""
+                pending_tool_calls = []
+                # Keep role metadata so a later provider text-part snapshot
+                # in this same batch can still be classified.  Clear the
+                # parent/text pairing maps so that classification cannot
+                # resurrect context from the closed episode.
+                parent_by_message_id.clear()
+                latest_text_by_message_id.clear()
+                clear_pending_user_message(session_id)
+
             mark_scene_events_finalized(session_id, [seq])
             update_session_checkpoint(session_id, seq)
 
@@ -1458,9 +1935,9 @@ def _process_session_events_impl(session_id: str, limit: int = 200) -> Dict[str,
                 outcome = run_memory_pipeline_outcome(
                     session_id=session_id,
                     turn=turn,
-                    user_text=prompt["user_text"],
-                    assistant_text=prompt["assistant_text"],
-                    source_event_ids=[event_id] if event_id else None,
+                    user_text=scene.extraction_user_text,
+                    assistant_text=scene.extraction_assistant_text,
+                    source_event_ids=scene.source_event_ids,
                     fallback_enabled=True,
                     scene=scene,
                     persist_scene=False,
