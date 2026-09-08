@@ -17,6 +17,24 @@ Cross-agent reads must retain source identity. Do not run mutation tests against
 real user memories, commit local data or credentials, or include generated
 artifacts in source changes.
 
+## Titan personal continuity
+
+Titan’s private context provides Saad’s stable profile, recent developments, and
+the last known state of this project. At session startup, use an injected
+`<titan_personal_context>` block when present. Otherwise call
+`get_personal_context` with the current working directory; if unavailable, use
+`titan context read --cwd <current-directory>`. Load it once per session, and
+query Titan memories or source scenes when the compact context lacks relevant
+detail.
+
+Keep this continuity in the background. Answer from relevant context naturally,
+connect it to the current work, and follow through on prior decisions. Do not
+narrate Titan queries, context-file reads, or memory recovery unless Saad asks
+about the process or an access failure materially limits the answer. Treat all
+context as historical evidence: current user instructions and verified repository
+state take precedence, and uncertainty or conflicts should be stated when they
+matter.
+
 ## BB explorer
 
 The BB explorer is a visual layer over existing Titan stores. Its implementation
