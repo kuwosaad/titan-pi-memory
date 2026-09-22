@@ -291,15 +291,34 @@ def get_required_provider_envs(root_dir: Path, env: Optional[Dict[str, str]] = N
 def verify_python_dependencies(requirements_path: Path) -> List[str]:
     missing: List[str] = []
     deps: List[str] = []
+    saw_requirement = False
     if requirements_path.exists():
         for raw_line in requirements_path.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
             if not line or line.startswith("#"):
                 continue
-            package = re.split(r"[<>=!~\[]", line, maxsplit=1)[0].strip()
+            requirement, _, marker = line.partition(";")
+            if requirement.strip():
+                saw_requirement = True
+            if marker:
+                match = re.fullmatch(r"\s*python_version\s*([<>=!]+)\s*['\"]([^'\"]+)['\"]\s*", marker)
+                if match:
+                    current = tuple(sys.version_info[:2])
+                    target = tuple(int(part) for part in match.group(2).split(".")[:2])
+                    applies = {
+                        "<": current < target,
+                        "<=": current <= target,
+                        "==": current == target,
+                        "!=": current != target,
+                        ">=": current >= target,
+                        ">": current > target,
+                    }.get(match.group(1), True)
+                    if not applies:
+                        continue
+            package = re.split(r"[<>=!~\[]", requirement, maxsplit=1)[0].strip()
             if package:
                 deps.append(package)
-    if not deps:
+    if not deps and not saw_requirement:
         deps = ["fastapi", "uvicorn", "requests", "pyyaml", "numpy", "networkx", "pydantic", "mcp"]
     for package in deps:
         module_name = _REQUIREMENTS_IMPORT_MAP.get(package.lower(), package.replace("-", "_"))
@@ -3145,60 +3164,6 @@ def run_init(
     voice.info("Tip: `titan setup` is the new command for this. It does the same thing.")
     voice.info("Run: titan setup opencode")
     return 1
-
-    normalized_agent = _normalize_agent_name(agent)
-    agent_home = bootstrap_agent_home(normalized_agent)
-
-    missing_deps = verify_python_dependencies(ROOT_DIR / "requirements.txt")
-    if missing_deps:
-        print(f"[titan] Warning: missing Python dependencies: {', '.join(missing_deps)}")
-        print("[titan] Run: pip install -r requirements.txt")
-    else:
-        print("[titan] Dependency check passed.")
-
-    env_example = ROOT_DIR / ".env.example"
-    env_file = TITAN_HOME / ".env"
-    template_keys = _parse_env_keys_from_example(env_example) if env_example.exists() else []
-    existing_env = _read_agent_effective_env(agent_home, {})
-    missing_template_keys = [key for key in template_keys if not existing_env.get(key)]
-
-    pending_updates: Dict[str, str] = {}
-    if missing_template_keys:
-        print(f"[titan] Warning: missing keys in environment/.env: {', '.join(missing_template_keys)}")
-        print("[titan] Titan can connect now, but extraction may stay limited until you add keys.")
-    else:
-        print("[titan] API key setup already satisfied from environment/.env.")
-
-    provider_info = get_required_provider_envs(ROOT_DIR)
-    required_envs = list(provider_info["required_envs"])
-    warnings = list(provider_info["warnings"])
-
-    effective_env = _read_agent_effective_env(agent_home, pending_updates)
-    missing_required = [name for name in required_envs if not effective_env.get(name)]
-
-    for warning in warnings:
-        print(f"[titan] Warning: {warning}")
-    if missing_required:
-        print(f"[titan] Warning: required provider keys missing for current model config: {', '.join(missing_required)}")
-        print("[titan] Test may fail until provider credentials are configured.")
-
-    install_result = install_opencode_plugin(scope=scope, root_dir=ROOT_DIR)
-    plugin_path = Path(install_result["target_path"])
-    print("[titan] Titan connection files are ready.")
-    print(f"[titan] Plugin {install_result['status']}: {plugin_path}")
-    print(f"[titan] Agent home ({normalized_agent}): {agent_home}")
-    print(f"[titan] Trace directory: {resolve_effective_spool_dir(normalized_agent)}")
-    print()
-    print(generate_agent_connection_guide(example_agent=normalized_agent))
-    print()
-    print("[titan] Next steps:")
-    print("1. Save the JSON block above in OpenCode config.")
-    print("2. Restart OpenCode.")
-    print("3. Use OpenCode normally.")
-    print(f"4. Run `{_doctor_command_for_agent(normalized_agent)}` to verify capture.")
-    if missing_required:
-        print(f"[titan] Optional next step: run `titan key set {missing_required[0]}` to enable the current model backend.")
-    return 0
 
 
 def run_doctor(*, agent: str = DEFAULT_AGENT_NAME) -> int:

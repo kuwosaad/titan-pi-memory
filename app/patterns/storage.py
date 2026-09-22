@@ -8,14 +8,11 @@ The schema itself remains owned by :mod:`app.storage.sqlite_schema`.
 from __future__ import annotations
 
 import sqlite3
-from contextlib import contextmanager
 from pathlib import Path
-from typing import ContextManager, Iterator, Optional
+from typing import ContextManager, Optional
 
 from app.storage.memories import _resolve_sqlite_path
 from app.storage.sqlite import sqlite_connection
-
-SQLITE_TIMEOUT_SECONDS = 30.0
 
 
 def resolve_pattern_db_path() -> Path:
@@ -30,9 +27,3 @@ def connect_pattern_db(db_path: Optional[Path] = None) -> ContextManager[sqlite3
     path = Path(db_path) if db_path is not None else resolve_pattern_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     return sqlite_connection(path)
-
-
-@contextmanager
-def pattern_connection(db_path: Optional[Path] = None) -> Iterator[sqlite3.Connection]:
-    with connect_pattern_db(db_path) as conn:
-        yield conn

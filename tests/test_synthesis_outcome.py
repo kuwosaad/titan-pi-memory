@@ -29,8 +29,7 @@ def _make_scene(tool_calls=None):
 
 class SynthesisOutcomeTests(unittest.TestCase):
     def setUp(self):
-        self.verifier = Mock()
-        self.verifier.verify_memory.return_value = Mock(verified=False, confidence=0.0)
+        pass
 
     def _run(self, scene, settings=None, extracted=None):
         if extracted is None:
@@ -44,7 +43,6 @@ class SynthesisOutcomeTests(unittest.TestCase):
                 )
             )
             stack.enter_context(patch("app.save_pipeline.pipeline.embed", return_value=[]))
-            stack.enter_context(patch("app.save_pipeline.pipeline.get_verifier", return_value=self.verifier))
             stack.enter_context(patch("app.save_pipeline.pipeline.append_memories"))
             # These tests inspect derived records, not scene persistence. Each
             # fixture reuses a scene ID, so keep writes isolated as well.

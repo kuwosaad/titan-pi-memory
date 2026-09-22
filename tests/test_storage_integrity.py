@@ -195,21 +195,28 @@ class StorageIntegrityTests(unittest.TestCase):
             root = Path(tmp_dir)
             for repo in self._memory_repositories(root):
                 record = _memory()
-                repo.append_memories([record, dict(record)])
+                stateful = {**record, "h": 0.7, "tau": 0.8, "outgoing_weights": {"other": 0.6}}
+                repo.append_memories([stateful, dict(stateful)])
                 self.assertEqual(repo.get_memory_count(), 1)
 
-                repo.update_lnn_state(
-                    record["id"],
-                    h=0.7,
-                    tau=0.8,
-                    outgoing_weights={"other": 0.6},
-                )
-                replay = {**record, "ts": "2026-09-05T00:03:00+00:00", "h": 0.0, "tau": 0.5}
+                replay = {**stateful, "ts": "2026-09-05T00:03:00+00:00", "h": 0.0, "tau": 0.5}
                 repo.append_memories([replay])
                 loaded = repo.get_recent_memories(limit=1)[0]
                 self.assertEqual(loaded["h"], 0.7)
                 self.assertEqual(loaded["tau"], 0.8)
                 self.assertEqual(loaded["outgoing_weights"], {"other": 0.6})
+
+    def test_existing_lnn_columns_remain_readable_without_runtime_state_api(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "memories.db"
+            repo = SqliteMemoryRepository(db_path)
+            record = {**_memory(), "h": 0.42, "tau": 0.73, "outgoing_weights": {"other": 0.91}, "incoming_weights": {"prior": 0.37}}
+            repo.append_memories([record])
+            loaded = repo.query_by_ids([record["id"]])[record["id"]]
+            self.assertEqual(loaded["h"], 0.42)
+            self.assertEqual(loaded["tau"], 0.73)
+            self.assertEqual(loaded["outgoing_weights"], {"other": 0.91})
+            self.assertEqual(loaded["incoming_weights"], {"prior": 0.37})
 
     def test_json_historical_duplicate_rows_are_preserved_while_new_ids_still_append(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -223,16 +223,16 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
             {"decision-enable", "decision-disable"},
         )
 
-    @patch("app.retrieval_pipeline.retriever._step2_1_rerank")
+    @patch("app.retrieval_pipeline.retriever._select_diverse_hits")
     @patch("app.retrieval_pipeline.config.load_settings")
     @patch("app.retrieval_pipeline.retriever.embed")
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
-    def test_configured_rerank_pool_bounds_step2_candidates(
+    def test_configured_candidate_pool_bounds_final_selection(
         self,
         mock_query_candidates,
         mock_embed,
         mock_load_settings,
-        mock_step2,
+        mock_select,
     ):
         mock_load_settings.return_value = {
             "retrieval_top_k": 2,
@@ -241,7 +241,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
             "retrieval_session_bias": False,
             "retrieval_rerank_enabled": True,
             "retrieval_rerank_alpha": 1.0,
-            "retrieval_rerank_pool_k": 2,
+            "retrieval_selection": {"enabled": True, "hybrid_candidates_enabled": False, "candidate_pool_k": 2},
             "retrieval": {"min_reliability": 0.0},
             "retrieval_dedup": {"enabled": False},
             "step2": {"attention_mask_enabled": True},
@@ -251,7 +251,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         mock_query_candidates.return_value = [
             {
                 "id": f"m-{index}",
-                "text": f"Distinct retrieval candidate number {index}.",
+                "text": f"Deployment option number {index}.",
                 "stream": "rough",
                 "type": "fact",
                 "session_id": f"s-{index}",
@@ -264,25 +264,23 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
             for index in range(4)
         ]
         mock_embed.return_value = [np.array([1.0, 0.0], dtype=np.float32)]
-        mock_step2.side_effect = lambda hits, *_args, **_kwargs: hits
+        mock_select.side_effect = lambda hits, *_args, **_kwargs: hits
 
-        retrieve_memories(query="retrieval candidate", top_k=2, min_similarity=0.0)
+        retrieve_memories(query="deployment option", top_k=2, min_similarity=0.0)
 
-        step2_hits = mock_step2.call_args.args[0]
-        self.assertEqual(len(step2_hits), 2)
+        selection_hits = mock_select.call_args.args[0]
+        self.assertEqual(len(selection_hits), 2)
 
-    @patch("app.retrieval_pipeline.retriever._step2_1_rerank")
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates")
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
     @patch("app.retrieval_pipeline.retriever.embed")
     @patch("app.retrieval_pipeline.config.load_settings")
-    def test_irrelevant_query_abstains_before_lnn_reranking(
+    def test_irrelevant_query_abstains(
         self,
         mock_load_settings,
         mock_embed,
         mock_lexical_candidates,
         mock_semantic_candidates,
-        mock_step2,
     ):
         mock_load_settings.return_value = {
             "retrieval_top_k": 8,
@@ -328,9 +326,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         )
 
         self.assertEqual(hits, [])
-        mock_step2.assert_not_called()
 
-    @patch("app.retrieval_pipeline.retriever._step2_1_rerank")
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates")
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
     @patch("app.retrieval_pipeline.retriever.embed")
@@ -341,7 +337,6 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         mock_embed,
         mock_lexical_candidates,
         mock_semantic_candidates,
-        mock_step2,
     ):
         mock_load_settings.return_value = {
             "retrieval_top_k": 8,
@@ -384,7 +379,6 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         )
 
         self.assertEqual(hits, [])
-        mock_step2.assert_not_called()
 
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
     @patch("app.retrieval_pipeline.retriever.embed")
@@ -522,16 +516,14 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
             {hit["memory"]["id"] for hit in hits}
         ))
 
-    @patch("app.retrieval_pipeline.retriever._step2_1_rerank")
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
     @patch("app.retrieval_pipeline.retriever.embed")
     @patch("app.retrieval_pipeline.config.load_settings")
-    def test_duplicate_collapse_preserves_best_query_facet_for_rerank_pool(
+    def test_duplicate_collapse_preserves_best_query_facet_for_candidate_pool(
         self,
         mock_load_settings,
         mock_embed,
         mock_candidates,
-        mock_step2,
     ):
         mock_load_settings.return_value = {
             "retrieval_top_k": 1,
@@ -556,6 +548,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
                 "max_query_aspects": 3,
                 "min_aspect_tokens": 2,
                 "multi_aspect_pool_k": 1,
+                "candidate_pool_k": 1,
                 "min_direct_similarity": 0.0,
                 "strong_lexical_coverage": 1.0,
                 "lexical_override_min_similarity": 1.0,
@@ -583,18 +576,14 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
             np.array([1.0, 0.0], dtype=np.float32),
             np.array([0.0, 1.0], dtype=np.float32),
         ]
-        mock_step2.side_effect = lambda hits, *_args, **_kwargs: hits
-
-        retrieve_memories(
+        hits = retrieve_memories(
             query="How should Saad explain things, and what frustrates collaboration?",
             top_k=1,
             min_similarity=0.0,
         )
 
-        rerank_input = mock_step2.call_args.args[0]
-        self.assertEqual([hit["memory"]["id"] for hit in rerank_input], ["second-facet-match"])
+        self.assertEqual([hit["memory"]["id"] for hit in hits], ["second-facet-match"])
 
-    @patch("app.retrieval_pipeline.retriever._step2_1_rerank")
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
     @patch("app.retrieval_pipeline.retriever.embed")
     @patch("app.retrieval_pipeline.config.load_settings")
@@ -603,7 +592,6 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         mock_load_settings,
         mock_embed,
         mock_candidates,
-        mock_step2,
     ):
         mock_load_settings.return_value = {
             "retrieval_top_k": 8,
@@ -656,7 +644,6 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
             memory("decision-disable", "Disable automatic scene expansion for memory queries.", [0.75, 0.40, 0.524], "scene-7", ["event-7"]),
         ]
         mock_embed.return_value = [np.array([1.0, 0.0, 0.0], dtype=np.float32)]
-        mock_step2.side_effect = lambda hits, *_args, **_kwargs: hits
 
         hits = retrieve_memories(query="Takashi Titan recommendation", top_k=8, min_similarity=0.0)
 
@@ -668,7 +655,6 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         self.assertIn("semantic-primary", ids)
         self.assertNotIn("semantic-secondary", ids)
         self.assertTrue({"decision-enable", "decision-disable"}.issubset(ids))
-        mock_step2.assert_called_once()
 
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
     @patch("app.retrieval_pipeline.retriever.embed", side_effect=ConnectionError("embedding unavailable"))

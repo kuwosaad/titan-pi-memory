@@ -6,7 +6,6 @@ import {
   boundSnapshot,
   createRequestGate,
   connectedMemories,
-  layoutGraph,
   mergeWarnings,
   pageTokens,
   shortText,
@@ -41,16 +40,6 @@ test("bounds graph nodes and edges without inventing source edges", () => {
   assert.ok(bounded.edges.length > 0);
   assert.equal(bounded.partial, true);
   assert.ok(bounded.edges.every((edge) => edge.kind === "similarity"));
-});
-
-test("layout is deterministic and finite for a bounded dataset", () => {
-  const memories = [memory(1), memory(2), memory(3)];
-  const edges = [{ source: memories[0].nodeId, target: memories[1].nodeId, kind: "similarity" as const, weight: 0.8 }];
-  const first = layoutGraph(memories, edges);
-  const second = layoutGraph(memories, edges);
-
-  assert.deepEqual(first, second);
-  assert.ok(first.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y)));
 });
 
 test("connections preserve collision-safe qualified node ids", () => {

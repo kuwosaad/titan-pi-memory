@@ -282,9 +282,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=lambda agent, shared_home=None: counts.get(agent, 0),
             ), patch.object(
                 mcp_server, "get_memory_count", return_value=4
-            ), patch.object(mcp_server, "get_memory_repository"), patch.object(
-                mcp_server, "get_lnn_state_repository", return_value=None
-            ), patch.dict(
+            ), patch.object(mcp_server, "get_memory_repository"), patch.dict(
                 mcp_server.os.environ,
                 {
                     "TITAN_AGENT_NAME": "codex",

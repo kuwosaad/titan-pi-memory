@@ -1,6 +1,5 @@
 import sys
 import os
-import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
@@ -31,9 +30,6 @@ os.environ.setdefault("TITAN_BASE_DIR", str(_RUNTIME_CONTEXT.base_dir))
 from app.api.routes import router
 from app.storage.sessions import ensure_dirs
 from app.save_pipeline.auto_ingest import start_auto_ingest_worker, stop_auto_ingest_worker
-from app.save_pipeline.dedup_worker import start_dedup_worker
-from app.save_pipeline.lnn_tick_worker import start_lnn_tick_worker
-from app.retrieval_pipeline.config import load_settings as _load_settings
 
 def _env_true(name: str, default: bool = True) -> bool:
     raw = os.getenv(name)
@@ -59,28 +55,10 @@ async def _startup_auto_ingest() -> None:
         maintenance_callback=maintenance_callback,
     )
 
-    dedup_stop = threading.Event()
-    app.state.dedup_stop_event = dedup_stop
-    start_dedup_worker(dedup_stop)
-
-    settings = _load_settings()
-    if settings.get("lnn", {}).get("enabled") and settings.get("lnn", {}).get("tick_enabled", True):
-        lnn_stop = threading.Event()
-        app.state.lnn_stop_event = lnn_stop
-        tick_interval = float(settings.get("lnn", {}).get("decay_tick_seconds", 60.0))
-        tau_disuse = float(settings.get("lnn", {}).get("tau_disuse_decay", 0.01))
-        weight_decay = float(settings.get("lnn", {}).get("weight_decay", 0.001))
-        start_lnn_tick_worker(lnn_stop, interval_seconds=tick_interval, tau_disuse_decay=tau_disuse, weight_decay=weight_decay)
 
 
 async def _shutdown_auto_ingest() -> None:
     stop_auto_ingest_worker(app)
-    dedup_stop = getattr(app.state, "dedup_stop_event", None)
-    if dedup_stop:
-        dedup_stop.set()
-    lnn_stop = getattr(app.state, "lnn_stop_event", None)
-    if lnn_stop:
-        lnn_stop.set()
 
 
 @asynccontextmanager

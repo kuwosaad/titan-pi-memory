@@ -42,10 +42,6 @@ def namespace_memory_db_path(agent_name: str, titan_home: Optional[Path] = None)
     return root / "out" / "memories" / "memory_store.db"
 
 
-def namespace_memories_json_path(agent_name: str, titan_home: Optional[Path] = None) -> Path:
-    return namespace_memory_db_path(agent_name, titan_home).with_name("memories.json")
-
-
 def discover_agent_namespaces(titan_home: Optional[Path] = None) -> list[str]:
     """Return valid agent workspaces from the shared Titan home."""
 
@@ -150,7 +146,6 @@ class FederatedRecall:
                 + list(self._memory_paths)
                 + list(self._scene_paths)
             )
-            agents_dir = (self._federation_root or (Path.home() / ".titan")) / "agents"
             discovered_sources: list[str] = []
             if not known_sources:
                 discovered_sources = discover_agent_namespaces(self._federation_root)
@@ -291,7 +286,6 @@ class FederatedRecall:
                     top_k=limit,
                     mode=mode or "both",
                     repository=repository,
-                    persist_lnn_state=(source_agent == self.active_agent),
                     **kwargs,
                 )
             except Exception as exc:

@@ -196,9 +196,6 @@ class ScenePipelineTests(unittest.TestCase):
             ts="2026-04-09T00:00:00+00:00",
         )
 
-        verifier = Mock()
-        verifier.verify_memory.return_value = Mock(verified=False, confidence=0.0)
-
         with (
             patch("app.save_pipeline.pipeline.get_extraction_adapter", return_value=object()),
             patch(
@@ -206,7 +203,6 @@ class ScenePipelineTests(unittest.TestCase):
                 return_value=[{"text": "Use session_id and event_id for dedupe.", "stream": "learnings", "type": "decision"}],
             ),
             patch("app.save_pipeline.pipeline.embed", return_value=[]),
-            patch("app.save_pipeline.pipeline.get_verifier", return_value=verifier),
             patch("app.save_pipeline.pipeline.append_memories") as mock_append_memories,
             patch("app.save_pipeline.pipeline.append_scene") as mock_append_scene,
             patch("app.save_pipeline.pipeline.append_memory_notes"),
@@ -362,9 +358,6 @@ class ScenePipelineTests(unittest.TestCase):
             used_context_fallback=False,
             ts="2026-09-05T00:00:00+00:00",
         )
-        verifier = Mock()
-        verifier.verify_memory.return_value = Mock(verified=False, confidence=0.0)
-
         with (
             patch("app.save_pipeline.pipeline.get_extraction_adapter", return_value=object()),
             patch(
@@ -375,7 +368,6 @@ class ScenePipelineTests(unittest.TestCase):
                 ],
             ),
             patch("app.save_pipeline.pipeline.embed", return_value=[]),
-            patch("app.save_pipeline.pipeline.get_verifier", return_value=verifier),
             patch("app.save_pipeline.pipeline.load_settings", return_value={"verification": {"enabled": False}}),
             patch("app.save_pipeline.pipeline.append_memories") as append_memories,
             patch("app.save_pipeline.pipeline.append_scene"),
@@ -1195,9 +1187,6 @@ class ScenePipelineTests(unittest.TestCase):
         self.assertEqual(scene.extraction_assistant_text, long_assistant)
 
     def test_run_memory_pipeline_outcome_persists_immediately_when_legacy_dedup_enabled(self):
-        verifier = Mock()
-        verifier.verify_memory.return_value = Mock(verified=False, confidence=0.0)
-
         with (
             patch("app.save_pipeline.pipeline.get_extraction_adapter", return_value=object()),
             patch(
@@ -1205,7 +1194,6 @@ class ScenePipelineTests(unittest.TestCase):
                 return_value=[{"text": "Use session_id and event_id for dedupe.", "stream": "learnings", "type": "decision"}],
             ),
             patch("app.save_pipeline.pipeline.embed", return_value=[]),
-            patch("app.save_pipeline.pipeline.get_verifier", return_value=verifier),
             patch("app.save_pipeline.pipeline.load_settings", return_value={"verification": {"enabled": False}, "dedup": {"enabled": True}}),
             patch("app.save_pipeline.pipeline.append_memories") as mock_append_memories,
             patch("app.save_pipeline.pipeline.append_memory_notes"),

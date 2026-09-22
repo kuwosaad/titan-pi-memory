@@ -133,14 +133,14 @@ def test_agent_settings_override_bundled_defaults_without_replacing_them(tmp_pat
     bundled_config = tmp_path / "config"
     bundled_config.mkdir()
     (bundled_config / "settings.yaml").write_text(
-        "port: 8000\nlnn:\n  enabled: true\n  tau_boost: 0.05\n",
+        "port: 8000\nretrieval_selection:\n  enabled: true\n  lexical_coverage_weight: 0.05\n",
         encoding="utf-8",
     )
     agent_home = tmp_path / "titan" / "agents" / "pi"
     local_config = agent_home / "config"
     local_config.mkdir(parents=True)
     local_settings = local_config / "settings.yaml"
-    local_settings.write_text("lnn:\n  tau_boost: 0.10\n", encoding="utf-8")
+    local_settings.write_text("retrieval_selection:\n  lexical_coverage_weight: 0.10\n", encoding="utf-8")
 
     context = RuntimeContext.from_environment(
         root_dir=tmp_path,
@@ -153,14 +153,14 @@ def test_agent_settings_override_bundled_defaults_without_replacing_them(tmp_pat
 
     assert context.settings_path == local_settings.resolve()
     assert context.settings["port"] == 8000
-    assert context.settings["lnn"]["enabled"] is True
-    assert context.settings["lnn"]["tau_boost"] == 0.10
+    assert context.settings["retrieval_selection"]["enabled"] is True
+    assert context.settings["retrieval_selection"]["lexical_coverage_weight"] == 0.10
 
 
 def test_explicit_settings_path_remains_a_full_replacement(tmp_path: Path):
     bundled_config = tmp_path / "config"
     bundled_config.mkdir()
-    (bundled_config / "settings.yaml").write_text("port: 8000\nlnn:\n  enabled: true\n", encoding="utf-8")
+    (bundled_config / "settings.yaml").write_text("port: 8000\nretrieval_selection:\n  enabled: true\n", encoding="utf-8")
     explicit = tmp_path / "benchmark.yaml"
     explicit.write_text("port: 9000\n", encoding="utf-8")
 

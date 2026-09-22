@@ -17,7 +17,6 @@ const requiredPiPayloads = [
   'app/graph/ui/template.html',
   'app/patterns/memory.py',
   'app/runtime/context.py',
-  'app/save_pipeline/trace_intake.py',
   'app/storage/sqlite.py',
   'config/__init__.py',
   'config/.env.example',

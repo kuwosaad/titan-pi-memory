@@ -82,7 +82,6 @@ def build_graph(session_id: Optional[str] = None) -> str:
         return "<html><body><h1>No memories found</h1></body></html>"
 
     config = load_visual_config()
-    facts = [mem["text"] for mem in memories]
     vectors: List[Optional[np.ndarray]] = [None for _ in memories]
     missing_texts = []
     missing_indices = []

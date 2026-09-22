@@ -5,8 +5,6 @@ import threading
 from pathlib import Path
 from typing import Callable, Dict, List
 
-from fastapi import FastAPI
-
 from app.save_pipeline.pipeline import ingest_spool_session
 
 

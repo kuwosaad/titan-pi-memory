@@ -5,13 +5,11 @@ import shutil
 import tempfile
 import threading
 import time
-import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .models import Session, Message
 from app.runtime.context import get_runtime_context
 
 try:
@@ -245,49 +243,3 @@ def _migrate_legacy_trace_files() -> None:
             except OSError:
                 pass
             continue
-
-
-def create_session() -> Session:
-    ensure_dirs()
-    session_id = uuid.uuid4().hex
-    session = Session(
-        id=session_id,
-        created_at=now_iso(),
-        messages=[]
-    )
-    save_session(session)
-    return session
-
-
-def load_session(session_id: str) -> Session:
-    path = session_path(session_id)
-    if path.exists():
-        data = read_json(path, {})
-        messages = [Message(**msg) for msg in data.get("messages", [])]
-        return Session(
-            id=session_id,
-            created_at=data.get("created_at", now_iso()),
-            messages=messages
-        )
-    return create_session()
-
-
-def save_session(session: Session) -> None:
-    ensure_dirs()
-    data = {
-        "id": session.id,
-        "created_at": session.created_at,
-        "messages": [msg.model_dump() for msg in session.messages]
-    }
-    write_json(session_path(session.id), data)
-
-
-def get_next_turn(session: Session) -> int:
-    return sum(1 for msg in session.messages if msg.role == "user") + 1
-
-
-def add_message(session: Session, role: str, content: str, turn: int, ts: Optional[str] = None) -> None:
-    timestamp = ts if ts is not None else now_iso()
-    message = Message(role=role, content=content, ts=timestamp, turn=turn)
-    session.messages.append(message)
-    save_session(session)

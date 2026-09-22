@@ -106,11 +106,6 @@ def runtime() -> dict:
         "memory_capabilities": {
             **capabilities,
             "adapter": memory_repository.__class__.__name__,
-            "lnn_status": (
-                "enabled"
-                if capabilities.get("lnn_state_store")
-                else "unsupported for selected backend"
-            ),
         },
     }
 

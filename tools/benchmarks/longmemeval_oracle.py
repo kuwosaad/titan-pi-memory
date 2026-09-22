@@ -92,7 +92,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--longmemeval-repo", default=None, help="Path to a cloned LongMemEval repo for official evaluation.")
     parser.add_argument("--eval-model", default="gpt-4o", help="Model name passed to LongMemEval's evaluate_qa.py.")
     parser.add_argument("--python-bin", default=sys.executable, help="Python executable for running the official evaluator.")
-    parser.add_argument("--enable-lnn", action="store_true", help="Enable benchmark-only LNN ODE reranking.")
     parser.add_argument("--max-runtime-minutes", type=float, default=None,
                         help="Hard wall-clock timeout for the entire run. Questions in-flight are abandoned when deadline is reached.")
     parser.add_argument("--notify-webhook", default=None,
@@ -106,7 +105,7 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def write_benchmark_config_files(bench_dir: Path, titan_home: Path, *, enable_lnn: bool) -> Dict[str, str]:
+def write_benchmark_config_files(bench_dir: Path, titan_home: Path) -> Dict[str, str]:
     config_dir = bench_dir / "config"
     ensure_dir(config_dir)
 
@@ -148,12 +147,6 @@ source_reliability:
   code: 1.0
   mixed: 0.5
   legacy: 0.3
-verification:
-  enabled: true
-  verify_code_facts: true
-  verify_api_claims: true
-  max_verification_time: 5
-  verification_cache_enabled: true
 retrieval:
   min_reliability: 0.4
   allow_unverified: true
@@ -162,11 +155,6 @@ extraction:
   assistant_hallucination_warning: true
   require_user_corroboration: true
   skip_unverifiable_technical: true
-lnn:
-  enabled: {str(enable_lnn).lower()}
-  use_ode_rerank: {str(enable_lnn).lower()}
-  tick_enabled: false
-  debug_activation_trace: true
 """
 
     extraction = """current: gemini
@@ -848,7 +836,7 @@ def main() -> None:
     run_state.save()
     print(f"[HARNESS] run state written to {current_run_dir / 'run_state.json'}")
 
-    config_paths = write_benchmark_config_files(bench_dir, titan_home, enable_lnn=args.enable_lnn)
+    config_paths = write_benchmark_config_files(bench_dir, titan_home)
 
     items = select_items(load_dataset(dataset_path), args.mode, args.pilot_size, args.max_questions)
     done_question_ids = load_done_question_ids(predictions_path) if args.resume else set()
@@ -865,7 +853,6 @@ def main() -> None:
         "brief_max_items": args.brief_max_items,
         "brief_max_chars": args.brief_max_chars,
         "reader_temperature": args.reader_temperature,
-        "enable_lnn": args.enable_lnn,
         "selected_questions": [item.question_id for item in items],
         "config_paths": config_paths,
     }

@@ -41,7 +41,7 @@ class RetrieveRouteTests(unittest.TestCase):
         self.assertIn("titan_home", payload)
         self.assertIn("trace_dir", payload)
         self.assertEqual(payload["memory_backend"], "sqlite")
-        self.assertEqual(payload["memory_capabilities"]["lnn_status"], "unsupported for selected backend")
+        self.assertNotIn("lnn_status", payload["memory_capabilities"])
 
     def test_retrieve_endpoint_returns_json_from_pipeline(self):
         expected_payload = {

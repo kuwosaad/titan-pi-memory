@@ -80,7 +80,6 @@ from app.storage.traces import (
     set_pending_user_message,
     clear_pending_user_message,
 )
-from app.storage.verifier import get_verifier
 import logging
 
 
@@ -197,9 +196,6 @@ def run_memory_pipeline_outcome(
         LOGGER.warning("Embedding unavailable during memory save; storing records without vectors: %s", exc)
         vectors = []
 
-    verifier = get_verifier()
-    verification_enabled = settings.get("verification", {}).get("enabled", True)
-
     records: List[Dict[str, Any]] = []
     for idx, mem in enumerate(extracted):
         vector = vectors[idx] if idx < len(vectors) else None
@@ -210,13 +206,6 @@ def run_memory_pipeline_outcome(
             scene=scene,
             fallback_source_event_ids=source_event_ids,
         )
-
-        verification_status = "unverified"
-        if verification_enabled and source_type != "user":
-            result = verifier.verify_memory(mem["text"])
-            if result.verified and result.confidence > 0.7:
-                verification_status = "verified"
-                source_reliability = max(source_reliability, result.confidence)
 
         records.append(
             create_memory_record(
@@ -233,7 +222,9 @@ def run_memory_pipeline_outcome(
                 source_event_ids=memory_source_event_ids,
                 source_type=source_type,
                 source_reliability=source_reliability,
-                verification_status=verification_status,
+                # Extraction provenance is retained, but automated code
+                # inspection is not evidence that a claim is true.
+                verification_status="unverified",
                 fallback_generated=fallback_used,
                 speaker_focus=mem.get("speaker_focus"),
                 memory_kind=mem.get("memory_kind"),
@@ -2149,31 +2140,33 @@ def _get_pipeline_debug_status_impl(session_id: Optional[str] = None) -> Dict[st
     return payload
 
 
-# Compatibility forwarding interfaces.  Keep the historical imports stable
-# while routing all trace use cases through the framework-neutral TraceIntake
-# seam introduced for the architecture deepening program.
-def process_session_events(session_id: str, limit: int = 200) -> Dict[str, Any]:
-    from app.save_pipeline.trace_intake import get_trace_intake
+# Compatibility forwarding interfaces. Keep the historical imports stable.
+_LEGACY_DEFAULT_SPOOL_DIR = ".opencode/titan/traces"
 
-    return get_trace_intake().process_session_events(session_id=session_id, limit=limit)
+
+def _resolve_spool_dir(spool_dir: Optional[str]) -> str:
+    """Resolve the legacy default through the active runtime namespace."""
+    if spool_dir and str(spool_dir) != _LEGACY_DEFAULT_SPOOL_DIR:
+        return str(Path(spool_dir).expanduser())
+    from app.runtime.context import get_runtime_context
+
+    return str(get_runtime_context().trace_dir)
+
+
+def process_session_events(session_id: str, limit: int = 200) -> Dict[str, Any]:
+    return _process_session_events_impl(session_id=session_id, limit=limit)
 
 
 def ingest_trace_event(event: TraceEvent, process_new: bool = True) -> Dict[str, Any]:
-    from app.save_pipeline.trace_intake import get_trace_intake
-
-    return get_trace_intake().ingest_trace_event(event=event, process_new=process_new)
+    return _ingest_trace_event_impl(event=event, process_new=process_new)
 
 
 def ingest_spool_session(session_id: str, spool_dir: str = ".opencode/titan/traces") -> Dict[str, Any]:
-    from app.save_pipeline.trace_intake import get_trace_intake
-
-    return get_trace_intake().ingest_spool_session(session_id=session_id, spool_dir=spool_dir)
+    return _ingest_spool_session_impl(session_id=session_id, spool_dir=_resolve_spool_dir(spool_dir))
 
 
 def get_pipeline_debug_status(session_id: Optional[str] = None) -> Dict[str, Any]:
-    from app.save_pipeline.trace_intake import get_trace_intake
-
-    return get_trace_intake().debug_status(session_id=session_id)
+    return _get_pipeline_debug_status_impl(session_id=session_id)
 
 
 def _safe_parse_iso(value: str) -> Optional[datetime]:
@@ -2360,9 +2353,6 @@ def retrieve_memory_brief(
     sources: Optional[list[str] | tuple[str, ...] | str] = None,
 ) -> Dict[str, Any]:
     from app.retrieval_pipeline.retriever import retrieve_memories
-    from app.retrieval_pipeline.config import load_settings
-
-    settings = load_settings()
     safe_query = query or ""
     route = route_query(safe_query)
     if not bool(route.get("use_memory", True)):
@@ -2411,10 +2401,7 @@ def retrieve_memory_brief(
             date_from=date_from,
             date_to=date_to,
         )
-    memory_brief = build_memory_notes(
-        hits, max_items=max_items, max_chars=max_chars,
-        cluster_mode=settings.get("step2", {}).get("cluster_compression_enabled", False),
-    )
+    memory_brief = build_memory_notes(hits, max_items=max_items, max_chars=max_chars)
     pattern_hits: List[Dict[str, Any]] = []
     pattern_brief = ""
     try:

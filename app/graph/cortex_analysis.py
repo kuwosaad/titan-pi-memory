@@ -250,11 +250,11 @@ def analyze_memory_clusters(
         }
 
     settings = load_settings()
-    step2_config = settings.get("step2", {}) or {}
-    sim_floor = float(step2_config.get("sim_floor", 0.45) or 0.45)
+    analysis_config = settings.get("cluster_analysis", settings.get("step2", {})) or {}
+    sim_floor = float(analysis_config.get("sim_floor", 0.45) or 0.45)
     bridge_floor = max(0.25, sim_floor - 0.1)
-    contradiction_threshold = float(step2_config.get("contradiction_sim_threshold", 0.7) or 0.7)
-    antonym_pairs = step2_config.get("contradiction_antonyms", []) or []
+    contradiction_threshold = float(analysis_config.get("contradiction_sim_threshold", 0.7) or 0.7)
+    antonym_pairs = analysis_config.get("contradiction_antonyms", []) or []
 
     # Share the immutable corpus snapshot with cluster inspection. Pairwise
     # cosine values are calculated on demand from normalized rows, avoiding a
@@ -274,7 +274,7 @@ def analyze_memory_clusters(
     # materialize millions of NetworkX edges after avoiding the NumPy matrix.
     pair_limit = len(selected_memories) - 1
     if len(selected_memories) > 512:
-        pair_limit = max(16, min(pair_limit, int(step2_config.get("analysis_top_k", 16) or 16)))
+        pair_limit = max(16, min(pair_limit, int(analysis_config.get("analysis_top_k", 16) or 16)))
     edge_floor = min(sim_floor, bridge_floor, contradiction_threshold)
     candidate_pairs = corpus.top_k_edges(top_k=pair_limit, min_sim=edge_floor)
     for i, j, sim in candidate_pairs:

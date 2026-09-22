@@ -45,6 +45,7 @@ from tools.cli.titan import (
     run_set_key,
     run_share,
     run_import_bundle,
+    verify_python_dependencies,
     upsert_env_keys,
     validate_codex_marketplace,
 )
@@ -587,6 +588,28 @@ class TitanCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         output = stdout.getvalue()
         self.assertIn("titan setup", output)
+
+    def test_verify_python_dependencies_honors_python_version_markers(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            requirements = Path(tmp_dir) / "requirements.txt"
+            requirements.write_text('tomli>=2.0.0; python_version < "3.11"\n', encoding="utf-8")
+            with patch("tools.cli.titan.sys.version_info", (3, 11)), patch(
+                "tools.cli.titan.importlib.util.find_spec", return_value=None
+            ):
+                self.assertEqual(verify_python_dependencies(requirements), [])
+            with patch("tools.cli.titan.sys.version_info", (3, 10)), patch(
+                "tools.cli.titan.importlib.util.find_spec", return_value=None
+            ):
+                self.assertEqual(verify_python_dependencies(requirements), ["tomli"])
+
+    def test_verify_python_dependencies_does_not_fallback_after_skipping_marked_requirements(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            requirements = Path(tmp_dir) / "requirements.txt"
+            requirements.write_text('tomli>=2.0.0; python_version < "3.11"\n', encoding="utf-8")
+            with patch("tools.cli.titan.sys.version_info", (3, 11)), patch(
+                "tools.cli.titan.importlib.util.find_spec", return_value=None
+            ):
+                self.assertEqual(verify_python_dependencies(requirements), [])
 
     def test_patch_opencode_config_creates_mcp_bridge(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

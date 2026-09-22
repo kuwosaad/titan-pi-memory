@@ -182,7 +182,7 @@ def test_unreadable_foreign_query_store_does_not_break_active_recall():
     assert {item["source_agent"] for item in result} == {"pi", "grok"}
 
 
-def test_foreign_query_does_not_mutate_active_lnn_state_when_ids_collide(tmp_path: Path):
+def test_foreign_query_preserves_legacy_state_when_ids_collide(tmp_path: Path):
     memory_id = "shared-session:1:0"
     active = SqliteMemoryRepository(tmp_path / "codex.db")
     foreign = SqliteMemoryRepository(tmp_path / "pi.db")
@@ -239,7 +239,7 @@ def test_foreign_query_does_not_mutate_active_lnn_state_when_ids_collide(tmp_pat
     assert foreign.query_by_ids([memory_id])[memory_id]["tau"] == pytest.approx(0.40)
 
 
-def test_active_query_keeps_existing_local_lnn_learning(tmp_path: Path):
+def test_active_query_preserves_legacy_state_without_learning(tmp_path: Path):
     memory_id = "active-session:1:0"
     active = SqliteMemoryRepository(tmp_path / "codex.db")
     active.append_memories([
@@ -276,7 +276,7 @@ def test_active_query_keeps_existing_local_lnn_learning(tmp_path: Path):
     ):
         recall.query_memories("active target", sources=["codex"])
 
-    assert active.query_by_ids([memory_id])[memory_id]["tau"] > 0.20
+    assert active.query_by_ids([memory_id])[memory_id]["tau"] == pytest.approx(0.20)
 
 
 def test_scene_routing_carries_source_agent():
@@ -442,7 +442,6 @@ def test_uninitialized_sqlite_namespace_adapter_is_read_only(tmp_path: Path):
     SqliteMemoryRepository(db_path).append_memories([])
     adapter = SqliteMemoryRepository(db_path, initialize=False)
 
-    assert adapter.supports_lnn is False
     with pytest.raises(sqlite3.OperationalError):
         adapter.append_memories([memory("s:1:0", "must not write")])
     assert adapter.get_recent_memories() == []
