@@ -41,6 +41,7 @@ _ALLOWED_MEMORY_KINDS = {
     "workflow",
     "issue",
 }
+_RETRIEVAL_REPOSITORY_KEY = "_retrieval_repository"
 
 
 def _refresh_json_paths() -> None:
@@ -571,6 +572,34 @@ class SqliteMemoryRepository:
             memory["_embedding_dtype"] = dtype
         return memory
 
+    def _row_to_retrieval_candidate(self, row: sqlite3.Row) -> Dict[str, Any]:
+        """Build the private lean record used only while retrieval ranks candidates."""
+
+        memory: Dict[str, Any] = {
+            "id": row["id"],
+            "text": row["text"],
+            "type": row["type"],
+            "stream": row["stream"],
+            "ts": row["ts"],
+            "session_id": row["session_id"],
+            "turn": row["turn"],
+            "scene_id": row["scene_id"],
+            "source_event_ids": json.loads(row["source_event_ids_json"] or "[]"),
+            "source_type": row["source_type"],
+            "source_reliability": float(row["source_reliability"]),
+            "verification_status": row["verification_status"],
+            "fallback_generated": bool(row["fallback_generated"]),
+            "speaker_focus": row["speaker_focus"],
+            "memory_kind": row["memory_kind"],
+            "embedding": None,
+            "_embedding_blob": row["embedding_blob"],
+            "_embedding_dim": row["embedding_dim"],
+            "_embedding_dtype": row["embedding_dtype"],
+            _RETRIEVAL_REPOSITORY_KEY: self,
+        }
+        memory["memory_kind"] = _normalize_memory_kind(memory)
+        return memory
+
     def append_memories(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not records:
             return []
@@ -672,7 +701,14 @@ class SqliteMemoryRepository:
             rows = conn.execute(query, (int(limit),)).fetchall()
         return [row["session_id"] for row in rows if row["session_id"]]
 
-    def _filtered_rows(self, filters: CandidateFilters, session_id: Optional[str] = None, fts_rowids: Optional[set[int]] = None) -> List[sqlite3.Row]:
+    def _filtered_rows(
+        self,
+        filters: CandidateFilters,
+        session_id: Optional[str] = None,
+        fts_rowids: Optional[set[int]] = None,
+        *,
+        retrieval_projection: bool = False,
+    ) -> List[sqlite3.Row]:
         clauses = ["source_reliability >= ?"]
         params: List[Any] = [float(filters.min_reliability)]
 
@@ -711,8 +747,41 @@ class SqliteMemoryRepository:
             where = f"({where}) AND rowid IN ({placeholders})"
             params.extend(list(fts_rowids))
 
-        query = f"SELECT * FROM memories WHERE {where} ORDER BY ts DESC"
         with self._lock, self._connect() as conn:
+            projection = "*"
+            if retrieval_projection:
+                columns = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(memories)").fetchall()
+                }
+                optional = {
+                    "scene_id": "NULL",
+                    "speaker_focus": "NULL",
+                    "memory_kind": "NULL",
+                }
+                projected = [
+                    "id",
+                    "text",
+                    "type",
+                    "stream",
+                    "ts",
+                    "session_id",
+                    "turn",
+                    *[
+                        name if name in columns else f"{fallback} AS {name}"
+                        for name, fallback in optional.items()
+                    ],
+                    "source_event_ids_json",
+                    "source_type",
+                    "source_reliability",
+                    "verification_status",
+                    "fallback_generated",
+                    "embedding_blob",
+                    "embedding_dim",
+                    "embedding_dtype",
+                ]
+                projection = ", ".join(projected)
+            query = f"SELECT {projection} FROM memories WHERE {where} ORDER BY ts DESC"
             return conn.execute(query, params).fetchall()
 
     def query_candidates(self, filters: CandidateFilters) -> List[Dict[str, Any]]:
@@ -723,6 +792,19 @@ class SqliteMemoryRepository:
         else:
             rows = self._filtered_rows(filters, session_id=None)
         return [self._row_to_memory(row, decode_embedding=False, include_blob=True) for row in rows]
+
+    def _query_retrieval_candidates(self, filters: CandidateFilters) -> List[Dict[str, Any]]:
+        if filters.session_id and filters.session_bias:
+            rows = self._filtered_rows(
+                filters,
+                session_id=filters.session_id,
+                retrieval_projection=True,
+            )
+            if not rows:
+                rows = self._filtered_rows(filters, session_id=None, retrieval_projection=True)
+        else:
+            rows = self._filtered_rows(filters, session_id=None, retrieval_projection=True)
+        return [self._row_to_retrieval_candidate(row) for row in rows]
 
     def _fts5_search(self, fts_query: str) -> Optional[set[int]]:
         try:
@@ -749,6 +831,55 @@ class SqliteMemoryRepository:
             if rows:
                 return [self._row_to_memory(row, decode_embedding=False, include_blob=True) for row in rows]
         return self.query_candidates(filters)
+
+    def _query_retrieval_candidates_with_text(
+        self,
+        fts_query: str,
+        filters: CandidateFilters,
+    ) -> List[Dict[str, Any]]:
+        if not fts_query or not fts_query.strip():
+            return self._query_retrieval_candidates(filters)
+        fts_rowids = self._fts5_search(fts_query)
+        if fts_rowids is not None:
+            if filters.session_id and filters.session_bias:
+                rows = self._filtered_rows(
+                    filters,
+                    session_id=filters.session_id,
+                    fts_rowids=fts_rowids,
+                    retrieval_projection=True,
+                )
+                if not rows:
+                    rows = self._filtered_rows(
+                        filters,
+                        session_id=None,
+                        fts_rowids=fts_rowids,
+                        retrieval_projection=True,
+                    )
+            else:
+                rows = self._filtered_rows(
+                    filters,
+                    session_id=None,
+                    fts_rowids=fts_rowids,
+                    retrieval_projection=True,
+                )
+            if rows:
+                return [self._row_to_retrieval_candidate(row) for row in rows]
+        return self._query_retrieval_candidates(filters)
+
+    def _hydrate_retrieval_candidates(self, memory_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Restore the historical SQLite candidate shape for selected winners."""
+
+        if not memory_ids:
+            return {}
+        unique_ids = list(dict.fromkeys(memory_ids))
+        placeholders = ",".join("?" for _ in unique_ids)
+        query = f"SELECT * FROM memories WHERE id IN ({placeholders})"
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(query, unique_ids).fetchall()
+        return {
+            row["id"]: self._row_to_memory(row, decode_embedding=False, include_blob=True)
+            for row in rows
+        }
 
     def query_by_ids(self, memory_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         if not memory_ids:
@@ -972,12 +1103,31 @@ def migrate_legacy_memories() -> int:
     return migrated
 
 
-def query_memory_candidates(filters: CandidateFilters) -> List[Dict[str, Any]]:
-    return get_memory_repository().query_candidates(filters)
+def query_memory_candidates(
+    filters: CandidateFilters,
+    *,
+    _retrieval_projection: bool = False,
+) -> List[Dict[str, Any]]:
+    repository = get_memory_repository()
+    if _retrieval_projection:
+        query = getattr(repository, "_query_retrieval_candidates", None)
+        if callable(query):
+            return query(filters)
+    return repository.query_candidates(filters)
 
 
-def query_memory_candidates_with_text(fts_query: str, filters: CandidateFilters) -> List[Dict[str, Any]]:
-    return get_memory_repository().query_candidates_with_text(fts_query, filters)
+def query_memory_candidates_with_text(
+    fts_query: str,
+    filters: CandidateFilters,
+    *,
+    _retrieval_projection: bool = False,
+) -> List[Dict[str, Any]]:
+    repository = get_memory_repository()
+    if _retrieval_projection:
+        query = getattr(repository, "_query_retrieval_candidates_with_text", None)
+        if callable(query):
+            return query(fts_query, filters)
+    return repository.query_candidates_with_text(fts_query, filters)
 
 
 def migrate_json_to_sqlite(sqlite_path: Optional[Path] = None) -> Dict[str, Any]:

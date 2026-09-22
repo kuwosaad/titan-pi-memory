@@ -25,11 +25,10 @@ TITAN_HOME = _RUNTIME_CONTEXT.titan_home
 os.environ.setdefault("TITAN_BASE_DIR", str(_RUNTIME_CONTEXT.base_dir))
 
 
-from app.graph.clusters import inspect_memory_clusters
-from app.graph.cortex_analysis import analyze_memory_clusters
-from app.patterns import api as patterns_api
+from app.graph.adapter import inspect_memory_clusters, analyze_memory_clusters
+from app.patterns import adapter as patterns_api
 from app.patterns.errors import PatternError
-from app.patterns.bundle import export_pattern_bundle, import_pattern_bundle
+from app.patterns.adapter import export_pattern_bundle, import_pattern_bundle
 from app.save_pipeline.pipeline import (
     get_scene_context as build_scene_context,
     handle_trace_packet,

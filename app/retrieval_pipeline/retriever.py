@@ -7,10 +7,15 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
-from app.embedding.embedder import embed
+from app.embedding.embedder import embed, embed_query_inputs
 from app.save_pipeline.extraction.extractor import is_hidden_metadata_memory
 from app.graph.similarity import cosine_similarity
-from app.storage.memories import query_memory_candidates, query_memory_candidates_with_text, unpack_embedding
+from app.storage.memories import (
+    _RETRIEVAL_REPOSITORY_KEY,
+    query_memory_candidates,
+    query_memory_candidates_with_text,
+    unpack_embedding,
+)
 from app.storage.repository import CandidateFilters, MemoryStore
 
 LOGGER = logging.getLogger(__name__)
@@ -554,6 +559,79 @@ def _merge_candidate_lanes(
     return merged
 
 
+def _query_retrieval_candidates(
+    repository: Optional[MemoryStore],
+    filters: CandidateFilters,
+    *,
+    fts_query: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Use a repository's private lean read when available."""
+
+    if repository is None:
+        if fts_query is not None:
+            return query_memory_candidates_with_text(
+                fts_query,
+                filters,
+                _retrieval_projection=True,
+            )
+        return query_memory_candidates(filters, _retrieval_projection=True)
+
+    if fts_query is not None:
+        query = getattr(repository, "_query_retrieval_candidates_with_text", None)
+        if callable(query):
+            return query(fts_query, filters)
+        return repository.query_candidates_with_text(fts_query, filters)
+
+    query = getattr(repository, "_query_retrieval_candidates", None)
+    if callable(query):
+        return query(filters)
+    return repository.query_candidates(filters)
+
+
+def _hydrate_retrieval_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Restore selected lean candidates without disturbing ranking metadata."""
+
+    repositories: Dict[int, Dict[str, Any]] = {}
+    for hit in hits:
+        memory = hit.get("memory") or {}
+        repository = memory.get(_RETRIEVAL_REPOSITORY_KEY)
+        if repository is None:
+            continue
+        group = repositories.setdefault(id(repository), {"repository": repository, "ids": []})
+        memory_id = str(memory.get("id") or "")
+        if memory_id and memory_id not in group["ids"]:
+            group["ids"].append(memory_id)
+
+    hydrated_by_repository: Dict[int, Dict[str, Dict[str, Any]]] = {}
+    for repository_id, group in repositories.items():
+        repository = group["repository"]
+        hydrate = getattr(repository, "_hydrate_retrieval_candidates", None)
+        if not callable(hydrate):
+            raise RuntimeError("retrieval candidate repository cannot hydrate selected winners")
+        hydrated = hydrate(group["ids"])
+        missing_ids = [memory_id for memory_id in group["ids"] if memory_id not in hydrated]
+        if missing_ids:
+            raise RuntimeError(
+                "selected retrieval candidates disappeared before hydration: "
+                + ", ".join(missing_ids)
+            )
+        hydrated_by_repository[repository_id] = hydrated
+
+    result: List[Dict[str, Any]] = []
+    for hit in hits:
+        memory = dict(hit.get("memory") or {})
+        repository = memory.pop(_RETRIEVAL_REPOSITORY_KEY, None)
+        if repository is not None:
+            stored = hydrated_by_repository.get(id(repository), {}).get(str(memory.get("id") or ""))
+            if stored is None:
+                raise RuntimeError("selected retrieval candidate is missing hydrated storage data")
+            # Ranked candidate values win so annotations computed during
+            # retrieval cannot be overwritten by storage hydration.
+            memory = {**stored, **memory}
+        result.append({**hit, "memory": memory})
+    return result
+
+
 def _lexical_terms(text: str) -> set[str]:
     terms = set(_content_tokens(text))
     for token in list(terms):
@@ -1040,22 +1118,18 @@ def _retrieve_memories_impl(
 
     fts_query = _build_fts_query(query)
     if fts_query:
-        lexical_candidates = (
-            repository.query_candidates_with_text(fts_query, filters)
-            if repository is not None
-            else query_memory_candidates_with_text(fts_query, filters)
+        lexical_candidates = _query_retrieval_candidates(
+            repository,
+            filters,
+            fts_query=fts_query,
         )
         if selection_enabled and bool(selection_config.get("hybrid_candidates_enabled", True)):
-            semantic_candidates = (
-                repository.query_candidates(filters)
-                if repository is not None
-                else query_memory_candidates(filters)
-            )
+            semantic_candidates = _query_retrieval_candidates(repository, filters)
             filtered = _merge_candidate_lanes(lexical_candidates, semantic_candidates)
         else:
             filtered = lexical_candidates
     else:
-        filtered = repository.query_candidates(filters) if repository is not None else query_memory_candidates(filters)
+        filtered = _query_retrieval_candidates(repository, filters)
     filtered = apply_hidden_metadata_filter(filtered)
     filtered = _dedupe_prefer_latest(filtered)
 
@@ -1069,10 +1143,10 @@ def _retrieve_memories_impl(
             key=lambda m: parse_timestamp(m.get("ts")) or datetime.min.replace(tzinfo=tz.utc),
             reverse=True,
         )
-        return [
+        return _hydrate_retrieval_hits([
             {"memory": m, "score": 0.0, "base_score": 0.0, "final_score": 0.0}
             for m in filtered[:top_k]
-        ]
+        ])
 
     raw_query = query.strip()
     query_aspects = _query_aspects(raw_query, selection_config) if selection_enabled else [raw_query]
@@ -1082,17 +1156,17 @@ def _retrieve_memories_impl(
     query_embedding_inputs = query_aspects
 
     try:
-        query_embeddings = embed(query_embedding_inputs)
+        query_embeddings = embed_query_inputs(query_embedding_inputs, embed)
         query_vector = query_embeddings[0]
         direct_aspect_vectors = query_embeddings
     except Exception as exc:
         LOGGER.warning("Embedding backend unavailable for query embedding; falling back to keyword retrieval: %s", exc)
-        return _keyword_fallback_hits(
+        return _hydrate_retrieval_hits(_keyword_fallback_hits(
             filtered,
             query,
             int(top_k),
             selection_config if selection_enabled else None,
-        )
+        ))
 
     vectors: List[Optional[np.ndarray]] = [None for _ in filtered]
     missing_texts: List[str] = []
@@ -1225,5 +1299,5 @@ def _retrieve_memories_impl(
         )
         if min_reliability and min_reliability > 0:
             fallback_hits = [h for h in fallback_hits if float(h.get("memory", {}).get("source_reliability", 0)) >= min_reliability]
-        return fallback_hits
-    return candidate_hits[:top_k]
+        return _hydrate_retrieval_hits(fallback_hits)
+    return _hydrate_retrieval_hits(candidate_hits[:top_k])

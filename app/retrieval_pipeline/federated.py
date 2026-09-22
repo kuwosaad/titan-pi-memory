@@ -271,35 +271,37 @@ class FederatedRecall:
         sources: Optional[Sequence[str] | str] = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
+        from app.embedding.embedder import query_embedding_reuse_scope
         from app.retrieval_pipeline.retriever import retrieve_memories
 
         selected = self.sources(sources)
         hits: list[dict[str, Any]] = []
-        for source_agent in selected:
-            try:
-                repository = self._memory_repository(source_agent)
-                if repository is None:
+        with query_embedding_reuse_scope():
+            for source_agent in selected:
+                try:
+                    repository = self._memory_repository(source_agent)
+                    if repository is None:
+                        continue
+                    source_hits = retrieve_memories(
+                        query=query,
+                        session_id=session_id,
+                        top_k=limit,
+                        mode=mode or "both",
+                        repository=repository,
+                        **kwargs,
+                    )
+                except Exception as exc:
+                    if source_agent == self.active_agent:
+                        raise
+                    LOGGER.warning("Skipping unreadable Titan namespace %s: %s", source_agent, exc)
                     continue
-                source_hits = retrieve_memories(
-                    query=query,
-                    session_id=session_id,
-                    top_k=limit,
-                    mode=mode or "both",
-                    repository=repository,
-                    **kwargs,
-                )
-            except Exception as exc:
-                if source_agent == self.active_agent:
-                    raise
-                LOGGER.warning("Skipping unreadable Titan namespace %s: %s", source_agent, exc)
-                continue
-            for hit in source_hits:
-                annotated = dict(hit)
-                memory = dict(hit.get("memory") or {})
-                memory["source_agent"] = source_agent
-                annotated["memory"] = memory
-                annotated["source_agent"] = source_agent
-                hits.append(annotated)
+                for hit in source_hits:
+                    annotated = dict(hit)
+                    memory = dict(hit.get("memory") or {})
+                    memory["source_agent"] = source_agent
+                    annotated["memory"] = memory
+                    annotated["source_agent"] = source_agent
+                    hits.append(annotated)
 
         return self._merge_hits(hits, limit)
 
@@ -354,32 +356,43 @@ class FederatedRecall:
     ) -> list[dict[str, Any]]:
         grouped: dict[str, list[str]] = {}
         order: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
         allowed = set(self.sources(sources))
         for memory in memories:
             scene_id = str(memory.get("scene_id") or "").strip()
             source_agent = str(memory.get("source_agent") or self.active_agent)
             if not scene_id or source_agent not in allowed:
                 continue
-            key = f"{source_agent}:{scene_id}"
-            if key not in grouped:
-                grouped[key] = []
-                order.append((source_agent, scene_id))
-            grouped[key].append(scene_id)
+            identity = (source_agent, scene_id)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            order.append(identity)
+            grouped.setdefault(source_agent, []).append(scene_id)
 
-        result: list[dict[str, Any]] = []
-        for source_agent, scene_id in order:
+        references: dict[tuple[str, str], dict[str, Any]] = {}
+        for source_agent, scene_ids in grouped.items():
             repository = self._scene_repository(source_agent)
             if repository is None:
                 continue
             try:
-                refs = repository.get_scene_references([scene_id])
+                refs = repository.get_scene_references(scene_ids)
             except Exception:
                 refs = []
+                for scene_id in scene_ids:
+                    try:
+                        refs.extend(repository.get_scene_references([scene_id]))
+                    except Exception:
+                        continue
             for reference in refs:
+                scene_id = str(reference.get("scene_id") or "").strip()
+                identity = (source_agent, scene_id)
+                if identity not in seen:
+                    continue
                 item = dict(reference)
                 item["source_agent"] = source_agent
-                result.append(item)
-        return result
+                references.setdefault(identity, item)
+        return [references[identity] for identity in order if identity in references]
 
     def get_scene_context(self, scene_id: str, *, source_agent: Optional[str] = None) -> dict[str, Any]:
         normalized_scene_id = str(scene_id or "").strip()
