@@ -78,7 +78,7 @@ docs/codex_titan_pi_parity_plan.md
 docs/titan-codex-plugin-marketplace-plan.md
 
 # Personal docs (kept locally, not pushed)
-saad_persona.md
+*_persona.md
 titan-one-pager.md
 titan-one-pager.pdf
 
@@ -108,4 +108,4 @@ titan-one-pager.pdf
 /.claude/worktrees/
 
 # Personal research retained locally, not a public product input.
-/docs/research/saad-preference-model-research.md
+/docs/research/*-preference-model-research.md

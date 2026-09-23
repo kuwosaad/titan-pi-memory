@@ -242,7 +242,7 @@ class NpmTitanMemoryCliPackageTests(unittest.TestCase):
 
         leak = PACKAGE_DIR / "runtime" / "founder-example.txt"
         try:
-            leak.write_text("Kuwo prefers concise replies from Karu.\n", encoding="utf-8")
+            leak.write_text("PROFILE_ACTOR_TERMS = ('private-user',)\n", encoding="utf-8")
             audited = subprocess.run(
                 ["node", "scripts/audit-runtime.js"],
                 cwd=PACKAGE_DIR,

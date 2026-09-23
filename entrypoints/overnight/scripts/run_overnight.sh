@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Titan-Karu Overnight Harness Bootstrap Script
+# Titan Overnight Harness Bootstrap Script
 # ---------------------------------------------------------------------------
 # Usage:
 #   ./run_overnight.sh [--manifest PATH] [--dry-run]
 #
 # This script:
-# 1. Resolves the Titan-Karu codebase directory
+# 1. Resolves the Titan codebase directory
 # 2. Creates the overnight isolation base directory
 # 3. Runs the overnight harness with appropriate environment
 # 4. Logs output to the artifact directory

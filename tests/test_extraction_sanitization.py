@@ -8,7 +8,7 @@ class ExtractionSanitizationTests(unittest.TestCase):
         sanitized = sanitize_memories(
             [
                 {"text": "A message.updated event was captured and stored for memory processing."},
-                {"text": "A user message was received in a conversation with Karu."},
+                {"text": "A user message was received in a conversation with the assistant."},
                 {"text": "The user recently visited Vienna and presented at a conference."},
             ]
         )

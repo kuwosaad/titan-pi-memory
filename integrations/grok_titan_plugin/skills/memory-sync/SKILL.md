@@ -177,7 +177,7 @@ Prefix each line in `thoughts` so extraction keeps the origin:
 ```txt
 [source:pi] Titan Pi extension writes spool events to ~/.titan/agents/pi/traces.
 [source:codex] Root cause of Titan-Mem issue was store-path drift.
-[source:claude-code] Kuwo prefers direct instructions when told to commit and push.
+[source:claude-code] The user prefers direct instructions when asking for a release.
 [source:grok] Titan Grok plugin lives at integrations/grok_titan_plugin.
 ```
 

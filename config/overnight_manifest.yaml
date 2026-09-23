@@ -1,10 +1,10 @@
-# Default overnight manifest for Titan-Karu retrieval benchmarking.
+# Default overnight manifest for Titan retrieval benchmarking.
 #
 # This manifest drives the overnight retrieval harness.
 # Override values using CLI flags or copy and edit this file.
 #
 # Key isolation guarantee: TITAN_BASE_DIR is set to ~/.titan-overnight
-# which is completely separate from the live Titan-Karu storage.
+# which is completely separate from the live Titan storage.
 #
 # To run:
 #   python -m entrypoints.overnight.runner --manifest config/overnight_manifest.yaml
@@ -71,11 +71,11 @@ benchmarks:
         top_k: 10
         gold_session_ids: []
         expected_themes: ["python", "convention", "code"]
-      - q: "what preferences did kuwo mention"
+      - q: "what preferences did the user mention"
         mode: "learnings"
         top_k: 8
         gold_session_ids: []
-        expected_themes: ["kuwo", "preference"]
+        expected_themes: ["user", "preference"]
 
   - id: "rough_recall_probe"
     description: "Probe retrieval recall for rough stream — recent event context"

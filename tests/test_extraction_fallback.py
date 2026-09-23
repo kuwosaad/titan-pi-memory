@@ -38,7 +38,7 @@ class ExtractionFallbackTests(unittest.TestCase):
                 session_id="default",
                 turn=1,
                 user_text="Goal: Conversation: hey\nThoughts: hey\nTool Calls: []\nIntent Phrase: telegram inbound memory capture\nContext: {}",
-                assistant_text="Outcome: User message in conversation with Karu",
+                assistant_text="Outcome: User message in conversation with the assistant",
                 fallback_enabled=True,
             )
 

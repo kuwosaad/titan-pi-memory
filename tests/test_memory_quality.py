@@ -11,11 +11,11 @@ class MemoryQualityTests(unittest.TestCase):
     def test_rejects_transport_shaped_memories(self):
         sanitized = sanitize_memories(
             [
-                {"text": "The agent's goal is to have a conversation with Karu."},
-                {"text": "Kuwo asked Karu to remember his preference for simple explanations."},
+                {"text": "The agent's goal is to have a conversation with Aster."},
+                {"text": "Mira asked Aster to remember their preference for simple explanations."},
             ],
-            user_display_name="Kuwo",
-            assistant_display_name="Karu",
+            user_display_name="Mira",
+            assistant_display_name="Aster",
         )
 
         self.assertEqual(len(sanitized), 1)
@@ -23,8 +23,8 @@ class MemoryQualityTests(unittest.TestCase):
 
     def test_marks_meaningful_exchange_as_memory_worthy(self):
         result = assess_memory_worthiness(
-            "Kuwo asked Karu to explain Titan in simple words and remember that preference.",
-            "Karu agreed to keep explanations simple going forward.",
+            "Mira asked Aster to explain Titan in simple words and remember that preference.",
+            "Aster agreed to keep explanations simple going forward.",
         )
 
         self.assertTrue(result["should_extract"])
@@ -33,8 +33,8 @@ class MemoryQualityTests(unittest.TestCase):
 
     def test_rejects_trace_packet_that_is_only_inbound_banter(self):
         result = assess_memory_worthiness(
-            "Goal: Conversation: Ur the best karu\nThoughts: Ur the best karu\nTool Calls: []\nIntent Phrase: telegram inbound memory capture\nContext: {'conversation_key': 'telegram:default:telegram:876708125'}",
-            "Outcome: User message in conversation with Karu",
+            "Goal: Conversation: Ur the best aster\nThoughts: Ur the best aster\nTool Calls: []\nIntent Phrase: telegram inbound memory capture\nContext: {'conversation_key': 'telegram:default:telegram:123456789'}",
+            "Outcome: User message in conversation with Aster",
         )
 
         self.assertFalse(result["should_extract"])
@@ -66,12 +66,12 @@ class MemoryQualityTests(unittest.TestCase):
     def test_hides_telegram_transport_memories_from_views(self):
         self.assertTrue(
             is_hidden_metadata_memory(
-                {"text": "Karu received a telegram message from user 876708125, message id 1663, via the openclaw-hook:titan-karu-bridge integration."}
+                {"text": "Aster received a telegram message from user 123456789, message id 42, via the openclaw-hook:titan-karu-bridge integration."}
             )
         )
         self.assertFalse(
             is_hidden_metadata_memory(
-                {"text": "Kuwo asked Karu to plan first and then implement efficiently."}
+                {"text": "Mira asked Aster to plan first and then implement efficiently."}
             )
         )
 

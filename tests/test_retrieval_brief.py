@@ -21,7 +21,7 @@ class RetrievalBriefTests(unittest.TestCase):
         mock_query_memory_candidates.return_value = [
             {
                 "id": "s1:0:0",
-                "text": "Karu received a telegram message from user 876708125 via the openclaw-hook:titan-karu-bridge integration.",
+                "text": "The assistant received a telegram message from user 123456789 via the openclaw-hook:titan-karu-bridge integration.",
                 "stream": "rough",
                 "type": "fact",
                 "session_id": "s1",

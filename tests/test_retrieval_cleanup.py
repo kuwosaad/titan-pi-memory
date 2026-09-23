@@ -50,8 +50,8 @@ def _fixture_rows():
         _memory("paraphrase", "The memory database is SQLite and local.", "learnings", (0.98, 0.20)),
         _memory("support", "We completed the T3 Code integration.", "rough", (0.92, 0.39)),
         _memory("opposition", "T3 Code uses Postgres, not SQLite.", "learnings", (0.97, 0.24)),
-        _memory("aspect-a", "Saad prefers concise explanations.", "learnings", (0.8, 0.6)),
-        _memory("aspect-b", "Saad is frustrated by slow delegation.", "learnings", (0.6, 0.8)),
+        _memory("aspect-a", "Mira prefers concise explanations.", "learnings", (0.8, 0.6)),
+        _memory("aspect-b", "Mira is frustrated by slow delegation.", "learnings", (0.6, 0.8)),
         _memory("unrelated", "Purple giraffe quantum bakery underwater violin.", "rough", (0.0, 1.0)),
     ]
 
@@ -65,7 +65,7 @@ def test_cleanup_default_yaml_preserves_baseline_hits_without_mutation():
         "exact": ("Which database backs the local memory store for T3 Code?", np.array([1.0, 0.0], dtype=np.float32), {"exact"}),
         "paraphrase": ("What database stores memory locally?", np.array([0.98, 0.20], dtype=np.float32), {"paraphrase"}),
         "multi_aspect": (
-            "How does Saad prefer explanations and what frustrates him in collaboration?",
+            "How does Mira prefer explanations and what frustrates him in collaboration?",
             np.array([0.7, 0.7], dtype=np.float32),
             # Both baseline and cleanup miss aspect-b with these synthetic vectors.
             # Preserve the observed baseline; this is not a full facet-recall claim.

@@ -236,10 +236,10 @@ def test_federated_query_does_not_reuse_across_provider_identities():
 
 
 def test_federated_query_does_not_cache_malformed_aspect_batch():
-    query = "How does Saad prefer agents to explain things, and what frustrates him in collaboration?"
+    query = "How does Mira prefer agents to explain things, and what frustrates him in collaboration?"
     aspects = [
         query,
-        "How does Saad prefer agents to explain things. communication style explanation preference",
+        "How does Mira prefer agents to explain things. communication style explanation preference",
         "what frustrates him in collaboration. collaboration preference working constraint",
     ]
     repos = {
@@ -249,7 +249,7 @@ def test_federated_query_does_not_cache_malformed_aspect_batch():
     recall = FederatedRecall(active_agent="codex", memory_repositories=repos)
     settings = {
         "retrieval_min_similarity": 0.0,
-        "identity": {"user_display_name": "Saad"},
+        "identity": {"user_display_name": "Mira"},
         "retrieval": {"min_reliability": 0.0},
         "retrieval_dedup": {"enabled": False},
         "retrieval_selection": {
