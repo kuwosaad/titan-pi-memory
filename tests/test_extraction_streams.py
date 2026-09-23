@@ -39,15 +39,15 @@ class ExtractionStreamTests(unittest.TestCase):
                 self.messages = messages
                 return """{
   "memories": [
-    {"text": "Ayanokoji will keep Saad's answers direct.", "type": "commitment", "stream": "learnings", "source": "assistant", "memory_kind": "commitment"}
+    {"text": "Aster promised to keep Mira's answers direct.", "type": "commitment", "stream": "learnings", "source": "assistant", "memory_kind": "commitment"}
   ]
 }"""
 
         adapter = CapturingAdapter()
         settings = {
             "identity": MappingProxyType({
-                "user_display_name": "Saad",
-                "assistant_display_name": "Ayanokoji",
+                "user_display_name": "Mira",
+                "assistant_display_name": "Aster",
             }),
             "source_reliability": {"assistant": 0.3},
         }
@@ -60,8 +60,8 @@ class ExtractionStreamTests(unittest.TestCase):
             )
 
         self.assertEqual([message["role"] for message in adapter.messages], ["system", "user"])
-        self.assertIn("Saad", adapter.messages[0]["content"])
-        self.assertIn("Ayanokoji", adapter.messages[0]["content"])
+        self.assertIn("Mira", adapter.messages[0]["content"])
+        self.assertIn("Aster", adapter.messages[0]["content"])
         self.assertNotIn("Remember that I prefer direct answers", adapter.messages[0]["content"])
         self.assertIn("Remember that I prefer direct answers", adapter.messages[1]["content"])
         self.assertEqual(memories[0]["speaker_focus"], "assistant")

@@ -1,19 +1,12 @@
 # Titan efficiency implementation and comparison — 2026-09-22
 
 Status: implementation integrated, regression suite passed, and cache-matched
-before/after measurements completed. See Git history for commit/publication state.
+before/after measurements completed.
 
 ## Scope
 
-Branch: `cleanup/core-pipeline-audit-2026-09-22`.
 Comparison baseline: `ee6d6345e17bb0cdece53c1f5599ad88c7b0fa85`, after the earlier cleanup.
-Main, installed runtimes, live memories, and the user's separate duplication work are unchanged.
 No deployments, model switches, or dependency removals were made in this pass.
-The measurements below were completed before committing the enhancements.
-
-Ten GPT-5.6 Sol agents at medium reasoning owned five implementation lanes,
-benchmark tooling, and four independent review lanes. Changes were developed in
-isolated worktrees and integrated by the parent after source and test review.
 
 ## Implemented
 
@@ -45,8 +38,8 @@ changed. There is no approximate search or new persistent result cache.
 
 ## Verification design
 
-The user confirmed the existing retrieval, save/recovery, and startup interfaces
-as the verification boundaries. Existing regression tests and focused new
+The verification boundaries were retrieval, save/recovery, and startup interfaces.
+Existing regression tests and focused new
 cases cover full SQLite result hydration, early-return fallbacks, provider
 identity and malformed responses, scene-reference order, spool replacement and
 recovery, and first invocation of lazily loaded features.
@@ -61,12 +54,10 @@ the existing Starlette/httpx deprecation. A subsequently added benchmark-cache
 guard test also passed separately; no runtime source changed after the full
 suite. An AST comparison also confirms that
 nine duplicate/opposition/diversity/federation-merge function bodies are
-unchanged from `ee6d634`. At verification time, main pointed to `bbb454b` and
-this branch's HEAD was `ee6d634`, with the enhancements in the working tree.
+unchanged from `ee6d634`.
 
 Benchmark tooling: `tools/benchmarks/efficiency_comparison.py`.
-Authoritative raw artifacts: `/private/tmp/titan-efficiency-cachematched-verified-20260922`.
-Test report: `/private/tmp/titan-efficiency-work.nk9Ucw/verification.xml`.
+The raw benchmark artifacts and test report were kept outside the repository.
 
 The benchmark uses an untouched baseline worktree, frozen baseline settings,
 fresh isolated processes, and nine alternating before/after pairs. Local
@@ -79,15 +70,14 @@ the same virtual environment/dependency caches. The candidate source is a copy
 of the integrated worktree with bytecode excluded; source fingerprints must
 match. `PYTHONDONTWRITEBYTECODE=1` prevents new caches during the run.
 
-The earlier `/private/tmp/titan-efficiency-final-20260922` artifact is exploratory,
+An earlier run is exploratory,
 not authoritative: the original candidate checkout had valid project bytecode
 while the fresh baseline did not. This could bias cold imports and retained
 process RSS even after query warmup. The whole comparison was rerun with matched
 cache conditions rather than reporting those potentially inflated gains.
 
-Host: Apple M2 (Mac14,2), eight CPU cores, 8 GiB RAM, macOS; Python 3.11.11,
-NumPy 2.4.6, SQLite 3.47.1. One pre-benchmark host observation showed load
-averages of 5.42 / 4.60 / 4.55; competing laptop activity was not controlled.
+Environment: macOS, Python 3.11.11, NumPy 2.4.6, SQLite 3.47.1.
+Competing host activity was not controlled.
 
 Each measured retrieval result is compared structurally, including IDs, order,
 text, scores, source/scene metadata, legacy fields, and embedding bytes. Float
@@ -183,9 +173,9 @@ equivalence, source/cache guards, and report claims and found no blocker.
 
 ```bash
 .venv/bin/python tools/benchmarks/efficiency_comparison.py run \
-  --baseline-root /private/tmp/titan-efficiency-work.nk9Ucw/baseline \
-  --candidate-root /private/tmp/titan-efficiency-work.nk9Ucw/candidate-clean \
-  --artifact-dir /private/tmp/titan-efficiency-cachematched-verified-20260922 \
+  --baseline-root <baseline-checkout> \
+  --candidate-root <candidate-checkout> \
+  --artifact-dir <new-artifact-directory> \
   --counts 1000 5000 --trials 9 --queries 25 --warmups 5
 ```
 
@@ -238,7 +228,7 @@ Cross-run host state and benchmark context were not controlled. Only the new
 within-run paired comparisons support this pass's performance deltas; comparing
 its candidate directly to the old run would be misleading.
 
-Earlier method/results: `/private/tmp/titan-resource-bench.WNw4ct/README.md`.
+The earlier benchmark artifacts were kept outside the repository.
 
 ## Remaining risks
 
@@ -251,6 +241,5 @@ retries can lose automatic rediscovery, and append-versus-unlink has a race.
 This optimization does not change those cleanup paths; it preserves recovery
 processing rather than adding a broader skip gate around them.
 
-The separate duplication fix on the user's other computer was not available
-for integration testing. Its algorithms were left untouched here; combined
-branch behavior must still be checked when that work becomes available.
+Separate deduplication changes were outside this comparison; combined behavior
+still requires integration testing.

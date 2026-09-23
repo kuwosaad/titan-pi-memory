@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-    Titan-Karu Overnight Harness — launchd plist template
+    Titan Overnight Harness — launchd plist template
 
     To install:
       1. Copy this file to ~/Library/LaunchAgents/ai.titan.overnight.plist
-      2. Replace YOUR_USERNAME with your actual username
-      3. Replace /path/to/Titan-Karu-overnight with the actual path
-      4. Run: launchctl load ~/Library/LaunchAgents/ai.titan.overnight.plist
+      2. Replace the paths below with your checkout and log directory
+      3. Run: launchctl load ~/Library/LaunchAgents/ai.titan.overnight.plist
 
     To run manually without launchd:
       ./entrypoints/overnight/scripts/run_overnight.sh --manifest config/overnight_manifest.yaml
@@ -22,9 +21,9 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/YOUR_USERNAME/Desktop/Code/Titan-Karu-overnight/entrypoints/overnight/scripts/run_overnight.sh</string>
+        <string>/path/to/titan-pi-memory/entrypoints/overnight/scripts/run_overnight.sh</string>
         <string>--manifest</string>
-        <string>/Users/YOUR_USERNAME/Desktop/Code/Titan-Karu-overnight/config/overnight_manifest.yaml</string>
+        <string>/path/to/titan-pi-memory/config/overnight_manifest.yaml</string>
     </array>
 
     <!-- Run every day at 3:00 AM -->
@@ -50,14 +49,14 @@
 
     <!-- Working directory -->
     <key>WorkingDirectory</key>
-    <string>/Users/YOUR_USERNAME/Desktop/Code/Titan-Karu-overnight</string>
+    <string>/path/to/titan-pi-memory</string>
 
     <!-- Standard output/error logs -->
     <key>StandardOutPath</key>
-    <string>/Users/YOUR_USERNAME/.titan-overnight/artifacts/launchd.stdout.log</string>
+    <string>/path/to/logs/launchd.stdout.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/YOUR_USERNAME/.titan-overnight/artifacts/launchd.stderr.log</string>
+    <string>/path/to/logs/launchd.stderr.log</string>
 
     <!-- Don't restart too aggressively -->
     <key>ExitTimeOut</key>

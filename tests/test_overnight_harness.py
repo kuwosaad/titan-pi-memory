@@ -1,5 +1,5 @@
 """
-Tests for the Titan-Karu overnight retrieval harness.
+Tests for the Titan overnight retrieval harness.
 """
 
 import os

@@ -26,7 +26,7 @@ repository verification.
 - Exact-match retrieval was unreliable in at least one observed test.
 - Concrete agent work reports were frequently marked `unverified` or given low
   reliability metadata.
-- Legacy Kuwo/Karu identity labels created avoidable ambiguity.
+- Legacy personalized identity labels created avoidable ambiguity.
 - Codex had to manually deduplicate results, classify their status, and verify
   repository state before answering safely.
 

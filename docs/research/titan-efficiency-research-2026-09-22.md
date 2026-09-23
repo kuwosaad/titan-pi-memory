@@ -216,7 +216,7 @@ near-duplicate collapse 2.846 seconds (29%), candidate querying 1.710 seconds
 (17%), and cosine aggregation 0.568 seconds (5.7%). The artifact also reports
 `_row_to_memory` at 1.199 seconds across roughly 55k rows, about 1.1 million
 regex calls, 226,630 tokenizations, and 123,040 content-token calls
-(`/private/tmp/titan-resource-bench.WNw4ct/retrieval.prof`). These are
+(from a local profiling artifact). These are
 instrumented cProfile shares, not production CPU fractions or a claimed
 speedup opportunity: Python's profiler documentation warns that profilers are
 not benchmarks and that Python-call overhead differs from C-call overhead:

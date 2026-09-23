@@ -44,12 +44,12 @@ class ExtractionPromptTests(unittest.TestCase):
 
     def test_prompt_uses_configured_display_identity_and_neutral_roles(self):
         prompt = build_extract_system_prompt(
-            user_display_name="Saad",
-            assistant_display_name="Ayanokoji",
+            user_display_name="Mira",
+            assistant_display_name="Aster",
         )
 
-        self.assertIn("Saad", prompt)
-        self.assertIn("Ayanokoji", prompt)
+        self.assertIn("Mira", prompt)
+        self.assertIn("Aster", prompt)
         self.assertIn('"speaker_focus": "user"|"assistant"|"shared"|"system"', prompt)
         self.assertNotIn("Kuwo", prompt)
         self.assertNotIn("Karu", prompt)

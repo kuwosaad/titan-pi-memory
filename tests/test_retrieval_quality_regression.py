@@ -59,7 +59,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
                 "score": 0.91,
                 "memory": {
                     "id": "relevant-1",
-                    "text": "Kuwo turns discontinuity into systems of continuity.",
+                    "text": "Mira turns discontinuity into systems of continuity.",
                     "stream": "learnings",
                     "type": "pattern",
                     "session_id": "psychology",
@@ -80,7 +80,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         ]
 
         result = retrieve_memory_brief(
-            query="What psychological patterns describe Kuwo?",
+            query="What psychological patterns describe Mira?",
             limit=1,
             include_scenes=False,
         )
@@ -306,7 +306,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         }
         weak_candidate = {
             "id": "preference-memory",
-            "text": "Saad prefers concise explanations and root-cause analysis.",
+            "text": "Mira prefers concise explanations and root-cause analysis.",
             "stream": "learnings",
             "type": "user_preference",
             "session_id": "preferences",
@@ -359,7 +359,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         }
         generic_candidate = {
             "id": "generic-preference-pointer",
-            "text": "Saad has a preference for concise explanations.",
+            "text": "Mira has a preference for concise explanations.",
             "stream": "learnings",
             "type": "user_preference",
             "session_id": "preferences",
@@ -476,7 +476,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         }
         explanation = {
             "id": "simple-explanations",
-            "text": "Saad prefers concise, direct explanations with simple wording first.",
+            "text": "Mira prefers concise, direct explanations with simple wording first.",
             "stream": "learnings",
             "type": "user_preference",
             "session_id": "preferences",
@@ -487,7 +487,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         }
         collaboration = {
             "id": "delegation-frustration",
-            "text": "Saad is frustrated by slow or unreliable delegation.",
+            "text": "Mira is frustrated by slow or unreliable delegation.",
             "stream": "learnings",
             "type": "user_preference",
             "session_id": "preferences",
@@ -505,7 +505,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         ]
 
         hits = retrieve_memories(
-            query="How does Saad prefer agents to explain things, and what frustrates him in collaboration?",
+            query="How does Mira prefer agents to explain things, and what frustrates him in collaboration?",
             top_k=8,
             min_similarity=0.0,
         )
@@ -577,7 +577,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
             np.array([0.0, 1.0], dtype=np.float32),
         ]
         hits = retrieve_memories(
-            query="How should Saad explain things, and what frustrates collaboration?",
+            query="How should Mira explain things, and what frustrates collaboration?",
             top_k=1,
             min_similarity=0.0,
         )
@@ -687,7 +687,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         }
         mock_candidates.return_value = [{
             "id": "preference-memory",
-            "text": "Saad has a preference for concise explanations.",
+            "text": "Mira has a preference for concise explanations.",
             "stream": "learnings",
             "type": "user_preference",
             "session_id": "preferences",
@@ -785,7 +785,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         }
         mock_candidates.return_value = [{
             "id": "t3code-memory",
-            "text": "Kuwo uses the t3code project as a GUI for coding agents.",
+            "text": "Mira uses the t3code project as a GUI for coding agents.",
             "stream": "learnings",
             "type": "user_fact",
             "session_id": "t3code",
@@ -836,11 +836,11 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         mock_candidates.return_value = [
             {
                 "id": "retrieval-diagnosis",
-                "text": "A retrieval issue: How does Saad prefer agents to explain things? returned irrelevant memories.",
+                "text": "A retrieval issue: How does Mira prefer agents to explain things? returned irrelevant memories.",
                 "stream": "rough",
                 "type": "issue",
                 "memory_kind": "issue",
-                "speaker_focus": "kuwo",
+                "speaker_focus": "user",
                 "session_id": "diagnosis",
                 "scene_id": "diagnosis:scene:1",
                 "ts": "2026-07-01T00:00:00+00:00",
@@ -849,7 +849,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
             },
             {
                 "id": "actual-preference",
-                "text": "Saad prefers concise, direct explanations with simple wording first.",
+                "text": "Mira prefers concise, direct explanations with simple wording first.",
                 "stream": "learnings",
                 "type": "user_preference",
                 "memory_kind": "user_preference",
@@ -864,7 +864,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         mock_embed.return_value = [np.array([1.0, 0.0], dtype=np.float32)]
 
         hits = retrieve_memories(
-            query="How does Saad prefer agents to explain things?",
+            query="How does Mira prefer agents to explain things?",
             top_k=8,
             min_similarity=0.0,
         )

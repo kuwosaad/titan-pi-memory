@@ -186,6 +186,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                 [NPM, "install", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", str(install), str(malformed)],
                 cwd=state,
                 env=env,
+                timeout=90,
             )
             self.assertEqual(installed.returncode, 0, installed.stderr)
             cli = install / "node_modules" / "titan-memory-cli" / "bin" / "titan.js"
