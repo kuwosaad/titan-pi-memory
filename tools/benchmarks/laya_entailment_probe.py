@@ -29,12 +29,12 @@ SOURCE = "https://github.com/NandhaKishorM/laya/blob/main/research/scripts/build
 # Authored and frozen before inference. These are sanity checks, not a benchmark.
 CONTROLS = [
     ("exact", "Titan stores memories in SQLite.", "Titan stores memories in SQLite.", True),
-    ("paraphrase", "Saad prefers concise answers.", "Saad likes responses that are brief.", True),
+    ("paraphrase", "The user prefers concise answers.", "The user likes responses that are brief.", True),
     ("subsumption", "Titan stores memories in a local SQLite database.", "Titan stores memories in SQLite.", True),
     ("subsumption_reverse", "The team chose Python.", "The team chose Python for its memory service on Monday.", True),
     ("partial_overlap", "The team chose SQLite on Monday.", "The team chose SQLite for its local memory service.", True),
     ("number", "The retry limit is 3 attempts.", "The retry limit is 5 attempts.", False),
-    ("negation", "Saad wants automatic memory merging enabled.", "Saad does not want automatic memory merging enabled.", False),
+    ("negation", "The user wants automatic memory merging enabled.", "The user does not want automatic memory merging enabled.", False),
     ("planned_done", "The migration is planned for Friday.", "The migration finished on Friday.", False),
     ("entity", "Mira approved the release.", "Omar approved the release.", False),
     ("steps", "The pipeline extracts memories from a conversation.", "The pipeline embeds the extracted memories.", False),
@@ -46,15 +46,35 @@ CONTROLS = [
 
 
 def live_fingerprints():
+    """Check only databases explicitly selected for this benchmark run."""
+    selected = os.environ.get("TITAN_BENCH_VERIFY_DBS", "")
+    if not selected:
+        return None
     rows = []
-    for path in sorted((Path.home() / ".titan/agents").glob("*/out/memories/memory_store.db")):
+    paths = sorted({Path(value).expanduser().resolve(strict=True)
+                    for value in selected.split(os.pathsep) if value})
+    for path in paths:
         digest, n = hashlib.sha256(), 0
         with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as conn:
             for row in conn.execute("SELECT * FROM memories ORDER BY id"):
                 digest.update(json.dumps(row, ensure_ascii=False, default=lambda v: v.hex()).encode())
                 n += 1
-        rows.append({"path": str(path), "records": n, "sha256": digest.hexdigest()})
+        rows.append({"database": f"db-{len(rows) + 1}", "records": n, "sha256": digest.hexdigest()})
     return rows
+
+
+def verify_live_fingerprints(before_path: Path):
+    before = read_json(before_path)
+    if before is None:
+        return None
+    current = live_fingerprints()
+    if current is None:
+        return None
+    # Historical reports included local paths; compare their content without
+    # requiring those paths to appear in newly generated reports.
+    before = [{"database": f"db-{i + 1}", "records": row["records"],
+               "sha256": row["sha256"]} for i, row in enumerate(before)]
+    return current == before
 
 
 def main():
@@ -147,7 +167,7 @@ def main():
                           "missed_positives": sorted(gold - flagged),
                           "mutual_entailment_ids": [r["pair_id"] for r in subset if r["mutual_entailment"]],
                           "elapsed_ms": round(sum(r["elapsed_ms"] for r in subset), 1)}
-    summary["live_unchanged_after_inference"] = live_fingerprints() == read_json(run / "live_before.json")
+    summary["live_unchanged_after_inference"] = verify_live_fingerprints(run / "live_before.json")
     write_json(run / "summary.json", summary)
     print(json.dumps(summary, indent=2))
 

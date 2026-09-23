@@ -43,18 +43,18 @@ There were no inference failures or retries. Jev completed 43 hosted batches, re
 
 | Conversation | Memories / pairs | Jev positive pairs found | Laya positive pairs found | Saved after Jev / Laya review |
 |---|---:|---:|---:|---:|
-| Branch merge discussion | 20 / 190 | 3/3 | 3/3 | 17 / 17 |
-| Design-guide discussion | 23 / 253 | 4/4 | 2/4 | 19 / 21 |
-| Circular-import investigation | 15 / 105 | 12/13 | 3/13 | 9 / 12 |
-| Skill review and installation | 13 / 78 | 4/7 | 2/7 | 10 / 11 |
+| Session A | 20 / 190 | 3/3 | 3/3 | 17 / 17 |
+| Session B | 23 / 253 | 4/4 | 2/4 | 19 / 21 |
+| Session C | 15 / 105 | 12/13 | 3/13 | 9 / 12 |
+| Session D | 13 / 78 | 4/7 | 2/7 | 10 / 11 |
 
 ## What the errors mean
 
-Jev often confused repeated subject matter with repeated information: a concrete stash action with a general stash policy, an investigation request with its finding, or an installation request with completion. Review rejected these suggestions.
+Jev often confused repeated subject matter with repeated information: a concrete action with a general policy, an investigation request with its finding, or a request with its completion. Review rejected these suggestions.
 
-Laya also confused some lifecycle states. Its smaller candidate list did not consistently contain better matches. It missed the repeated design-guide definition with complementary styling details, the completed repository move, and much of the repeated import-cycle description. This fits the known limitation of directional entailment: each memory can add facts absent from the other, even when a reviewer could safely consolidate the repeated core information.
+Laya also confused some lifecycle states. Its smaller candidate list did not consistently contain better matches. It missed repeated definitions with complementary details, a completed action, and much of a repeated technical description. This fits the known limitation of directional entailment: each memory can add facts absent from the other, even when a reviewer could safely consolidate the repeated core information.
 
-Both models missed the complementary pre-install inspection workflow pair. Jev reached only two of three records describing a completed skill installation; Laya reached none. We merged only the candidate-connected subsets that passed review, rather than adding missed memories from the gold labels. The best possible result under all frozen clear groups would have been 53 records.
+Both models missed a complementary inspection-workflow pair. Jev reached only two of three records describing a completed action; Laya reached none. We merged only the candidate-connected subsets that passed review, rather than adding missed memories from the gold labels. The best possible result under all frozen clear groups would have been 53 records.
 
 Candidate links were never treated as automatic permission to merge. Negative and borderline suggestions were retained separately. Every proposed group or partial group received explicit text review.
 
@@ -64,7 +64,7 @@ Eight separate scratch SQLite stores were created, one per conversation/model. A
 
 The save helper was narrowly updated to preserve both sides of source provenance, record source-qualified lineage, accept isolated session names, and embed unchanged records that lacked vectors. Source-event unions, source identities, both provenance sides, final wording and 768-dimensional vectors were verified. The scratch records use representative classification fields; full original metadata remains in the snapshots and lineage artifacts. A production metadata merge policy was not implemented.
 
-A separate Luna audit checked the 12 full-group merged texts without reading model outputs. It found no material factual loss and requested one precision improvement: explicitly state the reverse import edge in the detailed cycle description. That wording was improved in the final Jev review, re-embedded and saved again; the previous scratch version was retained. The primary orchestrator separately checked the three partial-group rewrites. All final saves passed verification after the amendment. No additional factual loss was found relative to the selected baseline memories; this does not establish that every original extraction was correct.
+A separate Luna audit checked the 12 full-group merged texts without reading model outputs. It found no material factual loss and requested one precision improvement in a technical description. That wording was improved in the final Jev review, re-embedded and saved again; the previous scratch version was retained. The primary orchestrator separately checked the three partial-group rewrites. All final saves passed verification after the amendment. No additional factual loss was found relative to the selected baseline memories; this does not establish that every original extraction was correct.
 
 All three live memory stores (3,120 rows) retained identical read-only fingerprints. Canonical main remains clean. Prototype scripts compile; all eight final scratch stores passed readback and lineage checks. No production files or real memories were changed.
 
@@ -79,6 +79,8 @@ This is four conversations and 12 duplicate groups, not 626 independent positive
 ## Artifacts and reproduction
 
 Private snapshots, provenance and outputs remain under ignored `.bench/jev-laya-expanded/`. Key files are `manifest.json`, `comparison.json`, `verification.json`, `final_fact_audit.json`, `fact_audit_resolution.json`, the two model reports, and each `batch*/{jev,laya}/reviewed.json` and `reviewed_saved.json`. Do not commit this directory.
+
+New runs do not inspect any live Titan database by default. To compare an explicitly selected database before and after a run, set `TITAN_BENCH_VERIFY_DBS` to its path (or a path-separated list). The fingerprint report uses anonymous labels rather than exporting database paths.
 
 `tools/benchmarks/jev_laya_expanded.py` provides freeze, model-run, evaluation and verification phases; `tools/benchmarks/jev_save_review.py` persists explicitly approved results. Run inference only in a fresh prepared directory; it refuses to overwrite an existing model report. Verification can be repeated safely:
 

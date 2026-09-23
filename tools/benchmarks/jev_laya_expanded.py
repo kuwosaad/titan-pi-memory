@@ -12,7 +12,7 @@ import time
 
 from jev_duplicate_prototype import judge_pairs, read_json, write_json
 from jev_save_review import SIMPLE_INSTRUCTIONS, SIMPLE_OPTIONS
-from laya_entailment_probe import QUESTION, live_fingerprints
+from laya_entailment_probe import QUESTION, live_fingerprints, verify_live_fingerprints
 
 
 def digest(path):
@@ -49,6 +49,7 @@ def freeze(root):
         "review_policy": "Use predeclared source-reviewed groups; reject negative/ambiguous edges. Review connected candidate subsets explicitly; preserve other records unchanged.",
         "batches": batches, "frozen_before_inference": True,
     })
+    write_json(root / "live_before.json", live_fingerprints())
 
 
 def inputs(root):
@@ -260,10 +261,11 @@ def verify(root):
                     assert all(frozenset(pair) in gold_pairs for pair in itertools.combinations(group["members"], 2))
             checks.append({"batch": b, "model": model, "saved": saved["count"],
                            "newly_embedded": saved["newly_embedded"], "partition_text_vectors_provenance_lineage_verified": True})
-    assert live_fingerprints() == read_json(root / "live_before.json")
-    write_json(root / "verification.json", {"checks": checks, "live_stores_unchanged": True,
+    live_unchanged = verify_live_fingerprints(root / "live_before.json")
+    assert live_unchanged is not False
+    write_json(root / "verification.json", {"checks": checks, "live_stores_unchanged": live_unchanged,
                                             "frozen_inputs_labels_unchanged": True})
-    print("Verified all eight scratch stores, every original's lineage and both provenance sides; live stores unchanged.")
+    print("Verified all eight scratch stores, every original's lineage and both provenance sides.")
 
 
 def main():
