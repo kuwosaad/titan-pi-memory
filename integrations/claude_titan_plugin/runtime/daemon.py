@@ -309,7 +309,7 @@ class RuntimeGateway:
         await send({"type": "http.response.body", "body": body})
 
 
-def _start_workers(module: Any) -> tuple[threading.Event, threading.Event, threading.Event]:
+def _start_workers(module: Any) -> threading.Event:
     ingest_stop = threading.Event()
     interval = float(os.getenv("TITAN_AUTO_INGEST_INTERVAL_SECONDS", "3"))
     threading.Thread(
@@ -318,22 +318,7 @@ def _start_workers(module: Any) -> tuple[threading.Event, threading.Event, threa
         daemon=True,
         name="titan-auto-ingest",
     ).start()
-    dedup_stop = threading.Event()
-    module.start_dedup_worker(dedup_stop)
-    lnn_stop = threading.Event()
-    settings = module.load_settings() if hasattr(module, "load_settings") else None
-    if settings is None:
-        from app.retrieval_pipeline.config import load_settings
-
-        settings = load_settings()
-    if settings.get("lnn", {}).get("enabled") and settings.get("lnn", {}).get("tick_enabled", True):
-        module.start_lnn_tick_worker(
-            lnn_stop,
-            interval_seconds=float(settings.get("lnn", {}).get("decay_tick_seconds", 60.0)),
-            tau_disuse_decay=float(settings.get("lnn", {}).get("tau_disuse_decay", 0.01)),
-            weight_decay=float(settings.get("lnn", {}).get("weight_decay", 0.001)),
-        )
-    return ingest_stop, dedup_stop, lnn_stop
+    return ingest_stop
 
 
 def _fallback_event_sort_key(event: dict[str, Any], source: Path, line_number: int) -> tuple:
@@ -446,8 +431,7 @@ async def _serve_owned(args: argparse.Namespace) -> None:
         monitor.cancel()
         fallback_task.cancel()
         gateway.close()
-        for event in workers:
-            event.set()
+        workers.set()
         current = read_state(args.agent)
         if current and current.pid == os.getpid() and current.owner_nonce == args.owner_nonce:
             state_path(args.agent).unlink(missing_ok=True)

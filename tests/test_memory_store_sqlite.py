@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import numpy as np
 
+from app.retrieval_pipeline.retriever import retrieve_memories
 import app.storage.memories as memories
 from app.storage.repository import CandidateFilters
 from app.storage.sqlite import sqlite_connection
@@ -215,6 +216,100 @@ class MemoryStoreSqliteTests(unittest.TestCase):
             self.assertEqual(len(candidates), 1)
             self.assertEqual(candidates[0]["id"], "s1:1:0")
             self.assertEqual(candidates[0]["scene_id"], "s1:scene:e-1")
+
+    def test_retrieve_memories_preserves_full_sqlite_candidate_payload(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            repo = memories.SqliteMemoryRepository(sqlite_file)
+            record = {
+                **_sample_records()[0],
+                "h": 0.25,
+                "tau": 0.75,
+                "outgoing_weights": {"s1:2:0": 0.4},
+                "incoming_weights": {"s0:9:0": 0.2},
+            }
+            repo.append_memories([record])
+            settings = {
+                "retrieval_top_k": 1,
+                "retrieval_min_similarity": 0.0,
+                "retrieval_recency_days": None,
+                "retrieval_session_bias": False,
+                "retrieval": {"min_reliability": 0.0},
+                "retrieval_dedup": {"enabled": False},
+                "retrieval_selection": {"enabled": False},
+            }
+
+            with patch(
+                "app.retrieval_pipeline.config.load_settings",
+                return_value=settings,
+            ), patch(
+                "app.retrieval_pipeline.retriever.embed",
+                return_value=[np.array([1.0, 0.0, 0.5], dtype=np.float32)],
+            ):
+                hits = retrieve_memories(
+                    "idempotency",
+                    repository=repo,
+                    top_k=1,
+                    min_similarity=0.0,
+                )
+
+            self.assertEqual(len(hits), 1)
+            memory = hits[0]["memory"]
+            self.assertEqual(memory["provenance"], {"user": "u1", "assistant": "a1"})
+            self.assertEqual(memory["h"], 0.25)
+            self.assertEqual(memory["tau"], 0.75)
+            self.assertEqual(memory["outgoing_weights"], {"s1:2:0": 0.4})
+            self.assertEqual(memory["incoming_weights"], {"s0:9:0": 0.2})
+            self.assertIsNone(memory["embedding"])
+            self.assertEqual(memory["_embedding_dim"], 3)
+            self.assertEqual(memory["_embedding_dtype"], "f32")
+            self.assertNotIn("_retrieval_repository", memory)
+
+    def test_retrieve_memories_hydrates_sqlite_candidates_on_early_returns(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sqlite_file = Path(tmp_dir) / "memory_store.db"
+            repo = memories.SqliteMemoryRepository(sqlite_file)
+            repo.append_memories([_sample_records()[0]])
+            settings = {
+                "retrieval_top_k": 1,
+                "retrieval_min_similarity": 0.0,
+                "retrieval_recency_days": None,
+                "retrieval_session_bias": False,
+                "retrieval": {"min_reliability": 0.0},
+                "retrieval_dedup": {"enabled": False},
+                "retrieval_selection": {"enabled": False},
+            }
+
+            with patch(
+                "app.retrieval_pipeline.config.load_settings",
+                return_value=settings,
+            ):
+                date_only_hits = retrieve_memories(
+                    "",
+                    repository=repo,
+                    top_k=1,
+                    min_similarity=0.0,
+                )
+
+            with patch(
+                "app.retrieval_pipeline.config.load_settings",
+                return_value=settings,
+            ), patch(
+                "app.retrieval_pipeline.retriever.embed",
+                side_effect=ConnectionError("embedding unavailable"),
+            ):
+                fallback_hits = retrieve_memories(
+                    "idempotency",
+                    repository=repo,
+                    top_k=1,
+                    min_similarity=0.0,
+                )
+
+            expected_provenance = {"user": "u1", "assistant": "a1"}
+            self.assertEqual(date_only_hits[0]["memory"]["provenance"], expected_provenance)
+            self.assertEqual(fallback_hits[0]["memory"]["provenance"], expected_provenance)
+            self.assertNotIn("_retrieval_repository", date_only_hits[0]["memory"])
+            self.assertNotIn("_retrieval_repository", fallback_hits[0]["memory"])
 
     def test_sqlite_db_has_human_readable_metadata_and_memory_view(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

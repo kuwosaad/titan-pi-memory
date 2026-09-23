@@ -2,13 +2,6 @@ from typing import Any, Dict, List, Literal, Mapping, Optional
 from pydantic import BaseModel, Field, model_validator
 
 
-class Message(BaseModel):
-    role: str = Field(..., description="Message role: 'user' or 'assistant'")
-    content: str = Field(..., description="Message content")
-    ts: Optional[str] = Field(None, description="ISO timestamp")
-    turn: Optional[int] = Field(None, description="Turn number in conversation")
-
-
 class Memory(BaseModel):
     id: str = Field(..., description="Unique memory ID")
     text: str = Field(..., description="Memory text content")
@@ -36,12 +29,6 @@ class Memory(BaseModel):
     tau: float = Field(0.5, description="Time constant controlling decay rate (0.05-0.95, adapts over time)")
     incoming_weights: Optional[Dict[str, float]] = Field(None, description="Synaptic weights from other memories into this one")
     outgoing_weights: Optional[Dict[str, float]] = Field(None, description="Synaptic weights from this memory to other memories")
-
-
-class Session(BaseModel):
-    id: str = Field(..., description="Unique session ID")
-    created_at: str = Field(..., description="ISO timestamp of creation")
-    messages: List[Message] = Field(default_factory=list, description="Conversation messages")
 
 
 class SceneMessage(BaseModel):

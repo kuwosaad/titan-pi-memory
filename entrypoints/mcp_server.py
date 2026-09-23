@@ -25,29 +25,10 @@ TITAN_HOME = _RUNTIME_CONTEXT.titan_home
 os.environ.setdefault("TITAN_BASE_DIR", str(_RUNTIME_CONTEXT.base_dir))
 
 
-def _load_env_file(path: Path) -> None:
-    if not path.exists():
-        return
-
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            continue
-        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
-            value = value[1:-1]
-        os.environ.setdefault(key, value)
-
-
-from app.graph.clusters import inspect_memory_clusters
-from app.graph.cortex_analysis import analyze_memory_clusters
-from app.patterns import api as patterns_api
+from app.graph.adapter import inspect_memory_clusters, analyze_memory_clusters
+from app.patterns import adapter as patterns_api
 from app.patterns.errors import PatternError
-from app.patterns.bundle import export_pattern_bundle, import_pattern_bundle
+from app.patterns.adapter import export_pattern_bundle, import_pattern_bundle
 from app.save_pipeline.pipeline import (
     get_scene_context as build_scene_context,
     handle_trace_packet,
@@ -56,11 +37,9 @@ from app.save_pipeline.pipeline import (
     scene_references_from_memories,
     serialize_public_memory,
 )
-from app.storage.memories import get_memory_count, get_recent_memories as load_recent_memories, get_memory_repository, get_lnn_state_repository
+from app.storage.memories import get_memory_count, get_recent_memories as load_recent_memories, get_memory_repository
 from app.storage.models import TraceEvent, TracePacketRequest, TraceToolCall
 from app.save_pipeline.auto_ingest import _auto_ingest_loop
-from app.save_pipeline.dedup_worker import start_dedup_worker
-from app.save_pipeline.lnn_tick_worker import start_lnn_tick_worker
 from integrations.codex_titan_plugin.pending_recovery import (
     inspect_codex_stop_hook,
     pending_recovery_enabled,
@@ -410,7 +389,6 @@ async def doctor() -> dict:
     provider_keys = _provider_key_status(agent_home)
     memory_count = get_memory_count()
     memory_repository = get_memory_repository()
-    lnn_supported = get_lnn_state_repository() is not None
     agent_namespace = agent_home
     default_recall_sources = _default_recall_sources(agent_name, shared_home)
     # Recall always goes through the read-only federation seam.  Its source
@@ -485,8 +463,6 @@ async def doctor() -> dict:
         "memory_backend": str(_RUNTIME_CONTEXT.memory_backend),
         "memory_capabilities": {
             "memory_store": True,
-            "lnn_state_store": lnn_supported,
-            "lnn_status": "enabled" if lnn_supported else "unsupported for selected backend",
             "adapter": memory_repository.__class__.__name__,
         },
         "cross_agent_memory": cross_agent_memory,
@@ -718,23 +694,10 @@ def run() -> None:
         name="titan-auto-ingest",
     ).start()
 
-    dedup_stop = threading.Event()
-    start_dedup_worker(dedup_stop)
-
-    from app.retrieval_pipeline.config import load_settings
-    settings = load_settings()
-    lnn_stop = threading.Event()
-    if settings.get("lnn", {}).get("enabled") and settings.get("lnn", {}).get("tick_enabled", True):
-        tick_interval = float(settings.get("lnn", {}).get("decay_tick_seconds", 60.0))
-        tau_disuse = float(settings.get("lnn", {}).get("tau_disuse_decay", 0.01))
-        weight_decay = float(settings.get("lnn", {}).get("weight_decay", 0.001))
-        start_lnn_tick_worker(lnn_stop, interval_seconds=tick_interval, tau_disuse_decay=tau_disuse, weight_decay=weight_decay)
     try:
         server.run("stdio")
     finally:
         ing_stop.set()
-        dedup_stop.set()
-        lnn_stop.set()
 
 
 if __name__ == "__main__":

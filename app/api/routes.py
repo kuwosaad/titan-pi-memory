@@ -18,20 +18,20 @@ from app.save_pipeline.pipeline import (
 )
 from app.save_pipeline.extraction.extractor import is_hidden_metadata_memory
 from app.retrieval_pipeline.federated import _source_list, _validate_agent_name
-from app.graph.builder import build_graph
-from app.graph.clusters import inspect_memory_clusters
-from app.graph.cortex_analysis import analyze_memory_clusters
+from app.graph.adapter import build_graph, inspect_memory_clusters, analyze_memory_clusters
 from app.storage.memories import get_memory_count, get_recent_memories
 from app.storage.models import TraceEvent, TracePacketRequest
 from app.storage.sessions import ensure_dirs
-from app.patterns.bundle import export_pattern_bundle, import_pattern_bundle
-from app.patterns.graph import build_pattern_graph, build_pattern_graph_data
-from app.patterns.api import (
+from app.patterns.adapter import (
     PatternCreateRequest,
     PatternApplicationCreateRequest,
     PatternApplicationOutcomeRequest,
     PatternEvidencePacketRequest,
     PatternMarkProcessedRequest,
+    export_pattern_bundle,
+    import_pattern_bundle,
+    build_pattern_graph,
+    build_pattern_graph_data,
     accept_pattern as accept_pattern_impl,
     create_pattern as create_pattern_impl,
     get_evidence_packet as get_evidence_packet_impl,
@@ -106,11 +106,6 @@ def runtime() -> dict:
         "memory_capabilities": {
             **capabilities,
             "adapter": memory_repository.__class__.__name__,
-            "lnn_status": (
-                "enabled"
-                if capabilities.get("lnn_state_store")
-                else "unsupported for selected backend"
-            ),
         },
     }
 

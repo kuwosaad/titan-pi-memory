@@ -192,10 +192,57 @@ class ReleaseArtifactTests(unittest.TestCase):
             isolated_cwd = state / "cwd"
             isolated_cwd.mkdir()
             result = run(["node", str(cli), "codex", "list-tools", "--json"], cwd=isolated_cwd, env=env)
-            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            self.assertIn("analyze_clusters", json.loads(result.stdout)["tools"])
             self.assertNotIn("PYTHONPATH", env)
             self.assertNotIn("PYTHONHOME", env)
-            self.assertIn("cortex_analysis", result.stderr)
+
+            requests = [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "artifact-isolation-test", "version": "1"},
+                    },
+                },
+                {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": "analyze_clusters", "arguments": {"cluster_ids": "1"}},
+                },
+            ]
+            invoked = subprocess.run(
+                ["node", str(cli), "mcp"],
+                cwd=isolated_cwd,
+                env=env,
+                input="\n".join(json.dumps(request) for request in requests) + "\n",
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=TIMEOUT,
+            )
+            responses = []
+            for line in invoked.stdout.splitlines():
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if message.get("id") == 2:
+                    responses.append(message)
+            self.assertEqual(len(responses), 1, invoked.stderr or invoked.stdout)
+            call_response = responses[0]
+            self.assertTrue(
+                "error" in call_response or call_response.get("result", {}).get("isError"),
+                call_response,
+            )
+            diagnostics = f"{json.dumps(call_response)}\n{invoked.stderr}"
+            self.assertIn("cortex_analysis", diagnostics)
+            self.assertNotIn(str(ROOT), diagnostics)
 
             gate = run([sys.executable, str(GATE), "--artifact", str(malformed)], cwd=ROOT)
             self.assertNotEqual(gate.returncode, 0)

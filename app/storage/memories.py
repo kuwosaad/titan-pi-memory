@@ -11,7 +11,7 @@ from typing import Any, ContextManager, Dict, List, Optional, Tuple
 import numpy as np
 
 from .models import Memory
-from .repository import CandidateFilters, MemoryRepository, MemoryStore, LnnStateStore, get_lnn_state_store
+from .repository import CandidateFilters, MemoryStore
 from .sessions import BASE_DIR, MEMORIES_DIR, read_json, write_json
 from . import sessions as _sessions
 from .sqlite import sqlite_connection
@@ -24,7 +24,7 @@ DEFAULT_SQLITE_FILE = MEMORIES_DIR / "memory_store.db"
 _MEMORY_ROOT = MEMORIES_DIR
 SQLITE_TIMEOUT_SECONDS = 30.0
 _MEMORIES_LOCK = threading.RLock()
-_REPO_CACHE: Optional[MemoryRepository] = None
+_REPO_CACHE: Optional[MemoryStore] = None
 _REPO_CACHE_KEY: Optional[Tuple[str, str]] = None
 # Stable production-resolver marker.  Federation uses this rather than
 # comparing module attributes, which can both point at a test double when
@@ -41,6 +41,7 @@ _ALLOWED_MEMORY_KINDS = {
     "workflow",
     "issue",
 }
+_RETRIEVAL_REPOSITORY_KEY = "_retrieval_repository"
 
 
 def _refresh_json_paths() -> None:
@@ -238,14 +239,7 @@ def _is_database_locked_error(exc: Exception) -> bool:
 
 
 class JsonMemoryRepository:
-    """Legacy JSON adapter for basic MemoryStore operations.
-
-    JSON files remain intentionally supported for migration and simple reads,
-    but they are not an LNN state store.  The legacy LNN methods below are kept
-    as compatibility shims; new callers must use ``get_lnn_state_store``.
-    """
-
-    supports_lnn = False
+    """Legacy JSON adapter for basic MemoryStore operations."""
 
     def __init__(self, memories_file: Optional[Path] = None) -> None:
         # The optional path is an internal seam for isolated namespace reads.
@@ -255,10 +249,6 @@ class JsonMemoryRepository:
     @property
     def _path(self) -> Path:
         return self.memories_file or MEMORIES_FILE
-
-    @property
-    def capabilities(self) -> Dict[str, bool]:
-        return {"memory_store": True, "lnn_state_store": False}
 
     def load_all_memories(self) -> List[Dict[str, Any]]:
         with _MEMORIES_LOCK:
@@ -380,98 +370,8 @@ class JsonMemoryRepository:
         by_id = {mem["id"]: mem for mem in memories if mem.get("id") in set(memory_ids)}
         return by_id
 
-    def get_strong_neighbors(self, memory_id: str, min_weight: float = 0.35, max_neighbors: int = 8) -> List[Tuple[str, float, float]]:
-        memories = self.load_all_memories()
-        neighbors: List[Tuple[str, float, float]] = []
-
-        source = next((m for m in memories if m.get("id") == memory_id), None)
-        if source:
-            outgoing = source.get("outgoing_weights") or {}
-            if isinstance(outgoing, dict):
-                for tid, w in outgoing.items():
-                    w = float(w)
-                    if w >= min_weight and tid != memory_id:
-                        target = next((m for m in memories if m.get("id") == tid), None)
-                        tau = float(target["tau"]) if target else 0.3
-                        neighbors.append((tid, w, tau))
-
-            for other in memories:
-                if other.get("id") == memory_id:
-                    continue
-                rev_outgoing = other.get("outgoing_weights") or {}
-                if isinstance(rev_outgoing, dict) and memory_id in rev_outgoing:
-                    w = float(rev_outgoing[memory_id])
-                    if w >= min_weight:
-                        tau = float(other["tau"])
-                        neighbors.append((other["id"], w, tau))
-
-        seen: set[str] = set()
-        deduped: List[Tuple[str, float, float]] = []
-        for nid, w, t in neighbors:
-            if nid in seen:
-                continue
-            seen.add(nid)
-            deduped.append((nid, w, t))
-        deduped.sort(key=lambda x: x[1], reverse=True)
-        return deduped[:max_neighbors]
-
-    def update_lnn_state(self, memory_id: str, h: Optional[float] = None, tau: Optional[float] = None,
-                         outgoing_weights: Optional[Dict[str, float]] = None,
-                         incoming_weights: Optional[Dict[str, float]] = None) -> None:
-        with _MEMORIES_LOCK:
-            all_memories = read_json(self._path, [])
-            for mem in all_memories:
-                if mem.get("id") == memory_id:
-                    if h is not None:
-                        mem["h"] = float(h)
-                    if tau is not None:
-                        mem["tau"] = min(0.95, max(0.05, float(tau)))
-                    if outgoing_weights is not None:
-                        mem["outgoing_weights"] = outgoing_weights
-                    if incoming_weights is not None:
-                        mem["incoming_weights"] = incoming_weights
-                    break
-            write_json(self._path, all_memories)
-
-    def batch_update_weights(self, weight_deltas: List[Tuple[str, str, float]]) -> None:
-        if not weight_deltas:
-            return
-        by_source: Dict[str, Dict[str, float]] = {}
-        for source_id, target_id, delta in weight_deltas:
-            if source_id not in by_source:
-                by_source[source_id] = {}
-            by_source[source_id][target_id] = by_source[source_id].get(target_id, 0.0) + delta
-        with _MEMORIES_LOCK:
-            all_memories = read_json(self._path, [])
-            for mem in all_memories:
-                mid = mem.get("id")
-                if mid in by_source:
-                    current = mem.get("outgoing_weights") or {}
-                    if isinstance(current, list):
-                        current = {}
-                    current = dict(current)
-                    for tid, delta in by_source[mid].items():
-                        current[tid] = min(current.get(tid, 0.0) + delta, 1.0)
-                    current = {k: v for k, v in current.items() if abs(v) > 0.001}
-                    mem["outgoing_weights"] = current if current else None
-            write_json(self._path, all_memories)
-
-    def decay_all_activations(self, tau_disuse_decay: float, dt_minutes: float) -> None:
-        pass
-
-    def decay_all_tau(self, tau_disuse_decay: float, dt_minutes: float) -> None:
-        pass
-
-    def decay_all_weights(self, weight_decay: float) -> None:
-        pass
-
-
 class SqliteMemoryRepository:
-    supports_lnn = True
-
-    @property
-    def capabilities(self) -> Dict[str, bool]:
-        return {"memory_store": True, "lnn_state_store": bool(self.supports_lnn)}
+    """SQLite memory adapter; LNN state remains readable as stored fields."""
     def __init__(self, db_path: Path, *, initialize: bool = True) -> None:
         self.db_path = db_path
         # Federation constructs this adapter with ``initialize=False`` for
@@ -480,7 +380,6 @@ class SqliteMemoryRepository:
         if initialize:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._read_only = not initialize
-        self.supports_lnn = not self._read_only
         self._lock = threading.RLock()
         if initialize:
             self._init_schema()
@@ -673,6 +572,34 @@ class SqliteMemoryRepository:
             memory["_embedding_dtype"] = dtype
         return memory
 
+    def _row_to_retrieval_candidate(self, row: sqlite3.Row) -> Dict[str, Any]:
+        """Build the private lean record used only while retrieval ranks candidates."""
+
+        memory: Dict[str, Any] = {
+            "id": row["id"],
+            "text": row["text"],
+            "type": row["type"],
+            "stream": row["stream"],
+            "ts": row["ts"],
+            "session_id": row["session_id"],
+            "turn": row["turn"],
+            "scene_id": row["scene_id"],
+            "source_event_ids": json.loads(row["source_event_ids_json"] or "[]"),
+            "source_type": row["source_type"],
+            "source_reliability": float(row["source_reliability"]),
+            "verification_status": row["verification_status"],
+            "fallback_generated": bool(row["fallback_generated"]),
+            "speaker_focus": row["speaker_focus"],
+            "memory_kind": row["memory_kind"],
+            "embedding": None,
+            "_embedding_blob": row["embedding_blob"],
+            "_embedding_dim": row["embedding_dim"],
+            "_embedding_dtype": row["embedding_dtype"],
+            _RETRIEVAL_REPOSITORY_KEY: self,
+        }
+        memory["memory_kind"] = _normalize_memory_kind(memory)
+        return memory
+
     def append_memories(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not records:
             return []
@@ -774,7 +701,14 @@ class SqliteMemoryRepository:
             rows = conn.execute(query, (int(limit),)).fetchall()
         return [row["session_id"] for row in rows if row["session_id"]]
 
-    def _filtered_rows(self, filters: CandidateFilters, session_id: Optional[str] = None, fts_rowids: Optional[set[int]] = None) -> List[sqlite3.Row]:
+    def _filtered_rows(
+        self,
+        filters: CandidateFilters,
+        session_id: Optional[str] = None,
+        fts_rowids: Optional[set[int]] = None,
+        *,
+        retrieval_projection: bool = False,
+    ) -> List[sqlite3.Row]:
         clauses = ["source_reliability >= ?"]
         params: List[Any] = [float(filters.min_reliability)]
 
@@ -813,8 +747,41 @@ class SqliteMemoryRepository:
             where = f"({where}) AND rowid IN ({placeholders})"
             params.extend(list(fts_rowids))
 
-        query = f"SELECT * FROM memories WHERE {where} ORDER BY ts DESC"
         with self._lock, self._connect() as conn:
+            projection = "*"
+            if retrieval_projection:
+                columns = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(memories)").fetchall()
+                }
+                optional = {
+                    "scene_id": "NULL",
+                    "speaker_focus": "NULL",
+                    "memory_kind": "NULL",
+                }
+                projected = [
+                    "id",
+                    "text",
+                    "type",
+                    "stream",
+                    "ts",
+                    "session_id",
+                    "turn",
+                    *[
+                        name if name in columns else f"{fallback} AS {name}"
+                        for name, fallback in optional.items()
+                    ],
+                    "source_event_ids_json",
+                    "source_type",
+                    "source_reliability",
+                    "verification_status",
+                    "fallback_generated",
+                    "embedding_blob",
+                    "embedding_dim",
+                    "embedding_dtype",
+                ]
+                projection = ", ".join(projected)
+            query = f"SELECT {projection} FROM memories WHERE {where} ORDER BY ts DESC"
             return conn.execute(query, params).fetchall()
 
     def query_candidates(self, filters: CandidateFilters) -> List[Dict[str, Any]]:
@@ -825,6 +792,19 @@ class SqliteMemoryRepository:
         else:
             rows = self._filtered_rows(filters, session_id=None)
         return [self._row_to_memory(row, decode_embedding=False, include_blob=True) for row in rows]
+
+    def _query_retrieval_candidates(self, filters: CandidateFilters) -> List[Dict[str, Any]]:
+        if filters.session_id and filters.session_bias:
+            rows = self._filtered_rows(
+                filters,
+                session_id=filters.session_id,
+                retrieval_projection=True,
+            )
+            if not rows:
+                rows = self._filtered_rows(filters, session_id=None, retrieval_projection=True)
+        else:
+            rows = self._filtered_rows(filters, session_id=None, retrieval_projection=True)
+        return [self._row_to_retrieval_candidate(row) for row in rows]
 
     def _fts5_search(self, fts_query: str) -> Optional[set[int]]:
         try:
@@ -852,95 +832,54 @@ class SqliteMemoryRepository:
                 return [self._row_to_memory(row, decode_embedding=False, include_blob=True) for row in rows]
         return self.query_candidates(filters)
 
-    def update_lnn_state(self, memory_id: str, h: Optional[float] = None, tau: Optional[float] = None,
-                         outgoing_weights: Optional[Dict[str, float]] = None,
-                         incoming_weights: Optional[Dict[str, float]] = None) -> None:
-        set_clauses: List[str] = []
-        params: List[Any] = []
-        if h is not None:
-            set_clauses.append("h = ?")
-            params.append(float(h))
-        if tau is not None:
-            tau_val = min(0.95, max(0.05, float(tau)))
-            set_clauses.append("tau = ?")
-            params.append(tau_val)
-        if outgoing_weights is not None:
-            set_clauses.append("outgoing_weights = ?")
-            params.append(json.dumps(outgoing_weights).encode())
-        if incoming_weights is not None:
-            set_clauses.append("incoming_weights = ?")
-            params.append(json.dumps(incoming_weights).encode())
-        if not set_clauses:
-            return
-        params.append(memory_id)
-        sql = f"UPDATE memories SET {', '.join(set_clauses)} WHERE id = ?"
-        with self._lock, self._connect() as conn:
-            conn.execute(sql, params)
-            conn.commit()
-
-    def batch_update_weights(self, weight_deltas: List[Tuple[str, str, float]]) -> None:
-        if not weight_deltas:
-            return
-        by_source: Dict[str, Dict[str, float]] = {}
-        for source_id, target_id, delta in weight_deltas:
-            if source_id not in by_source:
-                by_source[source_id] = {}
-            by_source[source_id][target_id] = by_source[source_id].get(target_id, 0.0) + delta
-        with self._lock, self._connect() as conn:
-            for source_id, updates in by_source.items():
-                row = conn.execute("SELECT outgoing_weights FROM memories WHERE id = ?", (source_id,)).fetchone()
-                current: Dict[str, float] = {}
-                if row and row["outgoing_weights"]:
-                    try:
-                        current = json.loads(row["outgoing_weights"])
-                    except (json.JSONDecodeError, TypeError):
-                        current = {}
-                for target_id, delta in updates.items():
-                    current[target_id] = min(current.get(target_id, 0.0) + delta, 1.0)
-                current = {k: v for k, v in current.items() if abs(v) > 0.001}
-                conn.execute(
-                    "UPDATE memories SET outgoing_weights = ? WHERE id = ?",
-                    (json.dumps(current).encode() if current else None, source_id),
+    def _query_retrieval_candidates_with_text(
+        self,
+        fts_query: str,
+        filters: CandidateFilters,
+    ) -> List[Dict[str, Any]]:
+        if not fts_query or not fts_query.strip():
+            return self._query_retrieval_candidates(filters)
+        fts_rowids = self._fts5_search(fts_query)
+        if fts_rowids is not None:
+            if filters.session_id and filters.session_bias:
+                rows = self._filtered_rows(
+                    filters,
+                    session_id=filters.session_id,
+                    fts_rowids=fts_rowids,
+                    retrieval_projection=True,
                 )
-            conn.commit()
-
-    def decay_all_activations(self, tau_disuse_decay: float, dt_minutes: float) -> None:
-        rate = float(tau_disuse_decay) * float(dt_minutes)
-        if rate <= 0:
-            return
-        sql = "UPDATE memories SET h = h * EXP(-?) WHERE h IS NOT NULL AND h > 0.001"
-        with self._lock, self._connect() as conn:
-            conn.execute(sql, (rate,))
-            conn.commit()
-
-    def decay_all_tau(self, tau_disuse_decay: float, dt_minutes: float) -> None:
-        rate = float(tau_disuse_decay) * float(dt_minutes)
-        if rate <= 0:
-            return
-        sql = "UPDATE memories SET tau = MAX(0.05, tau * (1.0 - ?)) WHERE tau > 0.05"
-        with self._lock, self._connect() as conn:
-            conn.execute(sql, (rate,))
-            conn.commit()
-
-    def decay_all_weights(self, weight_decay: float) -> None:
-        all_ids_query = "SELECT id, outgoing_weights FROM memories WHERE outgoing_weights IS NOT NULL"
-        with self._lock, self._connect() as conn:
-            rows = conn.execute(all_ids_query).fetchall()
-            for row in rows:
-                try:
-                    weights = json.loads(row["outgoing_weights"])
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                pruned = {}
-                for target_id, w in weights.items():
-                    w = float(w) * (1.0 - float(weight_decay))
-                    if abs(w) > 0.001:
-                        pruned[target_id] = w
-                conn.execute(
-                    "UPDATE memories SET outgoing_weights = ? WHERE id = ?",
-                    (json.dumps(pruned).encode() if pruned else None, row["id"]),
+                if not rows:
+                    rows = self._filtered_rows(
+                        filters,
+                        session_id=None,
+                        fts_rowids=fts_rowids,
+                        retrieval_projection=True,
+                    )
+            else:
+                rows = self._filtered_rows(
+                    filters,
+                    session_id=None,
+                    fts_rowids=fts_rowids,
+                    retrieval_projection=True,
                 )
-            conn.commit()
+            if rows:
+                return [self._row_to_retrieval_candidate(row) for row in rows]
+        return self._query_retrieval_candidates(filters)
+
+    def _hydrate_retrieval_candidates(self, memory_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Restore the historical SQLite candidate shape for selected winners."""
+
+        if not memory_ids:
+            return {}
+        unique_ids = list(dict.fromkeys(memory_ids))
+        placeholders = ",".join("?" for _ in unique_ids)
+        query = f"SELECT * FROM memories WHERE id IN ({placeholders})"
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(query, unique_ids).fetchall()
+        return {
+            row["id"]: self._row_to_memory(row, decode_embedding=False, include_blob=True)
+            for row in rows
+        }
 
     def query_by_ids(self, memory_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         if not memory_ids:
@@ -955,49 +894,7 @@ class SqliteMemoryRepository:
             result[row["id"]] = record
         return result
 
-    def get_strong_neighbors(self, memory_id: str, min_weight: float = 0.35, max_neighbors: int = 8) -> List[Tuple[str, float, float]]:
-        neighbors: List[Tuple[str, float, float]] = []
-
-        with self._lock, self._connect() as conn:
-            source_row = conn.execute("SELECT outgoing_weights, tau FROM memories WHERE id = ?", (memory_id,)).fetchone()
-            if source_row and source_row["outgoing_weights"]:
-                try:
-                    outgoing = json.loads(source_row["outgoing_weights"])
-                except (json.JSONDecodeError, TypeError):
-                    outgoing = {}
-                for target_id, weight in outgoing.items():
-                    weight = float(weight)
-                    if weight >= min_weight:
-                        target_row = conn.execute("SELECT tau FROM memories WHERE id = ?", (target_id,)).fetchone()
-                        tau = float(target_row["tau"]) if target_row else 0.3
-                        neighbors.append((target_id, weight, tau))
-
-            rev_query = "SELECT id, outgoing_weights, tau FROM memories WHERE outgoing_weights IS NOT NULL AND id != ?"
-            rev_rows = conn.execute(rev_query, (memory_id,)).fetchall()
-            for rev_row in rev_rows:
-                try:
-                    rev_outgoing = json.loads(rev_row["outgoing_weights"])
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                if memory_id in rev_outgoing:
-                    weight = float(rev_outgoing[memory_id])
-                    if weight >= min_weight:
-                        tau = float(rev_row["tau"])
-                        neighbors.append((rev_row["id"], weight, tau))
-
-        seen: set[str] = set()
-        deduped: List[Tuple[str, float, float]] = []
-        for nid, w, t in neighbors:
-            if nid == memory_id or nid in seen:
-                continue
-            seen.add(nid)
-            deduped.append((nid, w, t))
-
-        deduped.sort(key=lambda x: x[1], reverse=True)
-        return deduped[:max_neighbors]
-
-
-def get_memory_repository() -> MemoryRepository:
+def get_memory_repository() -> MemoryStore:
     global _REPO_CACHE, _REPO_CACHE_KEY
 
     _refresh_json_paths()
@@ -1028,17 +925,6 @@ def get_memory_repository() -> MemoryRepository:
 
 
 _REAL_GET_MEMORY_REPOSITORY = get_memory_repository
-
-
-def get_lnn_state_repository() -> Optional[LnnStateStore]:
-    """Return the selected repository's LNN capability, if available.
-
-    JSON-backed installations deliberately return ``None``.  This is the
-    explicit capability boundary used by workers and diagnostics while the
-    older repository methods remain available for import compatibility.
-    """
-
-    return get_lnn_state_store(get_memory_repository())
 
 
 def load_all_memories() -> List[Dict[str, Any]]:
@@ -1217,12 +1103,31 @@ def migrate_legacy_memories() -> int:
     return migrated
 
 
-def query_memory_candidates(filters: CandidateFilters) -> List[Dict[str, Any]]:
-    return get_memory_repository().query_candidates(filters)
+def query_memory_candidates(
+    filters: CandidateFilters,
+    *,
+    _retrieval_projection: bool = False,
+) -> List[Dict[str, Any]]:
+    repository = get_memory_repository()
+    if _retrieval_projection:
+        query = getattr(repository, "_query_retrieval_candidates", None)
+        if callable(query):
+            return query(filters)
+    return repository.query_candidates(filters)
 
 
-def query_memory_candidates_with_text(fts_query: str, filters: CandidateFilters) -> List[Dict[str, Any]]:
-    return get_memory_repository().query_candidates_with_text(fts_query, filters)
+def query_memory_candidates_with_text(
+    fts_query: str,
+    filters: CandidateFilters,
+    *,
+    _retrieval_projection: bool = False,
+) -> List[Dict[str, Any]]:
+    repository = get_memory_repository()
+    if _retrieval_projection:
+        query = getattr(repository, "_query_retrieval_candidates_with_text", None)
+        if callable(query):
+            return query(fts_query, filters)
+    return repository.query_candidates_with_text(fts_query, filters)
 
 
 def migrate_json_to_sqlite(sqlite_path: Optional[Path] = None) -> Dict[str, Any]:

@@ -34,6 +34,11 @@ class BrokenMemoryRepo(MemoryRepo):
         raise OSError("broken foreign store")
 
 
+class CandidateRepo(MemoryRepo):
+    def query_candidates_with_text(self, query, filters):
+        return list(self.hits)
+
+
 class SceneRepo:
     def __init__(self, scenes):
         self.scenes = scenes
@@ -162,6 +167,198 @@ def test_query_uses_same_retrieval_seam_for_each_source_and_ranks_globally():
     assert mocked.call_count == 2
 
 
+def test_federated_query_reuses_query_embedding_across_namespaces_for_one_request():
+    repos = {
+        "codex": CandidateRepo(hits=[memory("c1", "needle active", embedding=[0.8, 0.6])]),
+        "pi": CandidateRepo(hits=[memory("p1", "needle foreign", embedding=[1.0, 0.0])]),
+    }
+    recall = FederatedRecall(active_agent="codex", memory_repositories=repos)
+    settings = {
+        "retrieval_top_k": 8,
+        "retrieval_min_similarity": 0.0,
+        "retrieval_recency_days": None,
+        "retrieval_session_bias": False,
+        "retrieval": {"min_reliability": 0.0},
+        "retrieval_dedup": {"enabled": False},
+        "retrieval_selection": {"enabled": False},
+    }
+
+    with patch("app.retrieval_pipeline.config.load_settings", return_value=settings), patch(
+        "app.retrieval_pipeline.retriever.embed",
+        return_value=[np.array([1.0, 0.0], dtype=np.float32)],
+    ) as mocked_embed:
+        first = recall.query_hits("needle", sources=["codex", "pi"])
+        second = recall.query_hits("needle", sources=["codex", "pi"])
+
+    assert [(hit["source_agent"], hit["memory"]["id"]) for hit in first] == [
+        ("pi", "p1"),
+        ("codex", "c1"),
+    ]
+    assert second == first
+    assert mocked_embed.call_args_list == [
+        ((["needle"],),),
+        ((["needle"],),),
+    ]
+
+
+def test_federated_query_does_not_reuse_across_provider_identities():
+    repos = {
+        "codex": CandidateRepo(hits=[memory("c1", "needle active", embedding=[1.0, 0.0])]),
+        "pi": CandidateRepo(hits=[memory("p1", "needle foreign", embedding=[1.0, 0.0])]),
+    }
+    recall = FederatedRecall(active_agent="codex", memory_repositories=repos)
+    settings = {
+        "retrieval_min_similarity": 0.0,
+        "retrieval": {"min_reliability": 0.0},
+        "retrieval_dedup": {"enabled": False},
+        "retrieval_selection": {"enabled": False},
+    }
+    first_config = {
+        "current": "ollama",
+        "ollama": {"base_url": "http://first", "model": "embed-a", "dimensions": 2},
+    }
+    second_config = {
+        "current": "ollama",
+        "ollama": {"base_url": "http://second", "model": "embed-b", "dimensions": 2},
+    }
+    configs = iter([first_config, first_config, second_config, second_config])
+
+    with patch("app.retrieval_pipeline.config.load_settings", return_value=settings), patch(
+        "app.embedding.embedder.load_embedding_config", side_effect=lambda: next(configs)
+    ), patch(
+        "app.retrieval_pipeline.retriever.embed",
+        return_value=[np.array([1.0, 0.0], dtype=np.float32)],
+    ) as mocked_embed:
+        hits = recall.query_hits("needle", sources=["codex", "pi"])
+
+    assert {hit["source_agent"] for hit in hits} == {"codex", "pi"}
+    assert mocked_embed.call_count == 2
+
+
+def test_federated_query_does_not_cache_malformed_aspect_batch():
+    query = "How does Saad prefer agents to explain things, and what frustrates him in collaboration?"
+    aspects = [
+        query,
+        "How does Saad prefer agents to explain things. communication style explanation preference",
+        "what frustrates him in collaboration. collaboration preference working constraint",
+    ]
+    repos = {
+        "codex": CandidateRepo(hits=[memory("c1", f"{query} active evidence", embedding=[1.0, 0.0])]),
+        "pi": CandidateRepo(hits=[memory("p1", f"{query} foreign evidence", embedding=[1.0, 0.0])]),
+    }
+    recall = FederatedRecall(active_agent="codex", memory_repositories=repos)
+    settings = {
+        "retrieval_min_similarity": 0.0,
+        "identity": {"user_display_name": "Saad"},
+        "retrieval": {"min_reliability": 0.0},
+        "retrieval_dedup": {"enabled": False},
+        "retrieval_selection": {
+            "enabled": True,
+            "query_aspects_enabled": True,
+            "profile_aspect_expansion_enabled": True,
+            "max_query_aspects": 3,
+            "min_aspect_tokens": 2,
+            "min_direct_similarity": 0.0,
+        },
+    }
+    vector = np.array([1.0, 0.0], dtype=np.float32)
+
+    with patch("app.retrieval_pipeline.config.load_settings", return_value=settings), patch(
+        "app.retrieval_pipeline.retriever.embed",
+        side_effect=[[vector], [vector, vector, vector]],
+    ) as mocked_embed:
+        hits = recall.query_hits(query, sources=["codex", "pi"])
+
+    assert {hit["source_agent"] for hit in hits} == {"codex", "pi"}
+    assert [item.args[0] for item in mocked_embed.call_args_list] == [aspects, aspects]
+
+
+def test_federated_query_does_not_cache_provider_failure():
+    repos = {
+        "codex": CandidateRepo(hits=[memory("c1", "needle active", embedding=[1.0, 0.0])]),
+        "pi": CandidateRepo(hits=[memory("p1", "needle foreign", embedding=[1.0, 0.0])]),
+    }
+    recall = FederatedRecall(active_agent="codex", memory_repositories=repos)
+    settings = {
+        "retrieval_min_similarity": 0.0,
+        "retrieval": {"min_reliability": 0.0},
+        "retrieval_dedup": {"enabled": False},
+        "retrieval_selection": {"enabled": False},
+    }
+
+    with patch("app.retrieval_pipeline.config.load_settings", return_value=settings), patch(
+        "app.retrieval_pipeline.retriever.embed",
+        side_effect=[ConnectionError("provider unavailable"), [np.array([1.0, 0.0], dtype=np.float32)]],
+    ) as mocked_embed:
+        hits = recall.query_hits("needle", sources=["codex", "pi"])
+
+    assert {hit["source_agent"] for hit in hits} == {"codex", "pi"}
+    assert mocked_embed.call_count == 2
+
+
+def test_federated_query_keeps_valid_vectors_when_post_call_identity_read_fails():
+    repos = {
+        "codex": CandidateRepo(hits=[memory("c1", "needle active", embedding=[1.0, 0.0])]),
+        "pi": CandidateRepo(hits=[memory("p1", "needle foreign", embedding=[1.0, 0.0])]),
+    }
+    recall = FederatedRecall(active_agent="codex", memory_repositories=repos)
+    settings = {
+        "retrieval_min_similarity": 0.0,
+        "retrieval": {"min_reliability": 0.0},
+        "retrieval_dedup": {"enabled": False},
+        "retrieval_selection": {"enabled": False},
+    }
+    config = {
+        "current": "ollama",
+        "ollama": {"base_url": "http://provider", "model": "embed-a", "dimensions": 2},
+    }
+    config_reads = iter([config, OSError("config temporarily unavailable"), config, config])
+
+    def load_config():
+        value = next(config_reads)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    with patch("app.retrieval_pipeline.config.load_settings", return_value=settings), patch(
+        "app.embedding.embedder.load_embedding_config", side_effect=load_config
+    ), patch(
+        "app.retrieval_pipeline.retriever.embed",
+        return_value=[np.array([1.0, 0.0], dtype=np.float32)],
+    ) as mocked_embed:
+        hits = recall.query_hits("needle", sources=["codex", "pi"])
+
+    assert {hit["source_agent"] for hit in hits} == {"codex", "pi"}
+    assert mocked_embed.call_count == 2
+
+
+def test_federated_query_does_not_reuse_candidate_embeddings():
+    repos = {
+        "codex": CandidateRepo(hits=[memory("c1", "same missing candidate")]),
+        "pi": CandidateRepo(hits=[memory("p1", "same missing candidate")]),
+    }
+    recall = FederatedRecall(active_agent="codex", memory_repositories=repos)
+    settings = {
+        "retrieval_min_similarity": 0.0,
+        "retrieval": {"min_reliability": 0.0},
+        "retrieval_dedup": {"enabled": False},
+        "retrieval_selection": {"enabled": False},
+    }
+    vector = np.array([1.0, 0.0], dtype=np.float32)
+
+    with patch("app.retrieval_pipeline.config.load_settings", return_value=settings), patch(
+        "app.retrieval_pipeline.retriever.embed",
+        side_effect=lambda texts: [vector.copy() for _ in texts],
+    ) as mocked_embed:
+        recall.query_hits("needle", sources=["codex", "pi"])
+
+    assert [item.args[0] for item in mocked_embed.call_args_list] == [
+        ["needle"],
+        ["same missing candidate"],
+        ["same missing candidate"],
+    ]
+
+
 def test_unreadable_foreign_query_store_does_not_break_active_recall():
     repos = {
         "pi": MemoryRepo(),
@@ -182,7 +379,7 @@ def test_unreadable_foreign_query_store_does_not_break_active_recall():
     assert {item["source_agent"] for item in result} == {"pi", "grok"}
 
 
-def test_foreign_query_does_not_mutate_active_lnn_state_when_ids_collide(tmp_path: Path):
+def test_foreign_query_preserves_legacy_state_when_ids_collide(tmp_path: Path):
     memory_id = "shared-session:1:0"
     active = SqliteMemoryRepository(tmp_path / "codex.db")
     foreign = SqliteMemoryRepository(tmp_path / "pi.db")
@@ -239,7 +436,7 @@ def test_foreign_query_does_not_mutate_active_lnn_state_when_ids_collide(tmp_pat
     assert foreign.query_by_ids([memory_id])[memory_id]["tau"] == pytest.approx(0.40)
 
 
-def test_active_query_keeps_existing_local_lnn_learning(tmp_path: Path):
+def test_active_query_preserves_legacy_state_without_learning(tmp_path: Path):
     memory_id = "active-session:1:0"
     active = SqliteMemoryRepository(tmp_path / "codex.db")
     active.append_memories([
@@ -276,7 +473,7 @@ def test_active_query_keeps_existing_local_lnn_learning(tmp_path: Path):
     ):
         recall.query_memories("active target", sources=["codex"])
 
-    assert active.query_by_ids([memory_id])[memory_id]["tau"] > 0.20
+    assert active.query_by_ids([memory_id])[memory_id]["tau"] == pytest.approx(0.20)
 
 
 def test_scene_routing_carries_source_agent():
@@ -293,6 +490,118 @@ def test_scene_routing_carries_source_agent():
 
     assert context["scene"]["source_agent"] == "pi"
     assert refs == [{"scene_id": "pi-scene", "source_agent": "pi"}]
+
+
+def test_scene_references_batch_by_source_and_preserve_source_qualified_order():
+    class BatchedSceneRepo:
+        def __init__(self, references):
+            self.references = references
+            self.calls = []
+
+        def get_scene_references(self, scene_ids):
+            self.calls.append(list(scene_ids))
+            requested = [
+                self.references[scene_id]
+                for scene_id in reversed(scene_ids)
+                if scene_id in self.references
+            ]
+            return requested + [{"scene_id": "unrequested", "evidence_status": "complete"}]
+
+    codex = BatchedSceneRepo({
+        "shared": {
+            "scene_id": "shared",
+            "evidence_status": "partial",
+            "evidence_version": 1,
+            "missing_source_event_ids": ["codex-missing"],
+        },
+        "third": {
+            "scene_id": "third",
+            "evidence_status": "complete",
+            "evidence_version": 1,
+            "missing_source_event_ids": [],
+        },
+    })
+    pi = BatchedSceneRepo({
+        "shared": {
+            "scene_id": "shared",
+            "evidence_status": "partial",
+            "evidence_version": 0,
+            "missing_source_event_ids": ["pi-missing"],
+        },
+    })
+    recall = FederatedRecall(
+        active_agent="codex",
+        scene_repositories={"codex": codex, "pi": pi},
+    )
+
+    refs = recall.scene_references([
+        memory("c1", "codex shared", scene_id="shared", source_agent="codex"),
+        memory("p1", "pi shared", scene_id="shared", source_agent="pi"),
+        memory("c2", "codex third", scene_id="third", source_agent="codex"),
+        memory("p2", "missing", scene_id="missing", source_agent="pi"),
+        memory("c3", "duplicate", scene_id="shared", source_agent="codex"),
+    ])
+
+    assert codex.calls == [["shared", "third"]]
+    assert pi.calls == [["shared", "missing"]]
+    assert refs == [
+        {
+            "scene_id": "shared",
+            "evidence_status": "partial",
+            "evidence_version": 1,
+            "missing_source_event_ids": ["codex-missing"],
+            "source_agent": "codex",
+        },
+        {
+            "scene_id": "shared",
+            "evidence_status": "partial",
+            "evidence_version": 0,
+            "missing_source_event_ids": ["pi-missing"],
+            "source_agent": "pi",
+        },
+        {
+            "scene_id": "third",
+            "evidence_status": "complete",
+            "evidence_version": 1,
+            "missing_source_event_ids": [],
+            "source_agent": "codex",
+        },
+    ]
+
+
+def test_scene_references_batch_failure_preserves_per_scene_fail_open_behavior():
+    class PartiallyBrokenSceneRepo:
+        def __init__(self):
+            self.calls = []
+
+        def get_scene_references(self, scene_ids):
+            self.calls.append(list(scene_ids))
+            if len(scene_ids) > 1 or scene_ids == ["broken"]:
+                raise OSError("unreadable scene")
+            return [{"scene_id": scene_ids[0]}]
+
+    repository = PartiallyBrokenSceneRepo()
+    recall = FederatedRecall(
+        active_agent="codex",
+        scene_repositories={"codex": repository},
+    )
+
+    refs = recall.scene_references([
+        memory("m1", "first", scene_id="first"),
+        memory("m2", "broken", scene_id="broken"),
+        memory("m3", "last", scene_id="last"),
+    ])
+
+    assert repository.calls == [
+        ["first", "broken", "last"],
+        ["first"],
+        ["broken"],
+        ["last"],
+    ]
+    assert refs == [
+        {"scene_id": "first", "source_agent": "codex"},
+        {"scene_id": "last", "source_agent": "codex"},
+    ]
 
 
 def test_namespace_path_is_canonical_and_rejects_traversal(tmp_path: Path):
@@ -442,7 +751,6 @@ def test_uninitialized_sqlite_namespace_adapter_is_read_only(tmp_path: Path):
     SqliteMemoryRepository(db_path).append_memories([])
     adapter = SqliteMemoryRepository(db_path, initialize=False)
 
-    assert adapter.supports_lnn is False
     with pytest.raises(sqlite3.OperationalError):
         adapter.append_memories([memory("s:1:0", "must not write")])
     assert adapter.get_recent_memories() == []

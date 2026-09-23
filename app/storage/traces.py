@@ -1125,6 +1125,30 @@ def ingest_spool_file(session_id: str, spool_dir: Path) -> Dict[str, Any]:
             # File content changed in-place or recreated under same name.
             start_offset = 0
 
+    cursor_has_validated_head = file_size == 0 or (
+        previous_head_size == head_size and previous_head_hash == head_hash
+    )
+    if cursor and start_offset == file_size and cursor_has_validated_head:
+        # The durable cursor already owns every complete byte in this file.
+        # Keep the pipeline call alive for retry and pending-scene recovery, but
+        # avoid an empty read, a second stat/hash, and an atomic cursor rewrite.
+        return {
+            "ingested": 0,
+            "duplicate": 0,
+            "invalid": 0,
+            "sessions_touched": [],
+            "start_offset": start_offset,
+            "end_offset": start_offset,
+            "bytes_read": 0,
+            "processed_lines": 0,
+            "hit_cap": False,
+            "partial_line": False,
+            "spool_size": file_size,
+            "spool_mtime_ns": file_mtime_ns,
+            "spool_head_hash_256": head_hash,
+            "spool_head_size": head_size,
+        }
+
     read_result = _read_incremental_lines(spool_file=spool_file, start_offset=start_offset, max_lines=max_lines)
     parsed_events: List[Dict[str, Any]] = []
     invalid = int(read_result.get("invalid", 0))

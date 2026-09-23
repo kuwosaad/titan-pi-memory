@@ -33,12 +33,3 @@ gemini:
   base_url: https://generativelanguage.googleapis.com/v1beta
   model: gemini-2.5-pro
   request_timeout: 300
-
-dedup:
-  # Model settings only; activation is controlled by config/settings.yaml.
-  enabled: false
-  backend: opencode_go
-  api_key_env: OPENCODE_GO_API_KEY
-  base_url: https://opencode.ai/zen/go/v1
-  model: deepseek-v4-flash
-  temperature: 0.1

@@ -42,13 +42,6 @@ export function createRequestGate(): RequestGate {
   };
 }
 
-export interface GraphPoint extends MemorySummary {
-  x: number;
-  y: number;
-  radius: number;
-  degree: number;
-}
-
 export function mergeWarnings(...groups: Array<readonly string[] | undefined>): string[] {
   return Array.from(new Set(groups.flatMap((group) => group || []))).slice(0, MAX_WARNINGS);
 }
@@ -128,53 +121,6 @@ export function connectedMemories(
     if (memory) result.push({ memory, weight: Number(edge.weight) });
   }
   return result.sort((left, right) => right.weight - left.weight).slice(0, MAX_NEIGHBORS);
-}
-
-function stableHash(value: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-/**
- * A deterministic, bounded layout. It intentionally does not run a force
- * simulation: the side panel gets a stable picture with no background work.
- */
-export function layoutGraph(
-  memories: readonly MemorySummary[],
-  edges: ExplorerSnapshot["edges"],  width = 760,
-  height = 330,
-): GraphPoint[] {
-  const degree = new Map<string, number>();
-  for (const edge of edges) {
-    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
-    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
-  }
-
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const radius = Math.max(36, Math.min(width, height) * 0.40);
-  const ordered = [...memories].sort((left, right) => {
-    const degreeDelta = (degree.get(right.nodeId) ?? 0) - (degree.get(left.nodeId) ?? 0);
-    return degreeDelta || left.nodeId.localeCompare(right.nodeId);
-  });
-
-  return ordered.map((memory, index) => {
-    const hash = stableHash(memory.nodeId);
-    const angle = (index / Math.max(1, ordered.length)) * Math.PI * 2 + (hash % 1000) / 1000;
-    const orbit = radius * (0.62 + ((hash >>> 8) % 36) / 100);
-    const pointDegree = degree.get(memory.nodeId) ?? 0;
-    return {
-      ...memory,
-      x: centerX + Math.cos(angle) * orbit,
-      y: centerY + Math.sin(angle) * orbit,
-      degree: pointDegree,
-      radius: Math.min(8, 3.5 + Math.sqrt(pointDegree + 1)),
-    };
-  });
 }
 
 export type PageToken = number | "…";

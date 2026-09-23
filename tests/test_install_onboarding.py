@@ -19,7 +19,7 @@ PI_REQUIRED_PAYLOADS = (
     "README.md", "LICENSE", "requirements.txt", "package.json",
     "app/api/routes.py", "app/graph/cortex_analysis.py", "app/graph/corpus_analysis.py",
     "app/graph/ui/client.js", "app/graph/ui/styles.css", "app/graph/ui/template.html",
-    "app/patterns/memory.py", "app/runtime/context.py", "app/save_pipeline/trace_intake.py",
+    "app/patterns/memory.py", "app/runtime/context.py",
     "app/storage/sqlite.py", "config/__init__.py", "config/.env.example",
     "config/embedding_models.yaml", "config/extraction_models.yaml", "config/settings.yaml",
     "config/visual_config.yaml", "entrypoints/__init__.py", "entrypoints/main.py",
@@ -71,7 +71,6 @@ def test_pi_package_includes_the_complete_titan_runtime():
     required_modules = (
         "app/runtime/context.py",
         "app/storage/sqlite.py",
-        "app/save_pipeline/trace_intake.py",
         "app/graph/corpus_analysis.py",
         "app/patterns/errors.py",
         "app/patterns/memory.py",
@@ -111,7 +110,6 @@ def test_actual_npm_pack_contains_runtime_without_local_artifacts(tmp_path):
     for required in (
         "app/runtime/context.py",
         "app/storage/sqlite.py",
-        "app/save_pipeline/trace_intake.py",
         "app/graph/corpus_analysis.py",
         "app/patterns/memory.py",
     ):

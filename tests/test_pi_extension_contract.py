@@ -4,12 +4,14 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 PI_EXTENSION = ROOT_DIR / "tools" / "pi_extension" / "index.ts"
+PI_DASHBOARD = ROOT_DIR / "tools" / "pi_extension" / "titan_dashboard.py"
 
 
 class PiExtensionContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.source = PI_EXTENSION.read_text(encoding="utf-8")
+        cls.dashboard_source = PI_DASHBOARD.read_text(encoding="utf-8")
 
     def test_primary_messages_are_not_truncated_before_scene_ingest(self):
         self.assertNotIn("content: compactText(text, 2000)", self.source)
@@ -58,6 +60,12 @@ class PiExtensionContractTests(unittest.TestCase):
         self.assertIn('ctx.ui.setStatus("titan-memory", "TITAN READY")', self.source)
         self.assertIn('ctx.ui.setStatus("titan-memory", "TITAN UNCONFIGURED")', self.source)
         self.assertIn('ctx.ui.setStatus("titan-memory", "TITAN OFFLINE")', self.source)
+
+    def test_pi_does_not_expose_retired_lnn_or_save_time_dedup_surfaces(self):
+        self.assertNotIn("lnn_state_store", self.source)
+        self.assertNotIn("lnn_status", self.source)
+        self.assertNotIn("const dedupBlock", self.source)
+        self.assertNotIn("dedup_buffer_size", self.dashboard_source)
 
     def test_server_selects_a_compatible_python_instead_of_first_path_match(self):
         self.assertIn("function pythonCandidates()", self.source)

@@ -342,33 +342,6 @@ function setExtractionProvider(provider: "opencode_go" | "gemini"): string {
     text = text.replace(/gemini:\n/, `${opencodeBlock}gemini:\n`);
   }
 
-  const dedupBlock = provider === "opencode_go"
-    ? [
-        "dedup:",
-        "  enabled: true",
-        "  backend: opencode_go",
-        "  api_key_env: OPENCODE_GO_API_KEY",
-        "  base_url: https://opencode.ai/zen/go/v1",
-        "  model: deepseek-v4-flash",
-        "  temperature: 0.1",
-        "",
-      ].join("\n")
-    : [
-        "dedup:",
-        "  enabled: true",
-        "  backend: gemini",
-        "  api_key_env: GEMINI_API_KEY",
-        "  base_url: https://generativelanguage.googleapis.com/v1beta",
-        "  model: gemini-2.5-flash",
-        "  temperature: 0.1",
-        "  request_timeout: 120",
-        "  max_retries: 2",
-        "  retry_backoff_seconds: 1.0",
-        "",
-      ].join("\n");
-
-  text = text.replace(/dedup:\n(?:  .*\n?)*/, dedupBlock);
-
   writeFileSync(configPath, text, "utf-8");
   return configPath;
 }
@@ -558,8 +531,6 @@ interface TitanRuntimeResponse {
   memory_backend?: string;
   memory_capabilities?: {
     memory_store?: boolean;
-    lnn_state_store?: boolean;
-    lnn_status?: string;
     adapter?: string;
     [key: string]: unknown;
   };
@@ -1403,15 +1374,6 @@ export default function titanPiExtension(pi: ExtensionAPI) {
           existsSync(resolve(reportedHome, "config", "extraction_models.yaml")) &&
           existsSync(resolve(reportedHome, "config", "embedding_models.yaml"));
         const spoolExists = existsSync(reportedSpoolDir);
-        const capability = runtime.memory_capabilities;
-        const lnnStatus = capability?.lnn_status || (
-          capability?.lnn_state_store === false
-            ? "unsupported for selected backend"
-            : capability?.lnn_state_store === true
-              ? "enabled"
-              : "unknown"
-        );
-
         return {
           content: [{
             type: "text" as const,
@@ -1422,7 +1384,6 @@ export default function titanPiExtension(pi: ExtensionAPI) {
               `  Spool dir:  ${reportedSpoolDir} ${spoolExists ? "✅" : "⚠️ missing"}`,
               `  Config:     ${hasConfig ? "✅" : "⚠️ not configured (run /titan-setup)"}`,
               runtime.memory_backend ? `  Backend:    ${runtime.memory_backend}` : "",
-              capability ? `  LNN:        ${lnnStatus}` : "",
               `  Session ID: ${sessionId}`,
               healthy ? `  Memories:   ${JSON.stringify(stats)}` : "",
             ].filter(Boolean).join("\n"),

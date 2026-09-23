@@ -1,6 +1,6 @@
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import yaml
 
@@ -14,8 +14,6 @@ class SaveIntegrityTests(unittest.TestCase):
         settings["verification"] = {"enabled": False}
         settings["dedup"] = {"enabled": True}
 
-        verifier = Mock()
-        verifier.verify_memory.return_value = Mock(verified=False, confidence=0.0)
         extracted = {"text": "Use the event id for exact save deduplication.", "type": "decision"}
         with (
             patch.object(pipeline, "load_settings", return_value=settings),
@@ -23,7 +21,6 @@ class SaveIntegrityTests(unittest.TestCase):
             patch.object(pipeline, "get_extraction_adapter", return_value=object()),
             patch.object(pipeline, "extract_atomic_memories", return_value=[extracted]),
             patch.object(pipeline, "embed", return_value=[]),
-            patch.object(pipeline, "get_verifier", return_value=verifier),
             patch.object(pipeline, "append_memories") as append_memories,
             patch.object(pipeline, "append_memory_notes"),
         ):
@@ -35,7 +32,32 @@ class SaveIntegrityTests(unittest.TestCase):
             )
 
         self.assertEqual([record["text"] for record in outcome["records"]], [extracted["text"]])
+        self.assertEqual(outcome["records"][0]["verification_status"], "unverified")
         append_memories.assert_called_once_with(outcome["records"])
+
+    def test_function_name_cannot_verify_a_false_behavior_claim(self):
+        claim = "The function cosine_similarity encrypts memories with AES-256."
+        extracted = {"text": claim, "type": "fact", "source": "assistant", "reliability": 0.3}
+        with (
+            patch("app.retrieval_pipeline.config.load_settings", return_value={
+                "verification": {"enabled": True},
+            }),
+            patch.object(pipeline, "get_extraction_adapter", return_value=object()),
+            patch.object(pipeline, "extract_atomic_memories", return_value=[extracted]),
+            patch.object(pipeline, "embed", return_value=[]),
+            patch.object(pipeline, "append_memories"),
+            patch.object(pipeline, "append_memory_notes"),
+        ):
+            result = pipeline.run_memory_pipeline_outcome(
+                session_id="claim-evidence", turn=1,
+                user_text="How does the cosine_similarity function work?",
+                assistant_text=claim,
+            )
+
+        record = result["records"][0]
+        self.assertEqual(record["text"], claim)
+        self.assertEqual(record["verification_status"], "unverified")
+        self.assertEqual(record["source_reliability"], 0.3)
 
 
 if __name__ == "__main__":

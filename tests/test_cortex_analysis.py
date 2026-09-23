@@ -28,7 +28,7 @@ class CortexAnalysisTests(unittest.TestCase):
 
     def _settings(self):
         return {
-            "step2": {
+            "cluster_analysis": {
                 "sim_floor": 0.45,
                 "contradiction_sim_threshold": 0.7,
                 "contradiction_antonyms": [["add", "drop"]],

@@ -205,7 +205,6 @@ def build_dashboard(
 
     # Pipeline stats are only available for session-scoped debug payloads.
     spool_events = pipeline.get("spool_events")
-    buffer_size = pipeline.get("dedup_buffer_size")
     retry_queue_size = _safe_int(pipeline.get("retry_queue_size", 0))
 
     stats_table.add_row("Memories", f"{total_mem_count}")
@@ -217,8 +216,6 @@ def build_dashboard(
         stats_table.add_row("No embedding", f"{skipped_no_emb} skipped")
     if spool_events is not None:
         stats_table.add_row("Spool", f"{_safe_int(spool_events)} events")
-    if buffer_size is not None:
-        stats_table.add_row("Buffer", f"{_safe_int(buffer_size)}")
     if retry_queue_size:
         stats_table.add_row("Retry queue", f"{retry_queue_size}")
 
@@ -398,10 +395,9 @@ def _build_plain_dashboard(session_id: Optional[str] = None) -> str:
     lines.append(f"  Clusters: {_safe_int(clusters.get('cluster_count', 0))}")
     lines.append(f"  Edges: {_safe_int(clusters.get('connection_count', 0))} similarity")
     spool_ev = pipeline.get("spool_events")
-    buf = pipeline.get("dedup_buffer_size")
     retry = _safe_int(pipeline.get("retry_queue_size", 0))
-    if spool_ev is not None or buf is not None:
-        lines.append(f"  Spool: {_safe_int(spool_ev)} events  |  Buffer: {_safe_int(buf)}")
+    if spool_ev is not None:
+        lines.append(f"  Spool: {_safe_int(spool_ev)} events")
     elif retry:
         lines.append(f"  Retry queue: {retry}")
 

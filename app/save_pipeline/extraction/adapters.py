@@ -254,47 +254,6 @@ def get_extraction_adapter_with_config(config_path: str) -> ExtractionAdapter:
     return get_extraction_adapter(config_path=config_path)
 
 
-def get_dedup_adapter(config_path: str = "config/extraction_models.yaml") -> ExtractionAdapter:
-    config = load_extraction_config(config_path=config_path)
-    dedup_cfg = config.get("dedup", {})
-    if not dedup_cfg or not dedup_cfg.get("enabled"):
-        dedup_cfg = config.get("gemini", {})
-
-    backend = dedup_cfg.get("backend", "gemini")
-    if backend == "gemini" or "generativelanguage" in str(dedup_cfg.get("base_url", "")):
-        return GeminiExtractionAdapter(
-            model=dedup_cfg.get("model", "gemini-2.5-flash"),
-            api_key=_resolve_api_key(dedup_cfg, "dedup"),
-            base_url=dedup_cfg.get("base_url", "https://generativelanguage.googleapis.com/v1beta"),
-            temperature=_read_temperature(dedup_cfg),
-            request_timeout=float(dedup_cfg.get("request_timeout", 120.0) or 120.0),
-            max_retries=int(dedup_cfg.get("max_retries", 2) or 2),
-            retry_backoff_seconds=float(dedup_cfg.get("retry_backoff_seconds", 1.0) or 1.0),
-        )
-    if backend in {"openai", "opencode_go"}:
-        default_model = "deepseek-v4-flash" if backend == "opencode_go" else "gpt-4o-mini"
-        default_base_url = "https://opencode.ai/zen/go/v1" if backend == "opencode_go" else "https://api.openai.com/v1"
-        return OpenAIExtractionAdapter(
-            model=dedup_cfg.get("model", default_model),
-            api_key=_resolve_api_key(dedup_cfg, "dedup"),
-            base_url=dedup_cfg.get("base_url", default_base_url),
-            temperature=_read_temperature(dedup_cfg),
-        )
-    if backend == "ollama":
-        return OllamaExtractionAdapter(
-            model=dedup_cfg.get("model", "llama3.1:8b"),
-            base_url=dedup_cfg.get("base_url", "http://localhost:11434"),
-            temperature=_read_temperature(dedup_cfg),
-        )
-    return get_extraction_adapter(config_path=config_path)
-
-
-def dedup_model_enabled(config_path: str = "config/extraction_models.yaml") -> bool:
-    config = load_extraction_config(config_path=config_path)
-    dedup_cfg = config.get("dedup", {})
-    return bool(dedup_cfg.get("enabled", False))
-
-
 __all__ = [
     "ExtractionAdapter",
     "OllamaExtractionAdapter",
@@ -303,6 +262,4 @@ __all__ = [
     "GeminiExtractionAdapter",
     "get_extraction_adapter",
     "get_extraction_adapter_with_config",
-    "get_dedup_adapter",
-    "dedup_model_enabled",
 ]
