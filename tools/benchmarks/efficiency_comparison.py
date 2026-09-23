@@ -16,7 +16,6 @@ import json
 import math
 import os
 from pathlib import Path
-import resource
 import shutil
 import statistics
 import subprocess
@@ -189,6 +188,8 @@ def _rss_mib() -> float:
 
 
 def _peak_rss_mib() -> float:
+    import resource
+
     maximum = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return maximum / (1024 * 1024 if sys.platform == "darwin" else 1024)
 
