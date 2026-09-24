@@ -1,6 +1,6 @@
 # titan-pi-memory
 
-> Persistent evolutionary memory for the Pi coding agent.
+> Pi adapter for Titan Memory — local-first multi-agent memory for coding agents.
 
 **Install:** `pi install npm:titan-pi-memory`
 

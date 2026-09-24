@@ -1,7 +1,7 @@
 /**
  * Titan Pi Extension
  *
- * Cross-session persistent memory for the Pi coding agent.
+ * Pi adapter for Titan Memory: local-first multi-agent persistent memory.
  *
  * Architecture:
  *   - Passive capture: listens to Pi lifecycle events, writes Titan-compatible
