@@ -11,44 +11,24 @@ import re
 from typing import Any, Dict, Optional, Tuple
 
 
-_LOW_SIGNAL_MARKERS = (
-    "captured and stored for memory processing", "event was captured and stored",
-    "message.updated event", "message part update event", "message.part.updated",
-    "session.updated event", "session.created event", "session status event",
+# Match complete transport boilerplate, never words that can also name a real
+# project or integration. A sentence containing Telegram is not transport noise.
+_TRANSPORT_PATTERNS = (
+    r"a message\.updated event was captured and stored for memory processing[.!]?",
+    r"a user message was received in a conversation with the assistant[.!]?",
+    r"(?:the )?(?:event|message) was captured and stored(?: for memory processing)?[.!]?",
+    r"(?:message\.updated|message part update|message\.part\.updated|session\.updated|session\.created|session status) event[.!]?",
+    r"the agent'?s goal is to have a conversation(?: with [\w'-]+(?: [\w'-]+){0,2})?[.!]?",
+    r"(?:a user message was received|an assistant message was sent|a new session started)[.!]?",
+    r"[\w -]+ received (?:a |an )?(?:inbound |outbound )?telegram message from user [\w-]+, message id [\w-]+, via (?:the )?[\w:@/-]+(?: integration)?[.!]?",
 )
-_LOW_SIGNAL_PATTERNS = (
-    r"^the agent'?s (goal|outcome|intent phrase)\b", r"^the agent is in a conversation\b",
-    r"^the assistant is in a conversation\b", r"^a user message was received\b",
-    r"^an assistant message was sent\b", r"^the assistant received (a|an)\b",
-    r"^the conversation (is happening|originated)\b", r"^the conversation key\b",
-    r"^the trace packet\b", r"^the agent received (an )?(inbound|outbound|telegram)\b",
-    r"^an inbound message\b", r"^a new session started\b", r"^the inbound message\b",
-    r"^the agent memory namespace\b",
-)
-_TELEGRAM_METADATA_PATTERNS = (
-    r"\btelegram\b", r"\bconversation key\b", r"\bmessage id\b", r"\bopenclaw-hook\b",
-    r"\bbridge integration\b", r"\bnamespace\b", r"\binbound message\b", r"\baccount '?default'?\b",
-)
-_DURABLE_RELATIONAL_PATTERNS = (
-    r"\b(we are friends|became friends|family now|always be honest|trust|remember this moment)\b",
-    r"\b(friendship|relationship)\b",
-)
-
-
-def _contains_durable_relational_signal(text: str) -> bool:
-    lowered = text.lower()
-    return any(re.search(pattern, lowered, re.IGNORECASE) for pattern in _DURABLE_RELATIONAL_PATTERNS)
 
 
 def _is_low_signal_transport_text(text: str) -> bool:
-    lowered = text.lower()
-    if not lowered:
+    cleaned = " ".join(text.split()).strip()
+    if not cleaned:
         return True
-    if '"event_type"' in lowered and '"payload"' in lowered:
-        return True
-    if any(marker in lowered for marker in _LOW_SIGNAL_MARKERS):
-        return True
-    return any(re.search(pattern, lowered) for pattern in _LOW_SIGNAL_PATTERNS)
+    return any(re.fullmatch(pattern, cleaned, re.IGNORECASE) for pattern in _TRANSPORT_PATTERNS)
 
 
 _SPEAKER_FOCUS_ALIASES = {
@@ -140,15 +120,7 @@ def classify_memory(
 
 def is_hidden_metadata_memory(memory: Dict[str, Any] | str) -> bool:
     text = memory if isinstance(memory, str) else str(memory.get("text") or "")
-    lowered = text.lower().strip()
-    if not lowered or _is_low_signal_transport_text(lowered):
-        return True
-    if any(re.search(pattern, lowered, re.IGNORECASE) for pattern in _TELEGRAM_METADATA_PATTERNS):
-        if not _contains_durable_relational_signal(lowered) and not any(
-            token in lowered for token in ("asked", "requested", "wants", "prefers", "decided", "promised", "problem", "issue", "fix")
-        ):
-            return True
-    return False
+    return _is_low_signal_transport_text(text)
 
 
 __all__ = ["classify_memory", "is_hidden_metadata_memory"]

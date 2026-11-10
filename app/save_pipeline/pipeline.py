@@ -35,7 +35,6 @@ from app.save_pipeline.extraction.extractor import (
     assess_memory_worthiness,
     build_safe_fallback_memories,
     extract_atomic_memories,
-    _contains_durable_relational_signal,
     _contains_shallow_relational_signal,
 )
 from app.retrieval_pipeline.brief import build_memory_notes, build_timeline
@@ -47,6 +46,7 @@ from app.storage.memories import (
     get_recent_memories,
 )
 from app.storage.models import IngestResult, Scene, SceneMessage, SceneReference, TraceEvent, TracePacketRequest
+# Kept as an explicit-export compatibility import; ingestion does not export.
 from app.storage.notes import append_memory_notes
 from app.storage.scenes import append_scene, get_scene, get_scene_references, get_scenes, get_session_scenes  # compatibility for retrieval test patches
 from app.storage.sessions import BASE_DIR, ensure_dirs, interprocess_lock
@@ -119,7 +119,7 @@ def run_memory_pipeline(
         assistant_text=assistant_text,
         config_path=config_path,
         source_event_ids=source_event_ids,
-        fallback_enabled=True,
+        fallback_enabled=False,
     )
     return outcome["records"]
 
@@ -135,14 +135,14 @@ def run_memory_pipeline_outcome(
     assistant_text: str,
     config_path: Optional[str] = None,
     source_event_ids: Optional[List[str]] = None,
-    fallback_enabled: bool = True,
+    fallback_enabled: bool = False,
     existing_text_hashes: Optional[set[str]] = None,
     scene: Optional[Scene] = None,
     persist_scene: bool = True,
 ) -> Dict[str, Any]:
     # Core save stage: extract -> embed -> persist memory records.
-    from app.retrieval_pipeline.config import load_settings
-
+    # Raw-fragment fallback is a legacy opt-in. Ingestion always disables it;
+    # valid empty extraction is authoritative and provider failures are retried.
     worthiness = assess_memory_worthiness(user_text, assistant_text)
     if not worthiness["should_extract"]:
         return {
@@ -154,7 +154,6 @@ def run_memory_pipeline_outcome(
 
     adapter = get_extraction_adapter_with_config(config_path) if config_path else get_extraction_adapter()
 
-    settings = load_settings()
     extracted = extract_atomic_memories(user_text, assistant_text, adapter)
     fallback_used = False
     if not extracted and fallback_enabled and worthiness["allow_fallback"]:
@@ -173,11 +172,6 @@ def run_memory_pipeline_outcome(
             existing_text_hashes.add(text_hash)
             deduped.append(memory)
         extracted = deduped
-
-    if settings.get("synthesize_implementation_outcomes", False) and scene is not None:
-        synth = _synthesize_file_outcome_memory(scene, extracted)
-        if synth is not None:
-            extracted.append(synth)
 
     if not extracted:
         return {
@@ -231,10 +225,14 @@ def run_memory_pipeline_outcome(
             )
         )
 
-    append_memories(records)
+    if scene is not None:
+        # Memory IDs are opaque addresses. A durable scene owns its derivations;
+        # extraction order and reused legacy turns cannot change that identity.
+        for index, record in enumerate(records):
+            record["id"] = f"{scene.scene_id}:memory:{index}"
+    records = append_memories(records)
     if scene is not None and persist_scene:
         append_scene(scene)
-    append_memory_notes(records)
     return {"records": records, "fallback_used": fallback_used, "skipped_low_signal": False, "skip_reason": None}
 
 
@@ -348,7 +346,7 @@ def _normalize_transport_trace_prompt(req: TracePacketRequest) -> Dict[str, Any]
             "skip_reason": "transport_bridge_outbound_unpaired",
         }
 
-    if normalized_user and _contains_shallow_relational_signal(normalized_user) and not _contains_durable_relational_signal(normalized_user):
+    if normalized_user and _contains_shallow_relational_signal(normalized_user) and not normalized_assistant:
         return {
             "user_text": normalized_user,
             "assistant_text": "",
@@ -840,7 +838,7 @@ def _retry_failed_extractions(session_id: str) -> Dict[str, int]:
                 user_text=scene.extraction_user_text,
                 assistant_text=scene.extraction_assistant_text,
                 source_event_ids=scene.source_event_ids,
-                fallback_enabled=True,
+                fallback_enabled=False,
                 scene=scene,
                 persist_scene=False,
             )
@@ -1001,60 +999,6 @@ def _compact_text(value: Any, limit: int = 500) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
-
-
-_MUTATING_FILE_TOOL_NAMES = {
-    "edit",
-    "write",
-    "file_event",
-    "file_edit",
-    "apply_patch",
-    "patch",
-    "write_file",
-    "replace_file",
-}
-
-
-def _is_mutating_file_tool(name: str) -> bool:
-    normalized = str(name or "").strip().lower().replace("-", "_")
-    short_name = normalized.rsplit(".", 1)[-1]
-    return normalized in _MUTATING_FILE_TOOL_NAMES or short_name in _MUTATING_FILE_TOOL_NAMES
-
-
-def _synthesize_file_outcome_memory(
-    scene: Scene,
-    extracted: List[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
-    paths: List[str] = []
-    seen: set[str] = set()
-    for tc in scene.tool_calls:
-        if not _is_mutating_file_tool(tc.name):
-            continue
-        for fp in tc.file_paths:
-            if fp not in seen:
-                seen.add(fp)
-                paths.append(fp)
-
-    if not paths:
-        return None
-
-    lower_texts = [str(mem.get("text") or "").lower() for mem in extracted]
-    paths = [p for p in paths if not any(p.lower() in t for t in lower_texts)]
-    if not paths:
-        return None
-
-    paths.sort()
-    if len(paths) > 8:
-        paths = paths[:8]
-
-    return {
-        "text": "Modified files: " + ", ".join(paths),
-        "stream": "rough",
-        "source": "system",
-        "reliability": 1.0,
-        "speaker_focus": "system",
-        "memory_kind": "outcome",
-    }
 
 
 def _extract_file_paths(*values: Any) -> List[str]:
@@ -1929,7 +1873,7 @@ def _process_session_events_impl(session_id: str, limit: int = 200) -> Dict[str,
                     user_text=scene.extraction_user_text,
                     assistant_text=scene.extraction_assistant_text,
                     source_event_ids=scene.source_event_ids,
-                    fallback_enabled=True,
+                    fallback_enabled=False,
                     scene=scene,
                     persist_scene=False,
                 )
@@ -2260,6 +2204,16 @@ def _scene_reference_from_memory(memory: Dict[str, Any]) -> Optional[Dict[str, A
 
 
 def scene_references_from_memories(memories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    expanded_memories = []
+    for memory in memories:
+        expanded_memories.append(memory)
+        for ref in memory.get("evidence_refs") or []:
+            if not isinstance(ref, dict) or not ref.get("scene_id"):
+                continue
+            if ref.get("source_agent") and ref.get("source_agent") != memory.get("source_agent"):
+                continue
+            expanded_memories.append({"scene_id": ref["scene_id"]})
+    memories = expanded_memories
     ordered_scene_ids: List[str] = []
     seen_scene_ids: set[str] = set()
     for memory in memories:
@@ -2387,7 +2341,7 @@ def retrieve_memory_brief(
         active_agent = get_runtime_context().agent_name
     except Exception:
         active_agent = "default"
-    from app.retrieval_pipeline.federated import get_federated_recall
+    from app.retrieval_pipeline.federated import get_federated_recall, _qualify_evidence
 
     recall = get_federated_recall(active_agent=active_agent)
     selected_sources = recall.sources(sources)
@@ -2405,8 +2359,8 @@ def retrieve_memory_brief(
         # neither serialization nor rendering mutates the retriever's hits.
         hits = [
             {**hit, "source_agent": hit.get("source_agent") or active_agent,
-             "memory": {**(hit.get("memory") or {}),
-                        "source_agent": (hit.get("memory") or {}).get("source_agent") or active_agent}}
+             "memory": _qualify_evidence(hit.get("memory") or {},
+                        (hit.get("memory") or {}).get("source_agent") or active_agent)}
             for hit in hits
         ]
     else:

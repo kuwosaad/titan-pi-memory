@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Tuple
 
 from .prompts import build_extract_messages
 from app.save_pipeline.extraction.adapters import ExtractionAdapter
-from .policy import classify_memory, is_hidden_metadata_memory
+from .policy import classify_memory, is_hidden_metadata_memory, _is_low_signal_transport_text
 
 
 ROUGH_HINTS = [
@@ -21,34 +21,6 @@ ROUGH_HINTS = [
     "yesterday",
 ]
 
-LOW_SIGNAL_MARKERS = (
-    "captured and stored for memory processing",
-    "event was captured and stored",
-    "message.updated event",
-    "message part update event",
-    "message.part.updated",
-    "session.updated event",
-    "session.created event",
-    "session status event",
-)
-
-LOW_SIGNAL_MEMORY_PATTERNS = (
-    r"^the agent'?s (goal|outcome|intent phrase)\b",
-    r"^the agent is in a conversation\b",
-    r"^the assistant is in a conversation\b",
-    r"^a user message was received\b",
-    r"^an assistant message was sent\b",
-    r"^the assistant received (a|an)\b",
-    r"^the conversation (is happening|originated)\b",
-    r"^the conversation key\b",
-    r"^the trace packet\b",
-    r"^the agent received (an )?(inbound|outbound|telegram)\b",
-    r"^an inbound message\b",
-    r"^a new session started\b",
-    r"^the inbound message\b",
-    r"^the agent memory namespace\b",
-)
-
 MEANINGFUL_SIGNAL_PATTERNS = (
     r"\b(prefers?|wants?|asked|request(?:ed)?|needs?|plans?|decided|promised|committed|remember|important|should|must|use|uses)\b",
     r"\b(bug|issue|problem|fix|failed|failure|frustrat(?:ed|ing)|surpris(?:e|ing))\b",
@@ -56,19 +28,10 @@ MEANINGFUL_SIGNAL_PATTERNS = (
 )
 
 SHALLOW_EXCHANGE_PATTERNS = (
+    r"(?:thanks|thank you)(?:[,!.\s]+(?:that'?s|that is|that was|this is) (?:helpful|useful|clear))?[!. ]*",
+    r"(?:you'?re|you are) welcome[!. ]*",
     r"^(hi|hello|hey|ok|okay|thanks|thank you|cool|nice|sure|yes|no)\W*$",
     r"^(that sounds (good|great|amazing)|i can help\.?)$",
-)
-
-TRACE_METADATA_MARKERS = (
-    "conversation_key",
-    "intent phrase",
-    "agent_memory_namespace",
-    "memory capture",
-    "source openclaw-hook",
-    "direction inbound",
-    "direction outbound",
-    "account_id",
 )
 
 TRACE_GENERIC_OUTCOME_PREFIXES = (
@@ -77,43 +40,13 @@ TRACE_GENERIC_OUTCOME_PREFIXES = (
     "outcome: user message in conversation with ",
 )
 
-TRACE_DURABLE_SIGNAL_PATTERNS = (
-    r"\b(prefers?|wants?|asked|request(?:ed)?|needs?|plans?|decided|promised|remember|investigat(?:e|ed)|research(?:ed)?)\b",
-    r"\b(bug|issue|problem|fix|restart|configure|build|implement|repository|github|titan|memory|skill|workflow)\b",
-    r"https?://",
-    r"/[A-Za-z0-9._/-]+",
-)
-
-TELEGRAM_METADATA_PATTERNS = (
-    r"\btelegram\b",
-    r"\bconversation key\b",
-    r"\bmessage id\b",
-    r"\bopenclaw-hook\b",
-    r"\bbridge integration\b",
-    r"\bnamespace\b",
-    r"\binbound message\b",
-    r"\baccount '?default'?\b",
-)
-
-DURABLE_RELATIONAL_PATTERNS = (
-    r"\b(we are friends|became friends|family now|always be honest|trust|remember this moment)\b",
-    r"\b(friendship|relationship)\b",
-)
-
 SHALLOW_RELATIONAL_PATTERNS = (
-    r"\b(you'?re the best|ur the best|good job|thanks(?:\s+[\w-]+)?|thank you(?:\s+[\w-]+)?|love you|you are amazing)\b",
+    r"(?:you'?re the best|ur the best|good job|thanks|thank you|love you|you are amazing)(?: [\w-]+)?[.!]*",
 )
 
 
-def _is_low_signal_transport_text(text: str) -> bool:
-    lowered = text.lower()
-    if not lowered:
-        return True
-    if "\"event_type\"" in lowered and "\"payload\"" in lowered:
-        return True
-    if any(marker in lowered for marker in LOW_SIGNAL_MARKERS):
-        return True
-    return any(re.search(pattern, lowered) for pattern in LOW_SIGNAL_MEMORY_PATTERNS)
+class ExtractionError(ValueError):
+    """The provider returned no valid extraction; durable evidence must be retried."""
 
 
 def _first_sentence(text: str) -> str:
@@ -136,24 +69,16 @@ def _contains_meaningful_signal(text: str) -> bool:
     return any(re.search(pattern, lowered, re.IGNORECASE) for pattern in MEANINGFUL_SIGNAL_PATTERNS)
 
 
-def _contains_trace_durable_signal(text: str) -> bool:
-    lowered = text.lower()
-    return any(re.search(pattern, lowered, re.IGNORECASE) for pattern in TRACE_DURABLE_SIGNAL_PATTERNS)
-
-
-def _contains_durable_relational_signal(text: str) -> bool:
-    lowered = text.lower()
-    return any(re.search(pattern, lowered, re.IGNORECASE) for pattern in DURABLE_RELATIONAL_PATTERNS)
-
-
 def _contains_shallow_relational_signal(text: str) -> bool:
-    lowered = text.lower()
-    return any(re.search(pattern, lowered, re.IGNORECASE) for pattern in SHALLOW_RELATIONAL_PATTERNS)
+    # Retain the legacy helper, but only recognize the entire social message.
+    return any(re.fullmatch(pattern, text.strip().replace("’", "'"), re.IGNORECASE) for pattern in SHALLOW_RELATIONAL_PATTERNS)
 
 
 def _is_shallow_exchange(text: str) -> bool:
-    cleaned = _first_sentence(text).lower()
-    return any(re.search(pattern, cleaned) for pattern in SHALLOW_EXCHANGE_PATTERNS)
+    cleaned = " ".join(text.split()).strip().lower().replace("’", "'")
+    return not cleaned or _contains_shallow_relational_signal(cleaned) or any(
+        re.fullmatch(pattern, cleaned) for pattern in SHALLOW_EXCHANGE_PATTERNS
+    )
 
 
 def _looks_like_trace_prompt(text: str) -> bool:
@@ -171,58 +96,35 @@ def _extract_trace_field(text: str, field_name: str) -> str:
 
 def assess_memory_worthiness(user_text: str, assistant_text: str) -> Dict[str, Any]:
     combined = f"{user_text}\n{assistant_text}".strip()
-    lowered = combined.lower()
-
+    reason = None
     if not combined:
-        return {"should_extract": False, "allow_fallback": False, "skip_reason": "empty_exchange"}
-
-    if _contains_shallow_relational_signal(combined) and not _contains_durable_relational_signal(combined):
-        return {"should_extract": False, "allow_fallback": False, "skip_reason": "telegram_shallow_social"}
-
-    if _looks_like_trace_prompt(user_text):
-        goal = _extract_trace_field(user_text, "Goal").lower()
+        reason = "empty_exchange"
+    elif _looks_like_trace_prompt(user_text):
+        # Legacy wrappers are normalized by adapters where possible. Only skip
+        # an unmistakably empty conversation packet here; let extraction decide
+        # what is durable in substantive goals, thoughts, tools, and outcomes.
+        goal = _extract_trace_field(user_text, "Goal")
+        goal_text = re.sub(r"^conversation:\s*", "", goal, flags=re.IGNORECASE)
         thoughts = _extract_trace_field(user_text, "Thoughts")
         tool_calls = _extract_trace_field(user_text, "Tool Calls")
-        outcome = _extract_trace_field(assistant_text, "Outcome").lower() if _looks_like_trace_prompt(assistant_text) else assistant_text.lower()
-        metadata_hits = sum(marker in lowered for marker in TRACE_METADATA_MARKERS)
-        generic_goal = goal in {
-            "",
-            "conversation",
-            "a conversation",
-            "to have a conversation",
-            "to start a new conversation",
-        } or goal.startswith("conversation:")
-        tool_is_empty = tool_calls in {"", "[]"}
-        durable_trace_signal = _contains_trace_durable_signal(thoughts)
-        generic_outcome = any(marker in outcome for marker in TRACE_GENERIC_OUTCOME_PREFIXES)
-        if generic_goal and tool_is_empty and generic_outcome and not durable_trace_signal:
-            return {"should_extract": False, "allow_fallback": False, "skip_reason": "telegram_transport_only"}
-        if generic_goal and tool_is_empty and not _contains_meaningful_signal(thoughts):
-            return {"should_extract": False, "allow_fallback": False, "skip_reason": "thin_trace"}
-        if metadata_hits >= 2 and not _contains_meaningful_signal(thoughts):
-            return {"should_extract": False, "allow_fallback": False, "skip_reason": "telegram_metadata_only"}
-
-    if _is_low_signal_transport_text(combined):
-        return {"should_extract": False, "allow_fallback": False, "skip_reason": "transport_noise"}
-
-    if _is_shallow_exchange(user_text) and _is_shallow_exchange(assistant_text):
-        return {"should_extract": False, "allow_fallback": False, "skip_reason": "shallow_exchange"}
-
-    meaningful = _contains_meaningful_signal(combined)
-    metadata_hits = sum(marker in lowered for marker in TRACE_METADATA_MARKERS)
-    if metadata_hits >= 2 and not meaningful:
-        return {"should_extract": False, "allow_fallback": False, "skip_reason": "metadata_only"}
+        generic_outcome = any(marker in assistant_text.lower() for marker in TRACE_GENERIC_OUTCOME_PREFIXES)
+        if _is_shallow_exchange(goal_text) and _is_shallow_exchange(thoughts) and tool_calls in {"", "[]"} and generic_outcome:
+            reason = "telegram_shallow_social" if _contains_shallow_relational_signal(thoughts) else "telegram_transport_only"
+    elif _is_shallow_exchange(user_text) and _is_shallow_exchange(assistant_text):
+        reason = "shallow_exchange"
+    elif all(not text.strip() or _is_low_signal_transport_text(text) for text in (user_text, assistant_text)):
+        reason = "transport_noise"
 
     return {
-        "should_extract": meaningful or len(_first_sentence(combined)) > 40,
-        "allow_fallback": meaningful and not _is_shallow_exchange(user_text),
-        "skip_reason": None if meaningful or len(_first_sentence(combined)) > 40 else "failed_quality_gate",
+        "should_extract": reason is None,
+        "allow_fallback": reason is None and _contains_meaningful_signal(combined) and not _is_shallow_exchange(user_text),
+        "skip_reason": reason,
     }
 
 
 def build_safe_fallback_memories(user_text: str, assistant_text: str) -> List[dict]:
     """
-    Deterministic fallback when model extraction yields no useful output.
+    Explicit opt-in fallback when a caller requests raw exchange fragments.
     Produces short plain-language memories from the final user/assistant exchange.
     """
     user_line = _normalize_sentence(_first_sentence(user_text))
@@ -286,18 +188,14 @@ def sanitize_memories(
     assistant_aliases: tuple[str, ...] = (),
 ) -> List[dict]:
     cleaned = []
-    seen = set()
+    seen: Dict[str, dict] = {}
     for mem in memories:
-        text = re.sub(r"^[\-\d\.\s]+", "", str(mem.get("text", ""))).strip()
+        # Remove list notation only. Leading years, decimals and signed values
+        # are part of the claim and must survive normalization unchanged.
+        text = re.sub(r"^(?:[-*]\s+|\d+[.)]\s+)", "", str(mem.get("text", "")).strip()).strip()
         if not text or len(text) < 6:
             continue
-        if _is_low_signal_transport_text(text) or is_hidden_metadata_memory(text):
-            continue
-        if not _contains_meaningful_signal(text) and len(text) < 40:
-            continue
-
-        normalized_text = text.lower()
-        if normalized_text in seen:
+        if is_hidden_metadata_memory(text):
             continue
 
         mem_type = mem.get("type")
@@ -314,19 +212,26 @@ def sanitize_memories(
             assistant_aliases=assistant_aliases,
         )
 
-        cleaned.append(
-            {
-                "text": _normalize_sentence(text),
-                "type": mem_type,
-                "stream": stream,
-                "source": mem.get("source"),
-                "reliability": mem.get("reliability"),
-                "speaker_focus": speaker_focus,
-                "memory_kind": mem.get("memory_kind") or memory_kind,
-                "evidence_refs": _normalize_evidence_refs(mem.get("evidence_refs")),
-            }
-        )
-        seen.add(normalized_text)
+        candidate = {
+            "text": _normalize_sentence(text),
+            "type": mem_type,
+            "stream": stream,
+            "source": mem.get("source"),
+            "reliability": mem.get("reliability"),
+            "speaker_focus": speaker_focus,
+            "memory_kind": mem.get("memory_kind") or memory_kind,
+            "evidence_refs": _normalize_evidence_refs(mem.get("evidence_refs")),
+        }
+        # Group only exact statements with the same claim metadata. Repeated
+        # model records can cite different evidence; retain all those labels.
+        identity = {key: value for key, value in candidate.items() if key != "evidence_refs"}
+        key = json.dumps(identity, sort_keys=True, default=str)
+        if key in seen:
+            prior = seen[key]
+            prior["evidence_refs"] = list(dict.fromkeys(prior["evidence_refs"] + candidate["evidence_refs"]))
+        else:
+            cleaned.append(candidate)
+            seen[key] = candidate
     return cleaned
 
 
@@ -397,26 +302,35 @@ def extract_atomic_memories(user_text: str, assistant_text: str, adapter: Extrac
 
     try:
         data = json.loads(content)
-    except json.JSONDecodeError:
-        return fallback_memories(user_text)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ExtractionError("Extraction response is not valid JSON") from exc
 
-    if isinstance(data, list):
-        sanitized = sanitize_memories(
-            [{"text": str(x), "stream": "rough"} for x in data],
-            user_display_name=user_display_name,
-            assistant_display_name=assistant_display_name,
-            user_aliases=user_aliases,
-            assistant_aliases=assistant_aliases,
-        )
-        for mem in sanitized:
-            source, reliability = detect_source_attribution(mem["text"], user_text, assistant_text)
-            mem["source"] = source
-            mem["reliability"] = reliability
-        return sanitized
-
-    memories = data.get("memories") if isinstance(data, dict) else None
+    memories = data if isinstance(data, list) else data.get("memories") if isinstance(data, dict) else None
     if not isinstance(memories, list):
-        return fallback_memories(user_text)
+        raise ExtractionError("Extraction response must contain a memories list")
+    for item in memories:
+        if isinstance(item, str):
+            if not item.strip():
+                raise ExtractionError("Extraction memory text must be nonempty")
+        elif isinstance(item, dict):
+            if not isinstance(item.get("text"), str) or not item["text"].strip():
+                raise ExtractionError("Extraction memory text must be a nonempty string")
+            for key in ("type", "source", "stream", "speaker_focus", "memory_kind"):
+                if item.get(key) is not None and not isinstance(item[key], str):
+                    raise ExtractionError(f"Extraction memory {key} must be a string")
+            choices = {
+                "stream": {"rough", "learnings"},
+                "speaker_focus": {"user", "assistant", "shared", "system", "both", "mixed"},
+                "memory_kind": {"user_fact", "user_preference", "task", "decision", "commitment", "outcome", "relationship", "workflow", "issue"},
+            }
+            for key, allowed in choices.items():
+                if item.get(key) and item[key] not in allowed:
+                    raise ExtractionError(f"Extraction memory {key} has an unsupported value")
+            refs = item.get("evidence_refs")
+            if refs is not None and (not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs)):
+                raise ExtractionError("Extraction evidence_refs must be a list of strings")
+        else:
+            raise ExtractionError("Extraction memories must be objects or legacy strings")
 
     reliability_map = settings.get("source_reliability", {})
 
@@ -451,7 +365,7 @@ def extract_atomic_memories(user_text: str, assistant_text: str, adapter: Extrac
             normalized.append(
                 {
                     "text": text,
-                    "stream": infer_stream(text),
+                    "stream": "rough" if isinstance(data, list) else infer_stream(text),
                     "source": source,
                     "reliability": reliability,
                     "speaker_focus": None,

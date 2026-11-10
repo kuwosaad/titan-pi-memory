@@ -122,21 +122,54 @@ def _evidence_ref(record: Mapping[str, Any]) -> tuple[str, str, str]:
     return (*_identity(record), str(record.get("scene_id") or ""))
 
 
+def _display_group_key(record: Mapping[str, Any]) -> tuple[str, ...]:
+    # Case and internal whitespace can carry meaning in paths, identifiers,
+    # and string literals. Explicit scope is also part of the claim.
+    scope_fields = ("scope", "project", "project_id", "project_path", "repository", "entity_id", "subject")
+    return (str(record.get("text") or "").strip(), *(
+        json.dumps(record.get(field), sort_keys=True, default=str) for field in scope_fields
+    ))
+
+
+def _qualify_evidence(record: Mapping[str, Any], source_agent: str) -> dict[str, Any]:
+    result = {**record, "source_agent": source_agent}
+    if record.get("evidence_refs"):
+        result["evidence_refs"] = [
+            {**ref, "source_agent": ref.get("source_agent") or source_agent}
+            for ref in record["evidence_refs"] if isinstance(ref, Mapping)
+        ]
+    return result
+
+
 def _with_duplicate_evidence(winner: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any]:
-    """Keep compact, source-qualified references for identical text only."""
+    """Union inherited pointers before bounding the identical-text display group."""
     winner_ref = _evidence_ref(winner)
     references = {_evidence_ref(record) for record in records}
-    if len(references) < 2:
+    truncated = any(bool(record.get("evidence_refs_truncated")) for record in records)
+    for record in records:
+        for ref in record.get("evidence_refs") or []:
+            if isinstance(ref, Mapping) and ref.get("memory_id"):
+                references.add((str(ref.get("source_agent") or record.get("source_agent") or ""),
+                                str(ref["memory_id"]), str(ref.get("scene_id") or "")))
+    references = {ref for ref in references if ref[1] or ref[2]}
+    if len(references) < 2 and not truncated:
         return winner
-    ordered = [winner_ref] + sorted(references - {winner_ref})
+    ordered = ([winner_ref] if winner_ref in references else []) + sorted(references - {winner_ref})
     result = dict(winner)
     result["evidence_refs"] = [
         {"source_agent": source, "memory_id": memory_id, **({"scene_id": scene_id} if scene_id else {})}
         for source, memory_id, scene_id in ordered[:_MAX_EVIDENCE_REFS]
     ]
-    if len(ordered) > _MAX_EVIDENCE_REFS:
+    if truncated or len(ordered) > _MAX_EVIDENCE_REFS:
         result["evidence_refs_truncated"] = True
     return result
+
+
+def _rank_score(hit: Mapping[str, Any]) -> float:
+    for field in ("selection_score", "score", "final_score"):
+        if hit.get(field) is not None:
+            return float(hit[field])
+    return 0.0
 
 
 class FederatedRecall:
@@ -327,19 +360,29 @@ class FederatedRecall:
                     continue
                 for hit in source_hits:
                     annotated = dict(hit)
-                    memory = dict(hit.get("memory") or {})
-                    memory["source_agent"] = source_agent
+                    memory = _qualify_evidence(hit.get("memory") or {}, source_agent)
                     annotated["memory"] = memory
                     annotated["source_agent"] = source_agent
                     hits.append(annotated)
 
-        return self._merge_hits(hits, limit)
+        merged = self._merge_hits(hits, None)
+        aspect_count = max((len(hit.get("query_aspects") or []) for hit in merged), default=0)
+        if aspect_count > 1:
+            from app.retrieval_pipeline.config import load_settings
+            from app.retrieval_pipeline.retriever import _select_diverse_hits
+
+            selection = load_settings().get("retrieval_selection", {}) or {}
+            if selection.get("enabled", False):
+                # Apply the same facet allocation once across namespaces so a
+                # scalar merge cannot consume every slot with one question.
+                return _select_diverse_hits(merged, {}, int(limit), aspect_count, selection)
+        return merged[:int(limit)]
 
     def _merge_records(self, records: list[dict[str, Any]], limit: Optional[int]) -> list[dict[str, Any]]:
-        selected: dict[str, dict[str, Any]] = {}
-        groups: dict[str, list[dict[str, Any]]] = {}
+        selected: dict[tuple[str, ...], dict[str, Any]] = {}
+        groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
         for record in records:
-            key = _normalized_text(record.get("text")) or f"id:{record.get('source_agent')}:{record.get('id')}"
+            key = _display_group_key(record) if _normalized_text(record.get("text")) else ("id", *_identity(record))
             groups.setdefault(key, []).append(record)
             current = selected.get(key)
             if current is None or self._prefer(record, current):
@@ -352,11 +395,11 @@ class FederatedRecall:
         return merged if limit is None else merged[: max(0, int(limit))]
 
     def _merge_hits(self, hits: list[dict[str, Any]], limit: Optional[int]) -> list[dict[str, Any]]:
-        selected: dict[str, dict[str, Any]] = {}
-        groups: dict[str, list[dict[str, Any]]] = {}
+        selected: dict[tuple[str, ...], dict[str, Any]] = {}
+        groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
         for hit in hits:
             memory = hit.get("memory") or {}
-            key = _normalized_text(memory.get("text")) or f"id:{hit.get('source_agent')}:{memory.get('id')}"
+            key = _display_group_key(memory) if _normalized_text(memory.get("text")) else ("id", *_identity(memory))
             groups.setdefault(key, []).append(memory)
             current = selected.get(key)
             if current is None or self._prefer_hit(hit, current):
@@ -368,7 +411,7 @@ class FederatedRecall:
             item.get("source_agent") != self.active_agent, _identity(item.get("memory") or {})
         ))
         merged.sort(
-            key=lambda item: (float(item.get("score") or item.get("final_score") or 0.0), _timestamp((item.get("memory") or {}).get("ts"))),
+            key=lambda item: (_rank_score(item), _timestamp((item.get("memory") or {}).get("ts"))),
             reverse=True,
         )
         return merged if limit is None else merged[: max(0, int(limit))]
@@ -387,8 +430,8 @@ class FederatedRecall:
         current_active = current.get("source_agent") == self.active_agent
         if candidate_active != current_active:
             return candidate_active
-        candidate_score = float(candidate.get("score") or candidate.get("final_score") or 0.0)
-        current_score = float(current.get("score") or current.get("final_score") or 0.0)
+        candidate_score = _rank_score(candidate)
+        current_score = _rank_score(current)
         if candidate_score != current_score:
             return candidate_score > current_score
         candidate_memory = candidate.get("memory") or {}
@@ -408,16 +451,22 @@ class FederatedRecall:
         seen: set[tuple[str, str]] = set()
         allowed = set(self.sources(sources))
         for memory in memories:
-            scene_id = str(memory.get("scene_id") or "").strip()
             source_agent = str(memory.get("source_agent") or self.active_agent)
-            if not scene_id or source_agent not in allowed:
-                continue
-            identity = (source_agent, scene_id)
-            if identity in seen:
-                continue
-            seen.add(identity)
-            order.append(identity)
-            grouped.setdefault(source_agent, []).append(scene_id)
+            pointers = [{"source_agent": source_agent, "scene_id": memory.get("scene_id")},
+                        *(memory.get("evidence_refs") or [])]
+            for pointer in pointers:
+                if not isinstance(pointer, Mapping):
+                    continue
+                scene_id = str(pointer.get("scene_id") or "").strip()
+                source = str(pointer.get("source_agent") or source_agent)
+                if not scene_id or source not in allowed:
+                    continue
+                identity = (source, scene_id)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                order.append(identity)
+                grouped.setdefault(source, []).append(scene_id)
 
         references: dict[tuple[str, str], dict[str, Any]] = {}
         failed: set[tuple[str, str]] = set()

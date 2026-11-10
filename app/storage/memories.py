@@ -210,6 +210,23 @@ def _same_memory(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
     return _canonical_memory_payload(left) == _canonical_memory_payload(right)
 
 
+def _exact_evidence_key(record: Dict[str, Any]) -> Optional[str]:
+    """Identify an exact claim retry only when durable evidence is addressed.
+
+    A fresh turn/id or regenerated embedding does not create new evidence.
+    Different scenes, event lineage, provenance or claim metadata still do.
+    Records without scene/event identity cannot safely be deduplicated by text.
+    Repository boundaries provide the agent namespace; session stays in the key.
+    """
+
+    if not record.get("scene_id") and not record.get("source_event_ids"):
+        return None
+    payload = json.loads(_canonical_memory_payload({**record, "embedding": None}))
+    for field in ("id", "turn", "embedding"):
+        payload.pop(field)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
 def _memory_id(record: Dict[str, Any]) -> str:
     return str(record.get("id") or "")
 
@@ -274,26 +291,45 @@ class JsonMemoryRepository:
                         existing_by_id.setdefault(memory_id, []).append(item)
 
             retained: List[Any] = list(all_memories)
+            evidence_records = {}
+            for item in all_memories:
+                if isinstance(item, dict) and (key := _exact_evidence_key(item)) is not None:
+                    evidence_records.setdefault(key, item)
+            accepted = []
+            canonical_by_input_id = {}
             changed = False
             for record in records:
                 if not isinstance(record, dict):
                     retained.append(record)
+                    accepted.append(record)
                     changed = True
                     continue
                 memory_id = _memory_id(record)
                 existing = existing_by_id.get(memory_id, []) if memory_id else []
                 if existing:
-                    if any(_same_memory(item, record) for item in existing):
+                    matching = next((item for item in existing if _same_memory(item, record)), None)
+                    if matching is not None:
+                        accepted.append(_normalize_memory(canonical_by_input_id.get(memory_id, matching)))
                         continue
                     _reject_memory_collision(memory_id)
                 if memory_id:
                     existing_by_id[memory_id] = [record]
+                evidence_key = _exact_evidence_key(record)
+                if evidence_key is not None:
+                    if evidence_key in evidence_records:
+                        canonical = evidence_records[evidence_key]
+                        if memory_id:
+                            canonical_by_input_id[memory_id] = canonical
+                        accepted.append(_normalize_memory(canonical))
+                        continue
+                    evidence_records[evidence_key] = record
                 retained.append(record)
+                accepted.append(_normalize_memory(record))
                 changed = True
 
             if changed:
                 write_json(self._path, retained)
-        return records
+        return accepted
 
     def get_recent_memories(self, limit: Optional[int] = 8, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
         all_memories = self.load_all_memories()
@@ -601,6 +637,16 @@ class SqliteMemoryRepository:
         return memory
 
     def append_memories(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return self._append_memories(records, preserve_ids=False)
+
+    def _import_memories(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Import historical IDs without consolidating existing evidence pointers."""
+
+        return self._append_memories(records, preserve_ids=True)
+
+    def _append_memories(
+        self, records: List[Dict[str, Any]], *, preserve_ids: bool,
+    ) -> List[Dict[str, Any]]:
         if not records:
             return []
 
@@ -652,16 +698,57 @@ class SqliteMemoryRepository:
                         continue
                     _reject_memory_collision(memory_id)
 
-                if pending_order:
+                # Check exact evidence retries under the same write transaction
+                # as immutable-ID validation. Independent processes cannot race
+                # a fresh turn/id for an already persisted claim into the store.
+                canonical_ids = {memory_id: memory_id for memory_id in existing}
+                evidence_ids: Dict[str, str] = {}
+                evidence_scopes = {
+                    (str(record.get("session_id") or ""), record.get("scene_id"))
+                    for record in pending.values()
+                    if not preserve_ids and (record.get("scene_id") or record.get("source_event_ids"))
+                }
+                for session_id, scene_id in evidence_scopes:
+                    candidate_rows = conn.execute(
+                        "SELECT * FROM memories WHERE session_id = ? AND scene_id IS ?",
+                        (session_id, scene_id),
+                    ).fetchall()
+                    for candidate in candidate_rows:
+                        key = _exact_evidence_key(self._row_to_memory(candidate, decode_embedding=False))
+                        if key is not None:
+                            evidence_ids.setdefault(key, candidate["id"])
+
+                inserted_rows = []
+                for memory_id in pending_order:
+                    record = pending[memory_id]
+                    key = None if preserve_ids else _exact_evidence_key(record)
+                    if key is not None:
+                        if key in evidence_ids:
+                            canonical_ids[memory_id] = evidence_ids[key]
+                            continue
+                        evidence_ids[key] = memory_id
+                    canonical_ids[memory_id] = memory_id
+                    inserted_rows.append(self._record_to_row(record))
+                if inserted_rows:
                     conn.executemany(
                         sql,
-                        [self._record_to_row(pending[memory_id]) for memory_id in pending_order],
+                        inserted_rows,
                     )
+                persisted_ids = list(dict.fromkeys(canonical_ids.values()))
+                placeholders = ",".join("?" for _ in persisted_ids)
+                persisted_rows = conn.execute(
+                    f"SELECT * FROM memories WHERE id IN ({placeholders})", persisted_ids,
+                ).fetchall()
+                persisted = {
+                    row["id"]: self._row_to_memory(row, decode_embedding=True)
+                    for row in persisted_rows
+                }
+                accepted = [persisted[canonical_ids[row["id"]]] for row in rows]
                 conn.commit()
             except Exception:
                 conn.rollback()
                 raise
-        return records
+        return accepted
 
     def load_all_memories(self) -> List[Dict[str, Any]]:
         query = "SELECT * FROM memories ORDER BY ts ASC"
@@ -909,17 +996,10 @@ def get_memory_repository() -> MemoryStore:
         _REPO_CACHE_KEY = cache_key
         return _REPO_CACHE
 
-    try:
-        _REPO_CACHE = SqliteMemoryRepository(sqlite_path)
-    except Exception as exc:  # pragma: no cover
-        if _is_database_locked_error(exc):
-            raise
-        fallback = _resolve_read_fallback()
-        if fallback == "json":
-            LOGGER.warning("SQLite backend unavailable (%s). Falling back to JSON backend.", exc)
-            _REPO_CACHE = JsonMemoryRepository()
-        else:
-            raise
+    # Backend choice is a write contract. An unavailable configured SQLite
+    # store must fail visibly rather than silently splitting writes into JSON.
+    # Legacy JSON remains available by explicitly selecting that backend.
+    _REPO_CACHE = SqliteMemoryRepository(sqlite_path)
     _REPO_CACHE_KEY = cache_key
     return _REPO_CACHE
 
@@ -967,7 +1047,6 @@ def create_memory_record(
     speaker_focus: Optional[str] = None,
     memory_kind: Optional[str] = None,
 ) -> Dict[str, Any]:
-    tau = _resolve_tau_initial(memory_kind, source_reliability, verification_status, stream)
     return {
         "id": f"{session_id}:{turn}:{index}",
         "text": text,
@@ -986,34 +1065,7 @@ def create_memory_record(
         "fallback_generated": bool(fallback_generated),
         "speaker_focus": speaker_focus,
         "memory_kind": memory_kind,
-        "h": 0.0,
-        "tau": tau,
     }
-
-
-def _resolve_tau_initial(
-    memory_kind: Optional[str],
-    source_reliability: Optional[float],
-    verification_status: str,
-    stream: str,
-) -> float:
-    kind_tau = {
-        "decision": 0.90,
-        "commitment": 0.85,
-        "user_preference": 0.80,
-        "outcome": 0.70,
-        "workflow": 0.60,
-        "user_fact": 0.50,
-        "task": 0.40,
-        "issue": 0.35,
-    }
-    tau = kind_tau.get(str(memory_kind or "").strip().lower(), 0.30)
-    reliability = float(source_reliability) if source_reliability is not None else 0.5
-    if reliability >= 0.8 or verification_status == "verified":
-        tau += 0.10
-    if stream == "learnings":
-        tau += 0.05
-    return min(0.95, max(0.05, tau))
 
 
 def get_memories_for_session(session_id: str) -> List[Memory]:
@@ -1152,14 +1204,13 @@ def migrate_json_to_sqlite(sqlite_path: Optional[Path] = None) -> Dict[str, Any]
         normalized_records.append(normalized)
 
     try:
-        repo.append_memories(normalized_records)
+        normalized_records = repo._import_memories(normalized_records)
     except Exception:
         # Fall back to per-record writes so malformed rows do not block migration.
         saved_records: List[Dict[str, Any]] = []
         for record in normalized_records:
             try:
-                repo.append_memories([record])
-                saved_records.append(record)
+                saved_records.extend(repo._import_memories([record]))
             except Exception:
                 skipped += 1
         normalized_records = saved_records

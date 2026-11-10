@@ -57,7 +57,7 @@ class MCPToolProfileTests(unittest.TestCase):
             return subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, timeout=30)
 
     def test_core_profile_limits_tool_inventory_and_schema_size(self):
-        full_process = self.run_profile()
+        full_process = self.run_profile("full")
         core_process = self.run_profile("core")
         self.assertEqual(full_process.returncode, 0, full_process.stderr)
         self.assertEqual(core_process.returncode, 0, core_process.stderr)
@@ -67,9 +67,9 @@ class MCPToolProfileTests(unittest.TestCase):
         self.assertTrue(set(core) <= set(full))
         self.assertEqual(core, {name: full[name] for name in core})
         self.assertLess(len(core_process.stdout), len(full_process.stdout))
-        explicit = self.run_profile("full")
-        self.assertEqual(explicit.returncode, 0, explicit.stderr)
-        self.assertEqual(json.loads(explicit.stdout), full)
+        default = self.run_profile()
+        self.assertEqual(default.returncode, 0, default.stderr)
+        self.assertEqual(json.loads(default.stdout), core)
 
     def test_core_import_works_inside_running_event_loop(self):
         result = self.run_profile("core", inside_loop=True)

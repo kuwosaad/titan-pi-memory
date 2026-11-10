@@ -11,7 +11,7 @@ graphs_dir: out/graphs
 memories_file: memories.json
 memory_store_backend: sqlite
 memory_store_sqlite_path: out/memories/memory_store.db
-memory_store_read_fallback: json
+memory_store_read_fallback: none
 trace_packets_file: trace_packets.json
 trace_events_file: events.jsonl
 event_index_file: event_index.json
@@ -25,7 +25,6 @@ graph_artifacts_file: graph_artifacts.json
 extraction_backend: gemini
 min_memory_length: 6
 max_fallback_sentences: 3
-synthesize_implementation_outcomes: true
 
 # Names used only when rendering new memory text. Agent-local settings may
 # override these without changing the stable user/assistant speaker roles.
@@ -84,11 +83,6 @@ retrieval_selection:
   lexical_override_min_similarity: 0.25
   max_lexical_override_terms: 3
 
-  max_per_scene: 1
-  max_per_source_event: 1
-  semantic_redundancy_threshold: 0.85
-  profile_semantic_redundancy_threshold: 0.95
-
   user_profile_metadata_tiebreak_enabled: true
   profile_score_boost: 0.20
   profile_pattern_anchor_boost: 0.08
@@ -99,7 +93,7 @@ retrieval_selection:
 # Step 2.1: stateless attention between candidate memories (no LNN learning)
 # ──────────────────────────────────────────────
 step2:
-  enabled: true
+  enabled: false
   alpha: 1.0
   # Phase A: Query-conditioned attention mask (Extension 2)
   attention_mask_enabled: true
@@ -178,6 +172,7 @@ patterns:
   processor_version: "pattern-miner-v2"
   packet_mode: adaptive
   auto_mine_enabled: false
+  record_applications_on_retrieval: false
   auto_mine_every_memories: 50
   batch_size: 100
   context_limit: 300
@@ -227,9 +222,3 @@ retrieval:
   min_reliability: 0.4
   allow_unverified: true
   show_source_notes: false
-
-# Extraction Guardrails
-extraction:
-  assistant_hallucination_warning: true
-  require_user_corroboration: true
-  skip_unverifiable_technical: true

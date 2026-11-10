@@ -1,9 +1,8 @@
 from datetime import datetime, timedelta, timezone
-import hashlib
 import logging
 import re
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -72,25 +71,6 @@ class RetrievalRequest:
             date_to=date_to,
         )
 
-    def runner_kwargs(self) -> Dict[str, Any]:
-        """Return the legacy keyword values expected by the implementation.
-
-        Lists are recreated here deliberately: old adapters and tests may
-        mutate their input list, but cannot mutate the immutable request held
-        by the engine.
-        """
-        return {
-            "session_id": self.session_id,
-            "memory_types": list(self.memory_types) if self.memory_types is not None else None,
-            "top_k": self.top_k,
-            "min_similarity": self.min_similarity,
-            "min_reliability": self.min_reliability,
-            "mode": self.mode,
-            "intent": self.intent,
-            "date_from": self.date_from,
-            "date_to": self.date_to,
-        }
-
 
 @dataclass(frozen=True)
 class RetrievalPolicy:
@@ -127,43 +107,6 @@ class RetrievalPolicy:
             recency_days=settings.get("retrieval_recency_days"),
             session_bias=bool(settings.get("retrieval_session_bias", True)),
         )
-
-
-class RetrievalEngine:
-    """Small internal seam around the established ranking implementation.
-
-    The callable is deliberately injectable so admission/ranking tests can
-    exercise the public request contract without importing private stages.
-    """
-
-    def __init__(self, runner: Callable[..., List[Dict[str, Any]]]) -> None:
-        self._runner = runner
-
-    def retrieve(self, request: RetrievalRequest) -> List[Dict[str, Any]]:
-        return self._runner(request.query, **request.runner_kwargs())
-
-DUPLICATE_NEGATION_TERMS = {
-    "avoid",
-    "disable",
-    "disallow",
-    "dont",
-    "never",
-    "no",
-    "not",
-    "reject",
-    "remove",
-    "without",
-}
-
-DUPLICATE_OPPOSING_TERM_PAIRS = (
-    ("accept", "reject"),
-    ("add", "drop"),
-    ("allow", "disallow"),
-    ("enable", "disable"),
-    ("keep", "remove"),
-    ("prefer", "dislike"),
-    ("use", "avoid"),
-)
 
 PROFILE_QUERY_TERMS = (
     "behavior",
@@ -215,7 +158,8 @@ def parse_timestamp(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except ValueError:
         return None
 
@@ -324,164 +268,35 @@ def extract_date_brackets(text: str) -> Dict[str, Optional[str]]:
     return {"date_from": None, "date_to": None}
 
 
-def _dedupe_prefer_latest(memories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    latest_by_hash: Dict[str, Dict[str, Any]] = {}
-    for mem in memories:
-        text = str(mem.get("text") or "").strip()
-        if not text:
-            continue
-        key = hashlib.sha1(_canonical_text(text).encode("utf-8")).hexdigest()
-        current = latest_by_hash.get(key)
-        if current is None:
-            latest_by_hash[key] = mem
-            continue
+def _group_display_hits(hits: List[Dict[str, Any]], *, source_isolation: bool = False) -> List[Dict[str, Any]]:
+    """Group identical statements only; keep every source pointer on memory.
 
-        current_ts = parse_timestamp(current.get("ts"))
-        candidate_ts = parse_timestamp(mem.get("ts"))
-        if candidate_ts and (not current_ts or candidate_ts >= current_ts):
-            latest_by_hash[key] = mem
+    Similar vectors, token overlap, and shared scenes do not establish that
+    two claims have the same subject, scope, numbers, or polarity.
+    """
+    from .federated import _display_group_key, _qualify_evidence, _with_duplicate_evidence
 
-    deduped = list(latest_by_hash.values())
-    deduped.sort(key=lambda item: (parse_timestamp(item.get("ts")) or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
-    return deduped
-
-
-def _duplicate_hit_quality(hit: Dict[str, Any]) -> tuple[float, int, float, datetime]:
-    memory = hit.get("memory") or {}
-    verification_status = str(memory.get("verification_status") or "").lower()
-    return (
-        float(hit.get("base_score") or hit.get("score") or 0.0),
-        1 if verification_status == "verified" else 0,
-        float(memory.get("source_reliability") or 0.0),
-        parse_timestamp(memory.get("ts")) or datetime.min.replace(tzinfo=timezone.utc),
-    )
-
-
-def _texts_have_opposition(left_text: str, right_text: str) -> bool:
-    left_raw_tokens = set(_tokenize(left_text))
-    right_raw_tokens = set(_tokenize(right_text))
-    left_has_negation = bool(left_raw_tokens & DUPLICATE_NEGATION_TERMS)
-    right_has_negation = bool(right_raw_tokens & DUPLICATE_NEGATION_TERMS)
-    if left_has_negation != right_has_negation:
-        return True
-    return any(
-        (positive in left_raw_tokens and negative in right_raw_tokens)
-        or (negative in left_raw_tokens and positive in right_raw_tokens)
-        for positive, negative in DUPLICATE_OPPOSING_TERM_PAIRS
-    )
-
-
-def _hits_are_near_duplicates(
-    left: Dict[str, Any],
-    right: Dict[str, Any],
-    embedding_by_id: Dict[str, np.ndarray],
-    *,
-    token_jaccard_threshold: float,
-    embedding_similarity_threshold: float,
-    embedding_min_token_containment: float,
-) -> bool:
-    left_memory = left.get("memory") or {}
-    right_memory = right.get("memory") or {}
-    left_text = str(left_memory.get("text") or "").strip()
-    right_text = str(right_memory.get("text") or "").strip()
-    if not left_text or not right_text:
-        return False
-    if _canonical_text(left_text) == _canonical_text(right_text):
-        return True
-
-    if _texts_have_opposition(left_text, right_text):
-        return False
-
-    left_tokens = _content_tokens(left_text)
-    right_tokens = _content_tokens(right_text)
-    if not left_tokens or not right_tokens:
-        return False
-
-    intersection_size = len(left_tokens & right_tokens)
-    union_size = len(left_tokens | right_tokens)
-    jaccard = intersection_size / max(union_size, 1)
-    if jaccard >= token_jaccard_threshold:
-        return True
-
-    containment = intersection_size / max(min(len(left_tokens), len(right_tokens)), 1)
-    if containment < embedding_min_token_containment:
-        return False
-
-    left_vector = embedding_by_id.get(str(left_memory.get("id") or ""))
-    right_vector = embedding_by_id.get(str(right_memory.get("id") or ""))
-    if left_vector is None or right_vector is None:
-        return False
-    return float(cosine_similarity(left_vector, right_vector)) >= embedding_similarity_threshold
-
-
-def _collapse_near_duplicate_hits(
-    hits: List[Dict[str, Any]],
-    embedding_by_id: Dict[str, np.ndarray],
-    config: Dict[str, Any],
-) -> List[Dict[str, Any]]:
-    """Collapse visible query duplicates without deleting stored memories or scene lineage."""
-    if not hits or not bool(config.get("enabled", False)):
-        return hits
-
-    token_jaccard_threshold = float(config.get("token_jaccard_threshold", 0.82))
-    embedding_similarity_threshold = float(config.get("embedding_similarity_threshold", 0.93))
-    embedding_min_token_containment = float(config.get("embedding_min_token_containment", 0.75))
-
-    groups: List[List[Dict[str, Any]]] = []
-    for hit in hits:
-        matching_group: Optional[List[Dict[str, Any]]] = None
-        for group in groups:
-            representative = max(group, key=_duplicate_hit_quality)
-            if _hits_are_near_duplicates(
-                hit,
-                representative,
-                embedding_by_id,
-                token_jaccard_threshold=token_jaccard_threshold,
-                embedding_similarity_threshold=embedding_similarity_threshold,
-                embedding_min_token_containment=embedding_min_token_containment,
-            ):
-                matching_group = group
-                break
-        if matching_group is None:
-            groups.append([hit])
-        else:
-            matching_group.append(hit)
-
-    collapsed: List[Dict[str, Any]] = []
-    for group in groups:
-        representative = max(group, key=_duplicate_hit_quality)
-        if len(group) == 1:
-            collapsed.append(representative)
-            continue
-
-        memory_ids: List[str] = []
-        scene_ids: List[str] = []
-        for member in group:
-            memory = member.get("memory") or {}
-            memory_id = str(memory.get("id") or "").strip()
-            scene_id = str(memory.get("scene_id") or "").strip()
-            if memory_id and memory_id not in memory_ids:
-                memory_ids.append(memory_id)
-            if scene_id and scene_id not in scene_ids:
-                scene_ids.append(scene_id)
-
-        collapsed.append(
-            {
-                **representative,
-                "duplicate_memory_ids": memory_ids,
-                "duplicate_scene_ids": scene_ids,
-                "duplicate_count": len(group),
-            }
-        )
-
-    collapsed.sort(
-        key=lambda item: (
-            float(item.get("score") or 0.0),
-            parse_timestamp((item.get("memory") or {}).get("ts")) or datetime.min.replace(tzinfo=timezone.utc),
-        ),
-        reverse=True,
-    )
-    return collapsed
+    groups: Dict[tuple, List[Dict[str, Any]]] = {}
+    for index, hit in enumerate(hits):
+        memory = hit.get("memory") or {}
+        source = str(hit.get("source_agent") or memory.get("source_agent") or "")
+        if source:
+            memory = _qualify_evidence(memory, source)
+            hit = {**hit, "memory": memory}
+        key = _display_group_key(memory) if str(memory.get("text") or "").strip() else (index,)
+        if source_isolation:
+            key = (str(hit.get("source_agent") or memory.get("source_agent") or ""), *key)
+        groups.setdefault(key, []).append(hit)
+    result = []
+    for group in groups.values():
+        winner = max(group, key=lambda hit: (
+            float(hit.get("direct_similarity", hit.get("score", 0.0)) or 0.0),
+            parse_timestamp((hit.get("memory") or {}).get("ts")) or datetime.min.replace(tzinfo=timezone.utc),
+        ))
+        result.append({**winner, "memory": _with_duplicate_evidence(
+            winner.get("memory") or {}, [hit.get("memory") or {} for hit in group]
+        )})
+    return result
 
 
 def _expand_profile_aspect(facet: str, profile_mode: Optional[str]) -> str:
@@ -867,39 +682,6 @@ def _selection_rank_score(hit: Dict[str, Any], config: Dict[str, Any]) -> float:
     )
 
 
-def _source_event_ids(hit: Dict[str, Any]) -> set[str]:
-    memory = hit.get("memory") or {}
-    raw_ids = memory.get("source_event_ids") or []
-    if not isinstance(raw_ids, list):
-        return set()
-    return {str(event_id).strip() for event_id in raw_ids if str(event_id).strip()}
-
-
-def _is_display_redundant(
-    candidate: Dict[str, Any],
-    selected: List[Dict[str, Any]],
-    embedding_by_id: Dict[str, np.ndarray],
-    semantic_redundancy_threshold: float,
-) -> bool:
-    candidate_memory = candidate.get("memory") or {}
-    candidate_id = str(candidate_memory.get("id") or "")
-    candidate_vector = embedding_by_id.get(candidate_id)
-    if candidate_vector is None:
-        return False
-    candidate_text = str(candidate_memory.get("text") or "")
-    for existing in selected:
-        existing_memory = existing.get("memory") or {}
-        existing_id = str(existing_memory.get("id") or "")
-        existing_vector = embedding_by_id.get(existing_id)
-        if existing_vector is None:
-            continue
-        if _texts_have_opposition(candidate_text, str(existing_memory.get("text") or "")):
-            continue
-        if float(cosine_similarity(candidate_vector, existing_vector)) >= semantic_redundancy_threshold:
-            return True
-    return False
-
-
 def _select_diverse_hits(
     hits: List[Dict[str, Any]],
     embedding_by_id: Dict[str, np.ndarray],
@@ -919,49 +701,20 @@ def _select_diverse_hits(
 
     profile_score_boost = float(config.get("profile_score_boost", 0.0))
     # Direct query evidence dominates; Step 2.1 contributes a small adjustment.
-    admitted.sort(key=lambda hit: _selection_rank_score(hit, config), reverse=True)
+    ranked = []
+    for hit in admitted:
+        score = _selection_rank_score(hit, config)
+        ranked.append({**hit, "selection_score": score, "score": score})
+    admitted = ranked
+    admitted.sort(key=lambda hit: hit["selection_score"], reverse=True)
 
-    max_per_scene = max(1, int(config.get("max_per_scene", 1) or 1))
-    max_per_source_event = max(1, int(config.get("max_per_source_event", 1) or 1))
-    semantic_redundancy_threshold = float(config.get("semantic_redundancy_threshold", 0.98))
     selected: List[Dict[str, Any]] = []
-    scene_counts: Dict[str, int] = {}
-    source_event_counts: Dict[str, int] = {}
 
     def can_select(candidate: Dict[str, Any]) -> bool:
-        memory = candidate.get("memory") or {}
-        candidate_id = str(memory.get("id") or "").strip()
-        if candidate_id and any(
-            candidate_id == str((existing.get("memory") or {}).get("id") or "").strip()
-            for existing in selected
-        ):
-            return False
-        scene_id = str(memory.get("scene_id") or "").strip()
-        if scene_id and scene_counts.get(scene_id, 0) >= max_per_scene:
-            return False
-        for event_id in _source_event_ids(candidate):
-            if source_event_counts.get(event_id, 0) >= max_per_source_event:
-                return False
-        candidate_semantic_threshold = semantic_redundancy_threshold
-        if bool(candidate.get("profile_query", False)) and float(candidate.get("profile_affinity", 0.0)) > 0.0:
-            candidate_semantic_threshold = float(
-                config.get("profile_semantic_redundancy_threshold", candidate_semantic_threshold)
-            )
-        return not _is_display_redundant(
-            candidate,
-            selected,
-            embedding_by_id,
-            candidate_semantic_threshold,
-        )
+        return not any(candidate is existing for existing in selected)
 
     def select(candidate: Dict[str, Any]) -> None:
         selected.append(candidate)
-        memory = candidate.get("memory") or {}
-        scene_id = str(memory.get("scene_id") or "").strip()
-        if scene_id:
-            scene_counts[scene_id] = scene_counts.get(scene_id, 0) + 1
-        for event_id in _source_event_ids(candidate):
-            source_event_counts[event_id] = source_event_counts.get(event_id, 0) + 1
 
     # Cover independently asked facets before the global rank order can consume
     # every slot with a single aspect of a multi-part question.
@@ -978,6 +731,10 @@ def _select_diverse_hits(
             ),
             reverse=True,
         )
+        # A selected pointer can answer more than one facet. Do not spend a
+        # second slot on a weaker candidate for a facet it already covers best.
+        if facet_candidates and not can_select(facet_candidates[0]):
+            continue
         for candidate in facet_candidates:
             if can_select(candidate):
                 select(candidate)
@@ -1449,24 +1206,11 @@ def retrieve_memories(
     Retrieval no longer maintains LNN state, even when an old caller enables it.
     """
 
-    request = RetrievalRequest.from_compat(
-        query,
-        session_id=session_id,
-        memory_types=memory_types,
-        top_k=top_k,
-        min_similarity=min_similarity,
-        min_reliability=min_reliability,
-        mode=mode,
-        intent=intent,
-        date_from=date_from,
-        date_to=date_to,
-    )
-    if repository is None:
-        return RetrievalEngine(_retrieve_memories_impl).retrieve(request)
     return _retrieve_memories_impl(
-        query,
+        query, session_id=session_id, memory_types=memory_types,
+        top_k=top_k, min_similarity=min_similarity, min_reliability=min_reliability,
+        mode=mode, intent=intent, date_from=date_from, date_to=date_to,
         repository=repository,
-        **request.runner_kwargs(),
     )
 
 
@@ -1540,7 +1284,8 @@ def _retrieve_memories_impl(
     # must not prevent the same fallback when no visible session rows remain.
     if candidates and not filtered and session_id and session_bias:
         filtered = apply_hidden_metadata_filter(read_candidates(replace(filters, session_bias=False)))
-    filtered = _dedupe_prefer_latest(filtered)
+    if mode in {"rough", "learnings"}:
+        filtered = [memory for memory in filtered if str(memory.get("stream") or "rough") == mode]
 
     if not filtered:
         return []
@@ -1552,10 +1297,10 @@ def _retrieve_memories_impl(
             key=lambda m: parse_timestamp(m.get("ts")) or datetime.min.replace(tzinfo=tz.utc),
             reverse=True,
         )
-        return _hydrate_retrieval_hits([
+        return _hydrate_retrieval_hits(_group_display_hits([
             {"memory": m, "score": 0.0, "base_score": 0.0, "final_score": 0.0}
-            for m in filtered[:top_k]
-        ])
+            for m in filtered
+        ])[:top_k])
 
     raw_query = query.strip()
     query_aspects = _query_aspects(raw_query, selection_config) if selection_enabled else [raw_query]
@@ -1579,12 +1324,10 @@ def _retrieve_memories_impl(
         direct_aspect_vectors = query_embeddings
     except Exception as exc:
         LOGGER.warning("Embedding backend unavailable for query embedding; falling back to keyword retrieval: %s", exc)
-        return _hydrate_retrieval_hits(_keyword_fallback_hits(
-            filtered,
-            query,
-            int(top_k),
+        return _hydrate_retrieval_hits(_group_display_hits(_keyword_fallback_hits(
+            filtered, query, len(filtered),
             selection_config if selection_enabled else None,
-        ))
+        ))[:top_k])
 
     vectors: List[Optional[np.ndarray]] = [None for _ in filtered]
     missing_texts: List[str] = []
@@ -1689,14 +1432,7 @@ def _retrieve_memories_impl(
             int(selection_config.get("multi_aspect_pool_k", configured_pool_k) or configured_pool_k),
         )
     pool_k = configured_pool_k
-    dedup_config = settings.get("retrieval_dedup", {}) or {}
-    scan_multiplier = max(1, int(dedup_config.get("candidate_scan_multiplier", 3) or 3))
-    dedup_scan_k = min(len(hits), max(int(top_k), pool_k) * scan_multiplier)
-    candidate_hits = _collapse_near_duplicate_hits(
-        hits[:dedup_scan_k],
-        embedding_by_id,
-        dedup_config,
-    )
+    candidate_hits = _group_display_hits(hits)
     if selection_enabled:
         candidate_hits.sort(
             key=lambda hit: (
@@ -1715,7 +1451,7 @@ def _retrieve_memories_impl(
         missing_keyword_hits = _keyword_fallback_hits(
             [filtered[index] for index in missing_indices],
             raw_query,
-            pool_k,
+            len(filtered),
             selection_config if selection_enabled else None,
         )
         for hit in missing_keyword_hits:
@@ -1742,7 +1478,7 @@ def _retrieve_memories_impl(
             step2_config,
         )
 
-    candidate_hits.extend(missing_keyword_hits)
+    candidate_hits = _group_display_hits([*candidate_hits, *missing_keyword_hits])
 
     if selection_enabled:
         candidate_hits = _select_diverse_hits(
@@ -1762,5 +1498,5 @@ def _retrieve_memories_impl(
         )
         if min_reliability and min_reliability > 0:
             fallback_hits = [h for h in fallback_hits if float(h.get("memory", {}).get("source_reliability", 0)) >= min_reliability]
-        return _hydrate_retrieval_hits(fallback_hits)
+        return _hydrate_retrieval_hits(_group_display_hits(fallback_hits))
     return _hydrate_retrieval_hits(candidate_hits[:top_k])

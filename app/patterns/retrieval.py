@@ -29,7 +29,7 @@ def retrieve_accepted_patterns(
     limit: Optional[int] = None,
     min_confidence: Optional[float] = None,
     db_path: Optional[Path] = None,
-    record_applications: bool = True,
+    record_applications: bool = False,
 ) -> List[Dict[str, Any]]:
     """Retrieve accepted learned patterns that should guide a query.
 
@@ -110,7 +110,11 @@ def record_pattern_applications(
     *,
     db_path: Optional[Path] = None,
 ) -> None:
-    """Record only patterns actually shown by a caller rendering a brief."""
+    """Optionally record patterns actually shown by a caller rendering a brief."""
+    settings = load_settings()
+    config = settings.get("patterns") if isinstance(settings.get("patterns"), Mapping) else {}
+    if not bool(config.get("record_applications_on_retrieval", False)):
+        return
     safe_query = str(query or "").strip()
     if not safe_query or not hits:
         return

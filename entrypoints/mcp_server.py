@@ -708,8 +708,8 @@ _CORE_TOOLS = frozenset({"query_memories", "store_trace_packet", "get_scene_cont
 
 
 def _apply_tool_profile() -> None:
-    """Apply TITAN_MCP_TOOL_PROFILE (full by default, or core for essentials)."""
-    profile = os.getenv("TITAN_MCP_TOOL_PROFILE", "full").strip().lower()
+    """Apply TITAN_MCP_TOOL_PROFILE (core by default, or full for all tools)."""
+    profile = os.getenv("TITAN_MCP_TOOL_PROFILE", "core").strip().lower()
     if profile not in {"full", "core"}:
         raise ValueError("TITAN_MCP_TOOL_PROFILE must be 'core' or 'full'")
     if profile == "full":

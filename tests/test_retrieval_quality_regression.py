@@ -94,7 +94,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
     @patch("app.retrieval_pipeline.config.load_settings")
     @patch("app.retrieval_pipeline.retriever.embed")
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
-    def test_semantic_paraphrases_collapse_before_final_results(
+    def test_semantic_paraphrases_remain_separate_claims(
         self,
         mock_query_candidates,
         mock_embed,
@@ -161,11 +161,8 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
         )
 
         ids = [hit["memory"]["id"] for hit in hits]
-        self.assertEqual(len({memory_id for memory_id in ids if memory_id.startswith("conflict-")}), 1)
-        duplicate_hit = next(hit for hit in hits if hit["memory"]["id"].startswith("conflict-"))
-        self.assertEqual(duplicate_hit["duplicate_count"], 2)
-        self.assertEqual(set(duplicate_hit["duplicate_memory_ids"]), {"conflict-1", "conflict-2"})
-        self.assertEqual(set(duplicate_hit["duplicate_scene_ids"]), {"s1:scene:1", "s2:scene:2"})
+        self.assertTrue({"conflict-1", "conflict-2"}.issubset(ids))
+        self.assertTrue(all("duplicate_count" not in hit for hit in hits))
 
     @patch("app.retrieval_pipeline.config.load_settings")
     @patch("app.retrieval_pipeline.retriever.embed")
@@ -587,7 +584,7 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")
     @patch("app.retrieval_pipeline.retriever.embed")
     @patch("app.retrieval_pipeline.config.load_settings")
-    def test_final_selection_diversifies_scenes_events_and_semantic_duplicates(
+    def test_final_selection_keeps_distinct_claims_from_same_scene_or_event(
         self,
         mock_load_settings,
         mock_embed,
@@ -649,11 +646,11 @@ class RetrievalQualityRegressionTests(unittest.TestCase):
 
         ids = {hit["memory"]["id"] for hit in hits}
         self.assertIn("scene-primary", ids)
-        self.assertNotIn("scene-secondary", ids)
+        self.assertIn("scene-secondary", ids)
         self.assertIn("event-primary", ids)
-        self.assertNotIn("event-secondary", ids)
+        self.assertIn("event-secondary", ids)
         self.assertIn("semantic-primary", ids)
-        self.assertNotIn("semantic-secondary", ids)
+        self.assertIn("semantic-secondary", ids)
         self.assertTrue({"decision-enable", "decision-disable"}.issubset(ids))
 
     @patch("app.retrieval_pipeline.retriever.query_memory_candidates_with_text")

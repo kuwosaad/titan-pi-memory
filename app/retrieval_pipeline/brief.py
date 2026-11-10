@@ -36,17 +36,17 @@ def build_memory_notes(
 
     # Preserve the retriever’s selected order, including diversity or facet coverage.
     filtered = []
-    seen = set()
     for hit in hits:
         memory = hit.get("memory") or {}
         text = str(memory.get("text") or "").strip()
         if not text or is_hidden_metadata_memory(memory):
             continue
-        key = (_source(hit), " ".join(text.casefold().split()))
-        if key in seen:
-            continue
-        seen.add(key)
         filtered.append(hit)
+
+    # Direct brief callers share the same conservative evidence grouping as
+    # retrieval, while distinct named sources keep their labels here.
+    from .retriever import _group_display_hits
+    filtered = _group_display_hits(filtered, source_isolation=True)
 
     if cluster_mode and any(h.get("cluster_id") is not None for h in filtered):
         return _build_clustered_notes(filtered, max_items, max_chars, included_hits)

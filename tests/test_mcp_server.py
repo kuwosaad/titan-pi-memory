@@ -233,8 +233,12 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         mock_analyze.assert_called_once_with(cluster_ids="1,2", session_id="s1", limit=100, question="why", detail_limit=4)
 
     async def test_server_exports_codex_parity_tools(self):
-        tools = await mcp_server.server.list_tools()
-        names = {tool.name for tool in tools}
+        from tests.test_second_brain_mcp import MCPToolProfileTests
+
+        process = MCPToolProfileTests().run_profile("full")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        schemas = json.loads(process.stdout)
+        names = set(schemas)
 
         self.assertGreaterEqual(
             names,
@@ -256,7 +260,6 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        schemas = {tool.name: tool.inputSchema for tool in tools}
         self.assertEqual(schemas["analyze_clusters"]["properties"]["cluster_ids"]["type"], "string")
         self.assertEqual(schemas["pattern_create"]["properties"]["evidence_json"]["anyOf"][0]["type"], "string")
         self.assertNotIn("evidence", schemas["pattern_create"]["properties"])
@@ -377,8 +380,8 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(payload["trace_dir_exists"])
         self.assertEqual(payload["trace_file_count"], 1)
         self.assertEqual(payload["agent_namespace"], str(agent_home))
-        self.assertGreaterEqual(payload["mcp_tool_count"], 18)
-        self.assertIn("patterns_export_bundle", payload["mcp_tools"])
+        self.assertEqual(payload["mcp_tool_count"], 4)
+        self.assertEqual(set(payload["mcp_tools"]), {"query_memories", "store_trace_packet", "get_scene_context", "doctor"})
         self.assertEqual(payload["auto_ingest"]["spool_dir"], str(trace_dir))
         self.assertTrue(payload["auto_ingest"]["starts_with_mcp_server"])
         self.assertTrue(payload["required_config_files"]["settings"])

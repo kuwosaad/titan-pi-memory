@@ -211,6 +211,10 @@ The agent uses Titan's recall and scene tools. Tool names and prefixes vary by
 integration; retrieved memories are historical evidence, so verify them against
 current code before acting.
 
+Treat memory IDs and scene IDs as opaque addresses. New scene-backed memories
+use stable scene-qualified IDs so delayed extraction retries cannot collide
+with another scene that reused a legacy turn number.
+
 In Pi, you can also use commands directly:
 
 | Command | Purpose |
