@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
@@ -670,6 +670,18 @@ def _is_query_echo_memory(text: str, query: str) -> bool:
     query_terms = _lexical_terms(query)
     if not memory_terms or not query_terms or not (memory_terms & QUERY_ECHO_MARKERS):
         return False
+    # A factual memory about search or retrieval may naturally share most of
+    # the query's words. Require a question or a described search request
+    # before treating that overlap as an echo of the user's query.
+    question = re.search(r"\b(?:how|what|when|where|which|who|why)\b[^?]{0,300}\?", text, re.IGNORECASE)
+    request = re.search(
+        r"\b(?:asked|asks|requested|requests|instructed|told|wanted|wants)\b"
+        r".{0,100}\b(?:search\w*|retriev\w*|recall\w*|find|look\s+up|quer\w*|memor(?:y|ies))\b",
+        text,
+        re.IGNORECASE,
+    )
+    if not question and not request:
+        return False
     raw_query_tokens = _tokenize(query)
     normalized_text = _canonical_text(text)
     if len(raw_query_tokens) >= 4:
@@ -753,8 +765,10 @@ def _direct_evidence(
     query_aspect_vectors: List[np.ndarray],
     text: str,
     aspects: List[str],
+    aspect_scores: Optional[List[float]] = None,
 ) -> Dict[str, Any]:
-    aspect_scores = [float(cosine_similarity(vector, memory_vector)) for vector in query_aspect_vectors]
+    if aspect_scores is None:
+        aspect_scores = [float(cosine_similarity(vector, memory_vector)) for vector in query_aspect_vectors]
     if not aspect_scores:
         return {
             "query_similarity": 0.0,
@@ -808,12 +822,12 @@ def _has_meaningful_lexical_anchor(hit: Dict[str, Any], config: Dict[str, Any]) 
 
 
 def _query_has_sufficient_evidence(hits: List[Dict[str, Any]], config: Dict[str, Any]) -> bool:
-    """Keep unrelated candidate pools from reaching associative reranking.
+    """Keep unrelated candidate pools from reaching cross-memory reranking.
 
     Direct evidence is no longer a display-admission requirement.  A lexical
     anchor makes a weak pointer viable for navigation; without one, require a
     strong semantic anchor before allowing the pool to continue.  This keeps
-    nonsense queries from being amplified by LNN while leaving final ranking
+    nonsense queries from being amplified by related memories while leaving final ranking
     responsible for ordering viable pointers.
     """
     viable_hits = [hit for hit in hits if not bool(hit.get("query_echo_memory", False))]
@@ -829,6 +843,10 @@ def _query_has_sufficient_evidence(hits: List[Dict[str, Any]], config: Dict[str,
 
 
 def _selection_rank_score(hit: Dict[str, Any], config: Dict[str, Any]) -> float:
+    if hit.get("retrieval_method") == "keyword_fallback":
+        # A precise lexical pointer can compete for a result slot without
+        # pretending that its coverage score is a semantic similarity.
+        return float(hit.get("lexical_coverage", 0.0) or 0.0)
     direct_similarity = float(hit.get("direct_similarity", hit.get("base_score", hit.get("score", 0.0))) or 0.0)
     lexical_coverage = float(hit.get("lexical_coverage", 0.0) or 0.0)
     profile_boost = 0.0
@@ -837,11 +855,15 @@ def _selection_rank_score(hit: Dict[str, Any], config: Dict[str, Any]) -> float:
     pattern_anchor_boost = 0.0
     if bool(hit.get("profile_pattern_anchor", False)):
         pattern_anchor_boost = float(config.get("profile_pattern_anchor_boost", 0.0))
+    step2_delta = float(hit.get("final_score", direct_similarity) or 0.0) - float(
+        hit.get("base_score", direct_similarity) or 0.0
+    )
     return (
         direct_similarity
         + float(config.get("lexical_coverage_weight", 0.0)) * lexical_coverage
         + profile_boost
         + pattern_anchor_boost
+        + float(config.get("step2_score_weight", 0.0)) * step2_delta
     )
 
 
@@ -896,7 +918,7 @@ def _select_diverse_hits(
         return []
 
     profile_score_boost = float(config.get("profile_score_boost", 0.0))
-    # Rank by direct query evidence and explicit metadata preferences.
+    # Direct query evidence dominates; Step 2.1 contributes a small adjustment.
     admitted.sort(key=lambda hit: _selection_rank_score(hit, config), reverse=True)
 
     max_per_scene = max(1, int(config.get("max_per_scene", 1) or 1))
@@ -969,6 +991,392 @@ def _select_diverse_hits(
         if can_select(candidate):
             select(candidate)
     return selected[:top_k]
+
+
+def _build_attention_matrix(
+    hits: List[Dict[str, Any]],
+    query_terms: set[str],
+    embedding_by_id: Dict[str, np.ndarray],
+    intent: str,
+    step2_config: Dict[str, Any],
+) -> np.ndarray:
+    N = len(hits)
+    A = np.zeros((N, N), dtype=np.float32)
+
+    sim_floor = float(step2_config.get("sim_floor", 0.45))
+    mask = step2_config.get("attention_mask", {})
+    intent_mask = mask.get(intent, mask.get("balanced", {}))
+    if not intent_mask:
+        intent_mask = {"rough_to_rough": 0.25, "rough_to_learnings": 0.25, "learnings_to_rough": 0.25, "learnings_to_learnings": 0.25}
+    gate_offset = float(step2_config.get("gate_offset", 2.0))
+    gate_steepness = float(step2_config.get("gate_steepness", 0.8))
+    temporal_enabled = bool(step2_config.get("temporal_head_enabled", False))
+    temporal_tau_minutes = float(step2_config.get("temporal_tau_minutes", 30))
+    temporal_head_weight = float(step2_config.get("temporal_head_weight", 0.2))
+    semantic_head_weight = float(step2_config.get("semantic_head_weight", 0.8))
+
+    streams: List[str] = []
+    base_scores: List[float] = []
+    mem_ids: List[str] = []
+    timestamps: List[Optional[datetime]] = []
+    overlaps: List[int] = []
+    for h in hits:
+        mem = h.get("memory", {})
+        streams.append(str(mem.get("stream", "rough")))
+        base_scores.append(float(h.get("base_score", h.get("score", 0.0))))
+        mem_ids.append(str(mem.get("id", "")))
+        ts_str = str(mem.get("ts", ""))
+        timestamps.append(parse_timestamp(ts_str))
+        overlaps.append(len(query_terms & _content_tokens(str(mem.get("text", "")))))
+
+    for i in range(N):
+        vec_i = embedding_by_id.get(mem_ids[i])
+        if vec_i is None:
+            continue
+
+        for j in range(N):
+            if i == j:
+                continue
+
+            pair_key = f"{streams[j]}_to_{streams[i]}"
+            stream_weight = float(intent_mask.get(pair_key, 0.0))
+            if stream_weight <= 0.0:
+                continue
+
+            vec_j = embedding_by_id.get(mem_ids[j])
+            if vec_j is None:
+                continue
+
+            j_overlap = overlaps[j]
+            if j_overlap == 0:
+                continue
+
+            sim = float(cosine_similarity(vec_i, vec_j))
+            if sim < sim_floor:
+                continue
+
+            gate = 1.0 / (1.0 + np.exp(-(j_overlap - gate_offset) * gate_steepness))
+
+            if temporal_enabled and timestamps[i] is not None and timestamps[j] is not None:
+                delta_minutes = abs((timestamps[i] - timestamps[j]).total_seconds() / 60.0)
+                temporal_sim = np.exp(-delta_minutes / temporal_tau_minutes)
+                combined_sim = semantic_head_weight * sim + temporal_head_weight * temporal_sim
+                A[i][j] = combined_sim * stream_weight * gate * (base_scores[j] ** 2)
+            else:
+                A[i][j] = sim * stream_weight * gate * (base_scores[j] ** 2)
+
+    return A
+
+
+def _step2_1_rerank(
+    hits: List[Dict[str, Any]],
+    query: str,
+    embedding_by_id: Dict[str, np.ndarray],
+    alpha: float,
+    step2_config: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Stateless attention, centrality, temporal, and tension reranking."""
+    if not hits or alpha <= 0.0:
+        return hits
+
+    query_terms = _content_tokens(query)
+    if not query_terms:
+        return hits
+
+    attention_mask_enabled = bool(step2_config.get("attention_mask_enabled", False))
+    centrality_enabled = bool(step2_config.get("centrality_enabled", False))
+    contradiction_enabled = bool(step2_config.get("contradiction_enabled", False))
+    cluster_enabled = bool(step2_config.get("cluster_compression_enabled", False))
+    temporal_enabled = bool(step2_config.get("temporal_head_enabled", False))
+
+    if not attention_mask_enabled and not centrality_enabled and not contradiction_enabled and not cluster_enabled and not temporal_enabled:
+        return hits
+
+    from .router import route_intent
+    intent = route_intent(query.lower().strip()) if attention_mask_enabled else "balanced"
+
+    softmax_temp = float(step2_config.get("softmax_temp", 0.5))
+    gate_offset = float(step2_config.get("gate_offset", 2.0))
+    gate_steepness = float(step2_config.get("gate_steepness", 0.8))
+    residual_weight = float(step2_config.get("residual_weight", 0.3))
+
+    A = _build_attention_matrix(hits, query_terms, embedding_by_id, intent, step2_config)
+
+    centrality_scores: Dict[int, float] = {}
+    if centrality_enabled:
+        centrality_scores = _compute_centrality(
+            hits, query_terms, embedding_by_id, A, step2_config,
+        )
+
+    contradiction_adjustment: Dict[int, float] = {}
+    tension_notes: Dict[int, str] = {}
+    if contradiction_enabled:
+        contradiction_adjustment, tension_notes = _detect_contradictions(
+            hits, embedding_by_id, step2_config,
+        )
+
+    cluster_map: Dict[int, Dict[str, Any]] = {}
+    if cluster_enabled:
+        communities = _detect_clusters(A)
+        for cluster_id, community in enumerate(communities):
+            if not community:
+                continue
+            cluster_size = len(community)
+            cluster_items = sorted(community, key=lambda idx: float(
+                hits[idx].get("base_score", hits[idx].get("score", 0.0))), reverse=True)
+            rep_idx = cluster_items[0]
+            rep_text = str(hits[rep_idx].get("memory", {}).get("text", ""))
+            has_tension = any(idx in tension_notes for idx in community)
+            timestamps = []
+            for idx in community:
+                ts = parse_timestamp(str(hits[idx].get("memory", {}).get("ts", "")))
+                if ts:
+                    timestamps.append(ts)
+            oldest_ts = min(timestamps).strftime("%Y-%m-%d") if timestamps else ""
+            newest_ts = max(timestamps).strftime("%Y-%m-%d") if timestamps else ""
+            for idx in community:
+                cluster_map[idx] = {
+                    "cluster_id": cluster_id,
+                    "cluster_size": cluster_size,
+                    "cluster_representative_text": rep_text,
+                    "cluster_has_tension": has_tension,
+                    "cluster_oldest_ts": oldest_ts,
+                    "cluster_newest_ts": newest_ts,
+                }
+
+    rescored: List[Dict[str, Any]] = []
+    for i, item in enumerate(hits):
+        memory = item.get("memory") or {}
+        base = float(item.get("base_score") or item.get("score") or 0.0)
+        bonus = 0.0
+        support = 0.0
+
+        memory_terms = _content_tokens(str(memory.get("text") or ""))
+        overlap = len(query_terms & memory_terms)
+
+        if overlap >= 1:
+            row = A[i]
+            nonzero_mask = row > 0.0
+            if np.any(nonzero_mask):
+                support_values = row[nonzero_mask]
+                if len(support_values) > 0:
+                    scaled = support_values / softmax_temp
+                    scaled = scaled - np.max(scaled)
+                    exp_scores = np.exp(scaled)
+                    weights = exp_scores / np.sum(exp_scores)
+                    support = float(np.sum(weights * support_values))
+
+            gate = 1.0 / (1.0 + np.exp(-(overlap - gate_offset) * gate_steepness))
+            bonus = alpha * gate * support
+
+            if centrality_enabled and i in centrality_scores:
+                centrality_lambda = float(step2_config.get("centrality_lambda", 0.3))
+                centrality_bonus = alpha * centrality_lambda * centrality_scores[i]
+                bonus += centrality_bonus
+
+            if contradiction_enabled and i in contradiction_adjustment:
+                bonus += contradiction_adjustment[i]
+
+        final_score = float(base * (1 - residual_weight * min(bonus / (base + 0.001), 1.0)) + bonus)
+        hit_dict = {
+            **item,
+            "score": final_score,
+            "final_score": final_score,
+            "step2_bonus": bonus,
+            "support_score": support,
+        }
+        if contradiction_enabled and i in tension_notes:
+            hit_dict["tension_note"] = tension_notes[i]
+            hit_dict["step2_contradiction_delta"] = contradiction_adjustment.get(i, 0.0)
+        if cluster_enabled and i in cluster_map:
+            hit_dict.update(cluster_map[i])
+        rescored.append(hit_dict)
+
+    rescored.sort(
+        key=lambda item: (
+            float(item.get("final_score") or item.get("score") or 0.0),
+            parse_timestamp((item.get("memory") or {}).get("ts")) or datetime.min.replace(tzinfo=timezone.utc),
+        ),
+        reverse=True,
+    )
+    return rescored
+
+
+def _compute_centrality(
+    hits: List[Dict[str, Any]],
+    query_terms: set[str],
+    embedding_by_id: Dict[str, np.ndarray],
+    A: np.ndarray,
+    step2_config: Dict[str, Any],
+) -> Dict[int, float]:
+    N = len(hits)
+    if N == 0:
+        return {}
+
+    centrality_lambda = float(step2_config.get("centrality_lambda", 0.3))
+    iterations = int(step2_config.get("centrality_iterations", 2))
+    diversity_penalty = bool(step2_config.get("centrality_diversity_penalty", True))
+
+    base_scores = np.array([float(h.get("base_score", h.get("score", 0.0))) for h in hits], dtype=np.float32)
+    scores = base_scores.copy()
+
+    for _ in range(iterations):
+        new_scores = np.zeros(N, dtype=np.float32)
+        for i in range(N):
+            row = A[i]
+            weighted_sum = float(np.dot(row, scores))
+            new_scores[i] = base_scores[i] * (1.0 - centrality_lambda) + centrality_lambda * weighted_sum
+        scores = new_scores
+
+    if diversity_penalty and N > 1:
+        mem_ids = [str(h.get("memory", {}).get("id", "")) for h in hits]
+        sim_dup_threshold = 0.85
+        for i in range(N):
+            vec_i = embedding_by_id.get(mem_ids[i])
+            if vec_i is None:
+                continue
+            high_sim_count = 0
+            for j in range(N):
+                if i == j:
+                    continue
+                vec_j = embedding_by_id.get(mem_ids[j])
+                if vec_j is None:
+                    continue
+                if float(cosine_similarity(vec_i, vec_j)) > sim_dup_threshold:
+                    high_sim_count += 1
+            if high_sim_count > 1:
+                scores[i] = scores[i] / (1.0 + (high_sim_count - 1) * 0.5)
+
+    return {i: float(scores[i]) for i in range(N)}
+
+
+def _detect_contradictions(
+    hits: List[Dict[str, Any]],
+    embedding_by_id: Dict[str, np.ndarray],
+    step2_config: Dict[str, Any],
+) -> Tuple[Dict[int, float], Dict[int, str]]:
+    N = len(hits)
+    if N < 2:
+        return {}, {}
+
+    sim_threshold = float(step2_config.get("contradiction_sim_threshold", 0.7))
+    tension_weight = float(step2_config.get("contradiction_tension_weight", 0.3))
+    antonym_pairs = step2_config.get("contradiction_antonyms", [])
+    if not antonym_pairs:
+        return {}, {}
+
+    mem_ids = [str(h.get("memory", {}).get("id", "")) for h in hits]
+    content_tokens_list = [
+        _content_tokens(str(h.get("memory", {}).get("text", ""))) for h in hits
+    ]
+    raw_tokens_list = [
+        set(_tokenize(str(h.get("memory", {}).get("text", "")))) for h in hits
+    ]
+    timestamps = [
+        parse_timestamp(str(h.get("memory", {}).get("ts", ""))) for h in hits
+    ]
+
+    adjustment: Dict[int, float] = {}
+    tension: Dict[int, str] = {}
+
+    for i in range(N):
+        vec_i = embedding_by_id.get(mem_ids[i])
+        if vec_i is None:
+            continue
+        tokens_i = content_tokens_list[i]
+        raw_i = raw_tokens_list[i]
+        ts_i = timestamps[i]
+
+        for j in range(i + 1, N):
+            vec_j = embedding_by_id.get(mem_ids[j])
+            if vec_j is None:
+                continue
+            tokens_j = content_tokens_list[j]
+            raw_j = raw_tokens_list[j]
+            ts_j = timestamps[j]
+
+            sim = float(cosine_similarity(vec_i, vec_j))
+            if sim < sim_threshold:
+                continue
+
+            antonym_i: Optional[str] = None
+            antonym_j: Optional[str] = None
+            for a1, a2 in antonym_pairs:
+                has_a1_i = a1 in raw_i
+                has_a2_i = a2 in raw_i
+                has_a1_j = a1 in raw_j
+                has_a2_j = a2 in raw_j
+
+                if has_a1_i and has_a2_j:
+                    antonym_i = a1
+                    antonym_j = a2
+                    break
+                if has_a2_i and has_a1_j:
+                    antonym_i = a2
+                    antonym_j = a1
+                    break
+
+            if antonym_i is None:
+                continue
+
+            antonym_set = {antonym_i, antonym_j}
+            shared_context = tokens_i & tokens_j
+            shared_content = shared_context - antonym_set
+            if not shared_content:
+                continue
+
+            if ts_i is None or ts_j is None or ts_i == ts_j:
+                continue
+
+            if ts_j > ts_i:
+                older_i, newer_i = i, j
+                older_text = str(hits[i].get("memory", {}).get("text", ""))
+                newer_text = str(hits[j].get("memory", {}).get("text", ""))
+            else:
+                older_i, newer_i = j, i
+                older_text = str(hits[j].get("memory", {}).get("text", ""))
+                newer_text = str(hits[i].get("memory", {}).get("text", ""))
+
+            delta = tension_weight * sim
+            adjustment[older_i] = adjustment.get(older_i, 0.0) - delta
+            adjustment[newer_i] = adjustment.get(newer_i, 0.0) + delta
+
+            older_ts = timestamps[older_i]
+            newer_ts = timestamps[newer_i]
+            older_ts_str = older_ts.strftime("%Y-%m-%d") if older_ts else "unknown"
+            newer_ts_str = newer_ts.strftime("%Y-%m-%d") if newer_ts else "unknown"
+
+            note = (
+                f'possible change: "{older_text[:80]}" ({older_ts_str}) '
+                f'vs "{newer_text[:80]}" ({newer_ts_str})'
+            )
+            tension[older_i] = note
+            tension[newer_i] = note
+
+    return adjustment, tension
+
+
+def _detect_clusters(A: np.ndarray) -> List[set[int]]:
+    import networkx as nx
+    from networkx.algorithms.community import greedy_modularity_communities
+
+    N = A.shape[0]
+    if N < 2:
+        return [set() for _ in range(N)]
+
+    graph = nx.Graph()
+    for i in range(N):
+        graph.add_node(i)
+        for j in range(i + 1, N):
+            weight = float(A[i][j])
+            if weight > 0.0:
+                graph.add_edge(i, j, weight=weight)
+
+    if graph.number_of_edges() == 0:
+        return [{i} for i in range(N)]
+
+    communities = list(greedy_modularity_communities(graph))
+    return [set(c) for c in communities]
 
 
 def _keyword_fallback_hits(
@@ -1117,20 +1525,21 @@ def _retrieve_memories_impl(
     )
 
     fts_query = _build_fts_query(query)
-    if fts_query:
-        lexical_candidates = _query_retrieval_candidates(
-            repository,
-            filters,
-            fts_query=fts_query,
-        )
+    def read_candidates(candidate_filters: CandidateFilters) -> List[Dict[str, Any]]:
+        if not fts_query:
+            return _query_retrieval_candidates(repository, candidate_filters)
+        lexical = _query_retrieval_candidates(repository, candidate_filters, fts_query=fts_query)
         if selection_enabled and bool(selection_config.get("hybrid_candidates_enabled", True)):
-            semantic_candidates = _query_retrieval_candidates(repository, filters)
-            filtered = _merge_candidate_lanes(lexical_candidates, semantic_candidates)
-        else:
-            filtered = lexical_candidates
-    else:
-        filtered = _query_retrieval_candidates(repository, filters)
-    filtered = apply_hidden_metadata_filter(filtered)
+            semantic = _query_retrieval_candidates(repository, candidate_filters)
+            return _merge_candidate_lanes(lexical, semantic)
+        return lexical
+
+    candidates = read_candidates(filters)
+    filtered = apply_hidden_metadata_filter(candidates)
+    # Session bias falls back only when the store finds no rows. Hidden rows
+    # must not prevent the same fallback when no visible session rows remain.
+    if candidates and not filtered and session_id and session_bias:
+        filtered = apply_hidden_metadata_filter(read_candidates(replace(filters, session_bias=False)))
     filtered = _dedupe_prefer_latest(filtered)
 
     if not filtered:
@@ -1157,6 +1566,15 @@ def _retrieve_memories_impl(
 
     try:
         query_embeddings = embed_query_inputs(query_embedding_inputs, embed)
+        if len(query_embeddings) != len(query_embedding_inputs):
+            raise ValueError("Query embedding count does not match the requested inputs")
+        query_embeddings = [np.asarray(vector, dtype=np.float32) for vector in query_embeddings]
+        if not query_embeddings or any(
+            vector.ndim != 1 or not vector.size or not np.isfinite(vector).all()
+            or vector.shape != query_embeddings[0].shape or not np.any(vector)
+            for vector in query_embeddings
+        ):
+            raise ValueError("Query embeddings are invalid or have inconsistent dimensions")
         query_vector = query_embeddings[0]
         direct_aspect_vectors = query_embeddings
     except Exception as exc:
@@ -1175,7 +1593,7 @@ def _retrieve_memories_impl(
     for idx, mem in enumerate(filtered):
         stored = mem.get("embedding")
         if isinstance(stored, list) and stored:
-            vectors[idx] = np.array(stored, dtype=np.float32)
+            vectors[idx] = stored
             continue
         blob = mem.get("_embedding_blob")
         dim = mem.get("_embedding_dim")
@@ -1193,13 +1611,14 @@ def _retrieve_memories_impl(
             missing_texts.append(str(mem.get("text", "")))
             missing_indices.append(idx)
 
-    if missing_texts:
+    missing_keyword_mode = selection_config.get("missing_embedding_mode", "embed") == "keyword"
+    if missing_texts and not missing_keyword_mode:
         try:
             embedded = embed(missing_texts)
         except Exception as exc:
             LOGGER.warning("Embedding backend unavailable for candidate embeddings; continuing with stored vectors only: %s", exc)
             embedded = []
-        for pos, vector in enumerate(embedded):
+        for pos, vector in enumerate(embedded[:len(missing_indices)]):
             vectors[missing_indices[pos]] = vector
 
     hits = []
@@ -1208,9 +1627,22 @@ def _retrieve_memories_impl(
     for mem, vector in zip(filtered, vectors):
         if vector is None:
             continue
-        raw_score = float(cosine_similarity(query_vector, vector))
-        if raw_score < min_similarity:
+        try:
+            vector = np.asarray(vector, dtype=np.float32)
+        except (TypeError, ValueError):
+            LOGGER.warning("Skipping invalid embedding for memory id=%s", mem.get("id"))
             continue
+        if vector.shape != query_vector.shape or not np.isfinite(vector).all():
+            LOGGER.warning("Skipping incompatible embedding for memory id=%s", mem.get("id"))
+            continue
+        aspect_scores = [float(cosine_similarity(v, vector)) for v in direct_aspect_vectors]
+        raw_score = aspect_scores[0]
+        admission_score = max(aspect_scores) if selection_enabled else raw_score
+        if admission_score < min_similarity:
+            continue
+        evidence = _direct_evidence(
+            vector, direct_aspect_vectors, str(mem.get("text") or ""), query_aspects, aspect_scores,
+        )
         memory_id = str(mem.get("id") or "")
         if memory_id:
             embedding_by_id[memory_id] = vector
@@ -1235,9 +1667,7 @@ def _retrieve_memories_impl(
                 if profile_query and bool(selection_config.get("user_profile_metadata_tiebreak_enabled", False))
                 else 0.0
             ),
-            **_direct_evidence(
-                vector, direct_aspect_vectors, str(mem.get("text") or ""), query_aspects,
-            ),
+            **evidence,
         }
         hits.append(hit)
 
@@ -1277,9 +1707,42 @@ def _retrieve_memories_impl(
         )
     candidate_hits = candidate_hits[:pool_k]
 
+    # Vectorless memories can remain navigable by their own words without
+    # re-embedding the same corpus rows on every read. Their lexical score is
+    # labelled and kept separate from semantic similarity and reranking.
+    missing_keyword_hits: List[Dict[str, Any]] = []
+    if missing_keyword_mode and missing_indices:
+        missing_keyword_hits = _keyword_fallback_hits(
+            [filtered[index] for index in missing_indices],
+            raw_query,
+            pool_k,
+            selection_config if selection_enabled else None,
+        )
+        for hit in missing_keyword_hits:
+            hit.update({
+                "query_aspects": query_aspects,
+                "query_echo_memory": False,
+                "direct_similarity": 0.0,
+                "aspect_scores": [],
+            })
+
     # Candidate recall is permissive; abstain if the pool lacks query evidence.
-    if selection_enabled and not _query_has_sufficient_evidence(candidate_hits, selection_config):
+    if selection_enabled and not _query_has_sufficient_evidence(
+        [*candidate_hits, *missing_keyword_hits], selection_config
+    ):
         return []
+
+    step2_config = dict(settings.get("step2", {}) or {})
+    if bool(step2_config.get("enabled", False)):
+        candidate_hits = _step2_1_rerank(
+            candidate_hits,
+            raw_query,
+            embedding_by_id,
+            float(step2_config.get("alpha", 1.0)),
+            step2_config,
+        )
+
+    candidate_hits.extend(missing_keyword_hits)
 
     if selection_enabled:
         candidate_hits = _select_diverse_hits(

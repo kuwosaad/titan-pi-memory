@@ -2323,6 +2323,8 @@ _PUBLIC_MEMORY_FIELDS = (
     "ts",
     "source_event_ids",
     "source_agent",
+    "evidence_refs",
+    "evidence_refs_truncated",
 )
 
 
@@ -2351,22 +2353,31 @@ def retrieve_memory_brief(
     date_to: Optional[str] = None,
     include_scenes: bool = False,
     sources: Optional[list[str] | tuple[str, ...] | str] = None,
+    detail: Literal["full", "compact"] = "full",
 ) -> Dict[str, Any]:
     from app.retrieval_pipeline.retriever import retrieve_memories
+    if detail not in {"full", "compact"}:
+        raise ValueError("detail must be full or compact")
     safe_query = query or ""
     route = route_query(safe_query)
     if not bool(route.get("use_memory", True)):
-        return {
+        message = "Memory disabled for this query (fresh context requested)."
+        if max_chars is not None and len(message) > max(0, max_chars):
+            message = ""
+        result = {
             "query": safe_query,
             "mode": "none",
             "count": 0,
             "memories": [],
-            "scenes": [],
             "scene_refs": [],
-            "brief": "Memory disabled for this query (fresh context requested).",
-            "scene_brief": "",
+            "brief": message,
             "route": route,
         }
+        if detail == "compact":
+            result["pattern_refs"] = []
+        else:
+            result.update({"scenes": [], "scene_brief": ""})
+        return result
 
     selected_mode = mode or str(route.get("mode") or "both")
     selected_limit = limit if limit is not None else int(route.get("top_k") or 8)
@@ -2390,6 +2401,14 @@ def retrieve_memory_brief(
             date_from=date_from,
             date_to=date_to,
         )
+        # Local retrieval does not annotate its source. Work on copies so
+        # neither serialization nor rendering mutates the retriever's hits.
+        hits = [
+            {**hit, "source_agent": hit.get("source_agent") or active_agent,
+             "memory": {**(hit.get("memory") or {}),
+                        "source_agent": (hit.get("memory") or {}).get("source_agent") or active_agent}}
+            for hit in hits
+        ]
     else:
         hits = recall.query_hits(
             safe_query,
@@ -2401,23 +2420,67 @@ def retrieve_memory_brief(
             date_from=date_from,
             date_to=date_to,
         )
-    memory_brief = build_memory_notes(hits, max_items=max_items, max_chars=max_chars)
+    settings = load_settings()
+    step2_config = settings.get("step2", {}) or {}
+    # The limit applies to the assembled brief, including both sections.
+    # Reserve space for memory notes first; patterns are supplemental guidance.
+    brief_budget = max(0, int(max_chars if max_chars is not None else settings.get("notes_max_chars", 700)))
+    item_budget = max(0, int(max_items if max_items is not None else settings.get("notes_max_items", 6)))
+    included_hits: List[Dict[str, Any]] = []
+    memory_brief = build_memory_notes(
+        hits,
+        max_items=item_budget,
+        max_chars=brief_budget,
+        cluster_mode=bool(step2_config.get("enabled") and step2_config.get("cluster_compression_enabled")),
+        included_hits=included_hits,
+    ) if brief_budget else ""
     pattern_hits: List[Dict[str, Any]] = []
     pattern_brief = ""
-    try:
-        from app.patterns.brief import build_pattern_brief
-        from app.patterns.retrieval import retrieve_accepted_patterns
+    included_patterns: List[Dict[str, Any]] = []
+    remaining_chars = brief_budget - len(memory_brief) - (2 if memory_brief else 0)
+    remaining_items = item_budget - len(included_hits)
+    if active_agent in selected_sources and remaining_chars > 0 and remaining_items > 0:
+        try:
+            from app.patterns.brief import build_pattern_brief
+            from app.patterns.retrieval import record_pattern_applications, retrieve_accepted_patterns
 
-        pattern_hits = retrieve_accepted_patterns(safe_query)
-        pattern_brief = build_pattern_brief(pattern_hits, max_items=max_items, max_chars=max_chars)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Pattern retrieval failed: %s", exc)
+            pattern_hits = retrieve_accepted_patterns(safe_query, record_applications=False)
+            if detail == "compact":
+                # A compact result must be able to point back to its guidance.
+                pattern_hits = [hit for hit in pattern_hits if (hit.get("pattern") or {}).get("id")]
+            pattern_brief = build_pattern_brief(
+                pattern_hits, max_items=remaining_items, max_chars=remaining_chars,
+                included_hits=included_patterns,
+            )
+            if included_patterns:
+                record_pattern_applications(safe_query, included_patterns)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Pattern retrieval failed: %s", exc)
     brief = "\n\n".join(part for part in [pattern_brief, memory_brief] if part)
+    rendered_pattern_count = len(included_patterns)
 
     retrieved_memories = []
     for hit in hits:
         retrieved_memories.append(dict(hit.get("memory", {})))
-    memories = [serialize_public_memory(memory) for memory in retrieved_memories]
+    if detail == "compact":
+        reference_limit = max(0, item_budget - rendered_pattern_count)
+        # Prefer the records actually rendered; if nothing fits, retain
+        # pointers to the top hits so callers can still inspect the evidence.
+        if included_hits:
+            retrieved_memories = [dict(hit.get("memory") or {}) for hit in included_hits]
+        retrieved_memories = retrieved_memories[:reference_limit]
+        memories = [
+            {"id": memory.get("id"), "source_agent": memory.get("source_agent") or active_agent,
+             "scene_id": memory.get("scene_id"),
+             **{field: memory[field] for field in ("ts", "source_reliability", "verification_status")
+                if memory.get(field) is not None},
+             **({"fallback_generated": True} if memory.get("fallback_generated") else {}),
+             **({"evidence_refs": memory["evidence_refs"]} if memory.get("evidence_refs") else {}),
+             **({"evidence_refs_truncated": True} if memory.get("evidence_refs_truncated") else {})}
+            for memory in retrieved_memories
+        ]
+    else:
+        memories = [serialize_public_memory(memory) for memory in retrieved_memories]
 
     response: Dict[str, Any] = {
         "query": safe_query,
@@ -2438,10 +2501,26 @@ def retrieve_memory_brief(
     else:
         scene_refs = recall.scene_references(retrieved_memories, sources=sources)
     response["scene_refs"] = scene_refs
-    if include_scenes:
+    if include_scenes and detail == "full":
         response["scenes"] = scene_refs
 
-    if route.get("summary_mode") == "timeline":
+    if detail == "compact":
+        # The rendered brief carries the useful text. Return only pointers to
+        # its supporting records rather than duplicating full retrieval payloads.
+        response.pop("patterns")
+        response["pattern_refs"] = [
+            {"id": hit["pattern"]["id"], "source_agent": active_agent}
+            for hit in included_patterns
+        ]
+        response.pop("pattern_brief")
+        response.pop("scenes")
+        response.pop("scene_brief")
+        response["scene_refs"] = [
+            {**{key: value for key, value in ref.items() if key != "missing_source_event_ids"},
+             "source_agent": ref.get("source_agent") or active_agent}
+            for ref in scene_refs
+        ]
+    elif route.get("summary_mode") == "timeline":
         response.update(build_timeline(memories, max_items=max_items, max_chars=max_chars))
 
     return response

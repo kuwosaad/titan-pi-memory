@@ -3400,6 +3400,9 @@ def build_parser() -> argparse.ArgumentParser:
     setup_scope_group.add_argument("--global", dest="scope", action="store_const", const="global", default="global")
     setup_scope_group.add_argument("--project", dest="scope", action="store_const", const="project")
     setup_parser.add_argument("--non-interactive", action="store_true", help="Do not prompt; fail if required keys are missing.")
+    setup_ui_group = setup_parser.add_mutually_exclusive_group()
+    setup_ui_group.add_argument("--terminal", action="store_true", help="Use the terminal setup prompts.")
+    setup_ui_group.add_argument("--no-browser", action="store_true", help="Print the onboarding URL instead of opening a browser.")
     setup_parser.add_argument("--yes", action="store_true", help="Approve safe OpenCode config edits without prompting.")
     setup_parser.add_argument("--opencode-config", type=Path, help="OpenCode config path to patch. Defaults to ~/.config/opencode/opencode.json.")
     setup_parser.add_argument("--codex-config", type=Path, help="Codex config path to patch when running `titan setup codex`.")
@@ -3552,6 +3555,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "setup":
         normalized_setup_agent = _normalize_agent_name(args.agent)
+        terminal_options = (args.terminal or args.non_interactive or args.dry_run or args.verify
+                            or args.skip_plugin_install or args.yes or bool(args.cli_keys))
+        if args.no_browser and terminal_options:
+            parser.error("--no-browser cannot be combined with terminal-only setup options")
+        if not terminal_options and normalized_setup_agent in {DEFAULT_AGENT_NAME, CODEX_AGENT_NAME, CLAUDE_AGENT_NAME, "pi"}:
+            from tools.cli.onboarding import run_onboarding
+
+            config_path = args.codex_config if normalized_setup_agent == CODEX_AGENT_NAME else args.opencode_config
+            return run_onboarding(normalized_setup_agent, scope=args.scope, config_path=config_path, open_browser=not args.no_browser)
+        if args.no_browser:
+            parser.error("--no-browser is available for opencode, codex, claude-code, and pi")
         if normalized_setup_agent == CODEX_AGENT_NAME:
             codex_setup_kwargs = {
                 "dry_run": args.dry_run,

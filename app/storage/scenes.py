@@ -759,18 +759,23 @@ class SqliteSceneRepository:
         if not normalized_ids:
             return []
         placeholders = ",".join("?" for _ in normalized_ids)
-        query = f"""
-        SELECT scene_id, evidence_version, evidence_status, missing_source_event_ids_json
-        FROM scenes WHERE scene_id IN ({placeholders})
-        """
         with self._lock, self._connect() as conn:
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(scenes)")}
+            evidence_columns = ("evidence_version", "evidence_status", "missing_source_event_ids_json")
+            selected_columns = ["scene_id"] + [column for column in evidence_columns if column in columns]
+            query = f"SELECT {', '.join(selected_columns)} FROM scenes WHERE scene_id IN ({placeholders})"
             rows = conn.execute(query, normalized_ids).fetchall()
         by_id = {
             row["scene_id"]: {
                 "scene_id": row["scene_id"],
-                "evidence_version": int(row["evidence_version"] or 0),
-                "evidence_status": str(row["evidence_status"] or "partial"),
-                "missing_source_event_ids": json.loads(row["missing_source_event_ids_json"] or "[]"),
+                "evidence_version": int(row["evidence_version"] or 0) if "evidence_version" in columns else 0,
+                "evidence_status": (
+                    str(row["evidence_status"] or "partial")
+                    if all(column in columns for column in evidence_columns) else "partial"
+                ),
+                **({"scene_available": True} if not all(column in columns for column in evidence_columns) else {}),
+                **({"missing_source_event_ids": json.loads(row["missing_source_event_ids_json"] or "[]")}
+                   if "missing_source_event_ids_json" in columns else {}),
             }
             for row in rows
         }

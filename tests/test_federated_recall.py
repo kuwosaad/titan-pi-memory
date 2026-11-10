@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from copy import deepcopy
 import sqlite3
 import importlib
 from unittest.mock import patch
@@ -74,6 +75,79 @@ def test_source_override_and_limit_are_applied_after_merge():
 
     assert [item["source_agent"] for item in recall.get_recent_memories(limit=5, sources=["pi"])] == ["pi"]
     assert len(recall.get_recent_memories(limit=1, sources=["codex", "pi"])) == 1
+
+
+def test_nonpositive_limits_do_not_read_sources_or_run_retrieval():
+    recall = FederatedRecall(active_agent="codex", memory_repositories={"codex": BrokenMemoryRepo()})
+    with patch("app.retrieval_pipeline.retriever.retrieve_memories") as retrieve, patch(
+        "app.save_pipeline.dedup_buffer.peek_dedup_buffer"
+    ) as buffer:
+        assert recall.query_hits("needle", limit=0) == []
+        assert recall.query_hits("needle", limit=-1) == []
+        assert recall.get_recent_memories(limit=0) == []
+        assert recall.get_recent_memories(limit=-1) == []
+    retrieve.assert_not_called()
+    buffer.assert_not_called()
+
+
+def test_tied_federated_results_do_not_depend_on_source_order():
+    repos = {
+        "pi": MemoryRepo(recent=[memory("p", "duplicate"), memory("p2", "pi only")]),
+        "grok": MemoryRepo(recent=[memory("g", "duplicate"), memory("g2", "grok only")]),
+    }
+    recall = FederatedRecall(active_agent="codex", memory_repositories=repos)
+
+    def retrieve(query, **kwargs):
+        return [{"memory": item, "score": 0.8} for item in kwargs["repository"].recent]
+
+    with patch("app.retrieval_pipeline.retriever.retrieve_memories", side_effect=retrieve):
+        for get_results in (recall.get_recent_memories, lambda **kwargs: recall.query_memories("x", **kwargs)):
+            first = get_results(limit=3, sources=["pi", "grok"])
+            second = get_results(limit=3, sources=["grok", "pi"])
+            assert [(item["source_agent"], item["id"]) for item in first] == [
+                ("grok", "g"), ("grok", "g2"), ("pi", "p2")
+            ]
+            assert first == second
+
+
+def test_exact_duplicates_keep_source_qualified_evidence_without_mutating_repositories():
+    active = memory("shared", "Same text", scene_id="scene-active")
+    foreign = memory("shared", " same  TEXT ", scene_id="scene-foreign")
+    original = deepcopy([active, foreign])
+    repos = {"codex": MemoryRepo(recent=[active]), "pi": MemoryRepo(recent=[foreign])}
+    recall = FederatedRecall(active_agent="codex", memory_repositories=repos)
+
+    def retrieve(query, **kwargs):
+        return [{"memory": item, "score": 0.9} for item in kwargs["repository"].recent]
+
+    with patch("app.retrieval_pipeline.retriever.retrieve_memories", side_effect=retrieve):
+        recent = recall.get_recent_memories(limit=2)
+        hits = recall.query_hits("same", limit=2)
+
+    expected_refs = [
+        {"source_agent": "codex", "memory_id": "shared", "scene_id": "scene-active"},
+        {"source_agent": "pi", "memory_id": "shared", "scene_id": "scene-foreign"},
+    ]
+    assert len(recent) == len(hits) == 1
+    assert recent[0]["source_agent"] == hits[0]["memory"]["source_agent"] == "codex"
+    assert recent[0]["evidence_refs"] == hits[0]["memory"]["evidence_refs"] == expected_refs
+    assert hits[0]["score"] == 0.9
+    assert [active, foreign] == original
+
+
+def test_duplicate_evidence_is_bounded_and_truncation_is_explicit():
+    repos = {
+        f"agent{i:02d}": MemoryRepo(recent=[memory("shared", "same", scene_id=f"scene-{i}")])
+        for i in range(12)
+    }
+    recall = FederatedRecall(active_agent="agent11", memory_repositories=repos)
+    forward = recall.get_recent_memories(limit=1, sources=list(repos))[0]
+    reverse = recall.get_recent_memories(limit=1, sources=list(reversed(repos)))[0]
+
+    assert forward == reverse
+    assert forward["evidence_refs_truncated"] is True
+    assert len(forward["evidence_refs"]) == 10
+    assert forward["evidence_refs"][0]["source_agent"] == "agent11"
 
 
 def test_default_sources_discover_valid_agent_workspaces(tmp_path: Path, monkeypatch):
@@ -566,6 +640,7 @@ def test_scene_references_batch_by_source_and_preserve_source_qualified_order():
             "missing_source_event_ids": [],
             "source_agent": "codex",
         },
+        {"scene_id": "missing", "source_agent": "pi", "scene_available": False, "evidence_status": "partial"},
     ]
 
 
@@ -600,6 +675,7 @@ def test_scene_references_batch_failure_preserves_per_scene_fail_open_behavior()
     ]
     assert refs == [
         {"scene_id": "first", "source_agent": "codex"},
+        {"scene_id": "broken", "source_agent": "codex", "scene_available": None, "evidence_status": "partial"},
         {"scene_id": "last", "source_agent": "codex"},
     ]
 
@@ -742,7 +818,9 @@ def test_missing_namespace_does_not_create_files(tmp_path: Path):
     recall = FederatedRecall(active_agent="codex", titan_home=tmp_path)
 
     assert recall.get_recent_memories(sources=["pi"]) == []
-    assert recall.scene_references([memory("m", "x", scene_id="scene", source_agent="pi")], sources=["pi"]) == []
+    assert recall.scene_references([memory("m", "x", scene_id="scene", source_agent="pi")], sources=["pi"]) == [
+        {"source_agent": "pi", "scene_id": "scene", "scene_available": False, "evidence_status": "partial"}
+    ]
     assert not missing.exists()
 
 

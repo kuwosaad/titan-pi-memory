@@ -43,27 +43,22 @@ def _memory_dict(memory: Any) -> dict[str, Any]:
 
 
 def _compact_recall_payload(payload: dict[str, Any], *, limit: int) -> dict[str, Any]:
-    memories = [_memory_dict(memory) for memory in list(payload.get("memories") or [])[:limit]]
+    memories: list[dict[str, Any]] = []
+    seen_memories: set[tuple[str, str, str]] = set()
+    for raw_memory in payload.get("memories") or []:
+        memory = _memory_dict(raw_memory)
+        text = " ".join(str(memory.get("text") or "").split())
+        source = str(memory.get("source_agent") or "unknown")
+        key = (source, str(memory.get("scene_id") or ""), text)
+        if not text or key in seen_memories:
+            continue
+        seen_memories.add(key)
+        memories.append(memory)
+        if len(memories) == limit:
+            break
+    lines: list[str] = []
     refs: list[dict[str, Any]] = []
     seen_refs: set[tuple[str, str]] = set()
-    supplied_refs = list(payload.get("scene_refs") or [])
-    for memory in memories:
-        source = str(memory.get("source_agent") or "unknown")
-        scene_id = str(memory.get("scene_id") or "")
-        key = (source, scene_id)
-        if scene_id and key not in seen_refs:
-            seen_refs.add(key)
-            refs.append({"source_agent": source, "scene_id": scene_id})
-    for raw_ref in supplied_refs:
-        ref = _memory_dict(raw_ref)
-        source = str(ref.get("source_agent") or "unknown")
-        scene_id = str(ref.get("scene_id") or "")
-        key = (source, scene_id)
-        if scene_id and key not in seen_refs and len(refs) < limit:
-            seen_refs.add(key)
-            refs.append({"source_agent": source, "scene_id": scene_id})
-
-    lines: list[str] = []
     remaining = 4000
     for memory in memories:
         source = str(memory.get("source_agent") or "unknown")
@@ -77,6 +72,11 @@ def _compact_recall_payload(payload: dict[str, Any], *, limit: int) -> dict[str,
             break
         lines.append(line)
         remaining -= len(line) + 1
+        raw_scene_id = str(memory.get("scene_id") or "")
+        key = (source, raw_scene_id)
+        if raw_scene_id and key not in seen_refs:
+            seen_refs.add(key)
+            refs.append({"source_agent": source, "scene_id": raw_scene_id})
 
     return {
         "ok": True,

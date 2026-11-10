@@ -95,6 +95,12 @@ approve Titan Memory if you want passive capture.
 unapproved. See the [Codex guide](integrations/codex_titan_plugin/README.md) for
 verification, repair, and provider setup.
 
+MCP exposes all tools by default. To reduce tool definitions in an agent's
+context, set `TITAN_MCP_TOOL_PROFILE=core` in its MCP server environment and
+restart the server. Core exposes `query_memories`, `store_trace_packet`,
+`get_scene_context`, and `doctor`. Use `TITAN_MCP_TOOL_PROFILE=full` to restore
+all tools.
+
 ### Claude Code, OpenCode, and Grok
 
 These source-based paths start from a checkout:

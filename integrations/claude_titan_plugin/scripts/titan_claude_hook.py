@@ -655,8 +655,9 @@ def automatic_recall(
     if event_name not in {"SessionStart", "UserPromptSubmit"}:
         return ""
     prompt = payload.get("prompt") or payload.get("user_prompt") or payload.get("message") or ""
-    if event_name == "UserPromptSubmit" and isinstance(prompt, str) and _DO_NOT_RECALL.search(prompt):
-        return ""
+    if event_name == "UserPromptSubmit":
+        if not isinstance(prompt, str) or not prompt.strip() or _DO_NOT_RECALL.search(prompt):
+            return ""
     try:
         recall_context, _submit_events = _import_runtime()
         started = time.monotonic()

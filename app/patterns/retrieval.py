@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -27,6 +29,7 @@ def retrieve_accepted_patterns(
     limit: Optional[int] = None,
     min_confidence: Optional[float] = None,
     db_path: Optional[Path] = None,
+    record_applications: bool = True,
 ) -> List[Dict[str, Any]]:
     """Retrieve accepted learned patterns that should guide a query.
 
@@ -39,7 +42,7 @@ def retrieve_accepted_patterns(
         return []
 
     settings = load_settings()
-    config = settings.get("patterns") if isinstance(settings.get("patterns"), dict) else {}
+    config = settings.get("patterns") if isinstance(settings.get("patterns"), Mapping) else {}
     if not bool(config.get("enabled", True)):
         return []
 
@@ -47,12 +50,19 @@ def retrieve_accepted_patterns(
     safe_limit = max(1, min(safe_limit, 10))
     threshold = float(min_confidence if min_confidence is not None else config.get("min_confidence_to_retrieve", 0.60))
     path = Path(db_path) if db_path is not None else resolve_pattern_db_path()
-    store = PatternStore(path)
+    if not record_applications and not path.is_file():
+        return []
+    store = PatternStore(path, initialize=record_applications)
 
     try:
         candidates = store.list_patterns(status="accepted", limit=200)
     except PatternValidationError:
         return []
+    except sqlite3.OperationalError as exc:
+        # Existing memory stores may predate the optional patterns schema.
+        if not record_applications and "no such table: patterns" in str(exc):
+            return []
+        raise
 
     query_tokens = _tokens(safe_query)
     query_lower = safe_query.lower()
@@ -89,13 +99,37 @@ def retrieve_accepted_patterns(
         )
     )
     selected = hits[:safe_limit]
-    for hit in selected:
+    if record_applications:
+        _record_applications(store, safe_query, selected)
+    return selected
+
+
+def record_pattern_applications(
+    query: str,
+    hits: Sequence[Dict[str, Any]],
+    *,
+    db_path: Optional[Path] = None,
+) -> None:
+    """Record only patterns actually shown by a caller rendering a brief."""
+    safe_query = str(query or "").strip()
+    if not safe_query or not hits:
+        return
+    try:
+        store = PatternStore(Path(db_path) if db_path is not None else resolve_pattern_db_path())
+        _record_applications(store, safe_query, hits)
+    except Exception:
+        # Application tracking must not make the memory response fail.
+        pass
+
+
+def _record_applications(store: PatternStore, query: str, hits: Sequence[Dict[str, Any]]) -> None:
+    for hit in hits:
         try:
             retrieved_at = now_iso()
             store.record_application(
                 PatternApplication(
                     pattern_id=hit["pattern"]["id"],
-                    query=safe_query,
+                    query=query,
                     retrieved_at=retrieved_at,
                     shown_at=retrieved_at,
                 )
@@ -103,7 +137,6 @@ def retrieve_accepted_patterns(
         except Exception:
             # Retrieval guidance should never fail the main memory response.
             pass
-    return selected
 
 
 def _tokens(text: str) -> set[str]:

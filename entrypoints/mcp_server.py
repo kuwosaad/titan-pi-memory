@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
@@ -166,19 +167,41 @@ async def query_memories(
     query: Optional[str] = None,
     mode: Optional[str] = None,
     sources: Optional[list[str] | str] = None,
+    detail: str = "compact",
+    max_items: Optional[int] = None,
+    max_chars: Optional[int] = None,
 ) -> dict:
-    if query:
+    """Search memories with a bounded brief and scene pointers by default.
+
+    Set detail="full" for public memory records; get_scene_context expands a
+    specific scene. max_items and max_chars bound the generated brief, and
+    max_items also bounds pointers in compact search results. Zero disables
+    that budget. With no query, compact mode summarizes recent records
+    without semantic embedding; full mode returns recent public records.
+    """
+    if detail not in ("compact", "full"):
+        return _mcp_bad_request(ValueError("detail must be 'compact' or 'full'"))
+    for name, value, minimum, maximum in (("limit", limit, 1, 100), ("max_items", max_items, 0, 100), ("max_chars", max_chars, 0, 20000)):
+        if value is not None and not minimum <= value <= maximum:
+            return _mcp_bad_request(ValueError(f"{name} must be between {minimum} and {maximum}"))
+    if query or detail == "compact":
         kwargs = {
-            "query": query,
+            "query": query or "",
             "session_id": session_id,
             "mode": mode,
             "limit": limit,
             "include_scenes": False,
+            "detail": detail,
         }
+        if max_items is not None:
+            kwargs["max_items"] = max_items
+        if max_chars is not None:
+            kwargs["max_chars"] = max_chars
         if sources is not None:
             kwargs["sources"] = sources
         payload = await asyncio.to_thread(retrieve_memory_brief, **kwargs)
-        payload["memories"] = [_serialize_memory(mem) for mem in payload.get("memories", [])]
+        if detail == "full":
+            payload["memories"] = [_serialize_memory(mem) for mem in payload.get("memories", [])]
         return payload
 
     kwargs = {"limit": limit, "session_id": session_id}
@@ -217,6 +240,9 @@ async def get_recent_memories(
     limit: int = 20,
     sources: Optional[list[str] | str] = None,
 ) -> dict:
+    """Return up to 100 recent public memory records."""
+    if not 1 <= limit <= 100:
+        return _mcp_bad_request(ValueError("limit must be between 1 and 100"))
     kwargs = {"limit": limit, "session_id": session_id}
     if sources is not None:
         kwargs["sources"] = sources
@@ -676,6 +702,28 @@ async def get_scene_context(scene_id: str, source_agent: Optional[str] = None) -
 
 
 server.tool()(get_scene_context)
+
+
+_CORE_TOOLS = frozenset({"query_memories", "store_trace_packet", "get_scene_context", "doctor"})
+
+
+def _apply_tool_profile() -> None:
+    """Apply TITAN_MCP_TOOL_PROFILE (full by default, or core for essentials)."""
+    profile = os.getenv("TITAN_MCP_TOOL_PROFILE", "full").strip().lower()
+    if profile not in {"full", "core"}:
+        raise ValueError("TITAN_MCP_TOOL_PROFILE must be 'core' or 'full'")
+    if profile == "full":
+        return
+    # Import can occur from an existing event loop. A worker lets the public
+    # async listing API run safely in either synchronous or async callers.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        tools = executor.submit(lambda: asyncio.run(server.list_tools())).result()
+    for tool in tools:
+        if tool.name not in _CORE_TOOLS:
+            server.remove_tool(tool.name)
+
+
+_apply_tool_profile()
 
 
 def run() -> None:
