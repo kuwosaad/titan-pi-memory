@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/titan-pi-banner.png" alt="Titan Memory" width="960" />
+  <img src="assets/titan-banner-geometric.png" alt="Titan Memory" width="960" />
 </p>
 
 <h1 align="center">Titan Memory</h1>

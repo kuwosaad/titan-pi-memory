@@ -52,7 +52,8 @@
     "tools/pi_extension/prompts/",
     "tools/pi_extension/skills/",
     "assets/titan-pi-card.png",
-    "assets/titan-pi-banner.png"
+    "assets/titan-pi-banner.png",
+    "assets/titan-banner-geometric.png"
   ],
   "repository": {
     "type": "git",
