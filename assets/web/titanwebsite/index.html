@@ -1068,10 +1068,10 @@
         @media (max-width: 680px) {
             .nav { height: 72px; }
             .nav-links a:not(.nav-cta) { display: none; }
-            .nav-inner { width: calc(100vw - 32px); }
+            .nav-inner { width: calc(100vw - 24px); }
             .brand { gap: 8px; }
             .brand-mark { width: 28px; height: 28px; }
-            .hero { padding-inline: 16px; }
+            .hero { padding-inline: 12px; }
             h1 { font-size: clamp(52px, 18vw, 82px); }
             .hero-copy { font-size: 18px; }
             .section { width: calc(100vw - 32px); padding: 82px 0; }
@@ -1105,12 +1105,13 @@
         }
     </style>
     <link rel="stylesheet" href="demo.css"/>
+    <link rel="icon" type="image/svg+xml" href="titan-logo.svg">
 </head>
 <body>
     <nav class="nav" aria-label="Primary navigation">
         <div class="nav-inner">
             <a class="brand" href="#top" aria-label="Titan home">
-                <img class="brand-mark" src="titan-logo.svg" alt=""/>
+                <img class="brand-mark" src="titan-logo.svg" alt="" aria-hidden="true">
                 titan memory
             </a>
             <div class="nav-links">

@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">Titan Memory</h1>
-<p align="center"><strong>Give your coding agents a memory that survives the session.</strong></p>
+<p align="center"><strong>Local-first multi-agent memory for coding agents.</strong></p>
 <p align="center">
   <a href="#get-started">Get started</a> ·
   <a href="#use-titan">Usage</a> ·
@@ -12,14 +12,15 @@
   <a href="#development">Development</a>
 </p>
 
-Titan saves useful knowledge from your work—decisions, bugs, constraints,
-preferences, and outcomes—so your agents can find it again later. Ask what you
-changed last week, recover the reasoning behind a decision, or pick up a project
-with a different agent.
+Titan Memory is a local-first memory layer for coding agents. It saves useful
+knowledge from your work—decisions, bugs, constraints, preferences, and
+outcomes—so your agents can find it again later. Ask what you changed last week,
+recover the reasoning behind a decision, or pick up a project with a different
+agent.
 
-It connects to **Pi, Codex, Claude Code, OpenCode, and Grok**. Each agent writes to
-its own local memory store; recall can search across them. A separate **BB plugin**
-lets you explore those memories visually beside your chat.
+Adapters connect **Pi, Codex, Claude Code, OpenCode, and Grok**. Each agent writes
+to its own local memory store; recall can search across them. A separate **BB
+plugin** lets you explore those memories visually beside your chat.
 
 ## What Titan does
 

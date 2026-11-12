@@ -1,14 +1,16 @@
 {
   "name": "titan-pi-memory",
   "version": "0.2.6",
-  "description": "Persistent evolutionary memory for the Pi coding agent",
+  "description": "Local-first multi-agent memory for Pi, Codex, Claude Code, OpenCode, and Grok",
   "keywords": [
     "pi-package",
     "pi-extension",
     "memory",
     "agent-memory",
+    "multi-agent",
     "persistent-memory",
-    "coding-agent"
+    "coding-agent",
+    "local-first"
   ],
   "pi": {
     "extensions": [
