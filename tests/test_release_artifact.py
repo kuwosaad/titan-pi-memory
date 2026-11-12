@@ -120,6 +120,18 @@ class ReleaseArtifactTests(unittest.TestCase):
             with tarfile.open(archive, "r:gz") as handle:
                 names = [member.name for member in handle.getmembers() if member.isfile()]
             self.assertFalse(any(name.endswith("_agents.md") for name in names))
+            for asset in ("FONT-SOURCE.txt", "source-serif-regular.ttf", "titan-logo.svg"):
+                self.assertIn(f"package/runtime/tools/cli/onboarding_ui/{asset}", names)
+
+            # The onboarding exceptions are exact paths, not blanket type allowances.
+            unexpected = package_root / "runtime" / "tools" / "cli" / "onboarding_ui" / "other.svg"
+            unexpected.write_text("<svg/>", encoding="utf-8")
+            rejected = run(
+                ["node", str(package_root / "scripts" / "audit-runtime.js"), str(package_root)], cwd=candidate
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("other.svg: unexpected artifact file type", rejected.stderr)
+            unexpected.unlink()
 
             # The preparation step must omit exact internal-note names, not just
             # the historical *_agents.md suffix.

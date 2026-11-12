@@ -22,6 +22,11 @@ const requiredRuntimeFiles = [
 const allowedSuffixes = new Set([
   '.css', '.html', '.js', '.json', '.md', '.png', '.py', '.sh', '.ts', '.yaml', '.yml',
 ]);
+const allowedOnboardingAssets = new Set([
+  'tools/cli/onboarding_ui/FONT-SOURCE.txt',
+  'tools/cli/onboarding_ui/source-serif-regular.ttf',
+  'tools/cli/onboarding_ui/titan-logo.svg',
+]);
 const forbiddenPathPrefixes = [
   'entrypoints/overnight/',
   'tools/benchmarks/',
@@ -109,6 +114,7 @@ for (const file of runtimeFiles) {
   }
   const suffix = path.extname(file.relative).toLowerCase();
   if (!allowedExtensionlessFiles.has(file.relative)
+    && !allowedOnboardingAssets.has(file.relative)
     && file.relative !== 'config/.env.example'
     && suffix !== '' && !allowedSuffixes.has(suffix)) {
     violations.push(`${file.relative}: unexpected artifact file type`);
