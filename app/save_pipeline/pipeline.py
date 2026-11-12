@@ -139,7 +139,11 @@ def run_memory_pipeline_outcome(
     existing_text_hashes: Optional[set[str]] = None,
     scene: Optional[Scene] = None,
     persist_scene: bool = True,
+    derivation_version: Optional[str] = None,
 ) -> Dict[str, Any]:
+    if derivation_version is not None and (not isinstance(derivation_version, str) or not derivation_version.strip() or scene is None):
+        raise ValueError("derivation_version requires a nonempty string and an original scene")
+
     # Core save stage: extract -> embed -> persist memory records.
     # Raw-fragment fallback is a legacy opt-in. Ingestion always disables it;
     # valid empty extraction is authoritative and provider failures are retried.
@@ -154,7 +158,14 @@ def run_memory_pipeline_outcome(
 
     adapter = get_extraction_adapter_with_config(config_path) if config_path else get_extraction_adapter()
 
-    extracted = extract_atomic_memories(user_text, assistant_text, adapter)
+    from app.storage.memories import get_memory_repository
+    from app.runtime.context import get_runtime_context
+    from app.save_pipeline.extraction.comparison import correction_candidates, comparison_scope
+    repository = get_memory_repository()
+    source = get_runtime_context().agent_name
+    comparisons = correction_candidates(user_text, repository, source)
+    with comparison_scope(comparisons):
+        extracted = extract_atomic_memories(user_text, assistant_text, adapter)
     fallback_used = False
     if not extracted and fallback_enabled and worthiness["allow_fallback"]:
         extracted = build_safe_fallback_memories(user_text, assistant_text)
@@ -225,15 +236,93 @@ def run_memory_pipeline_outcome(
             )
         )
 
+    from app.retrieval_pipeline.event_time import normalize_event_time
+    for record, memory in zip(records, extracted):
+        for key in ("subject", "scope", "attribute"):
+            value = memory.get(key)
+            if isinstance(value, str) and value.strip():
+                record[key] = value.strip()[:300]
+        quote = memory.get("event_evidence")
+        event_date = memory.get("event_date")
+        # Require both exact current-source evidence and a visible date token.
+        # The model cannot date a fact merely from the save timestamp.
+        if (isinstance(quote, str) and quote.strip() and
+                (quote in user_text or quote in assistant_text) and
+                isinstance(event_date, str) and event_date in quote):
+            record.update(normalize_event_time(event_date, source_time=scene.ts if scene else None))
+
+    if scene is not None:
+        comparison_by_id = {item["id"]: item for item in comparisons}
+        for record, memory in zip(records, extracted):
+            old_id, quote = memory.get("supersedes"), memory.get("correction_evidence")
+            old = comparison_by_id.get(old_id) if isinstance(old_id, str) else None
+            if old and _grounded_correction(memory, old, quote, scene, record):
+                record["correction_target"] = old_id
+                record["correction_evidence"] = quote
+
     if scene is not None:
         # Memory IDs are opaque addresses. A durable scene owns its derivations;
         # extraction order and reused legacy turns cannot change that identity.
         for index, record in enumerate(records):
-            record["id"] = f"{scene.scene_id}:memory:{index}"
+            if derivation_version is None:
+                record["id"] = f"{scene.scene_id}:memory:{index}"
+            else:
+                # Include every immutable record field, including the embedding:
+                # regenerated vectors may differ even for the same claim. Native
+                # exact-evidence dedup still merges equivalent evidence afterward.
+                record["ts"] = scene.ts
+                identity = {key: value for key, value in record.items() if key not in {"id", "ts"}}
+                payload = json.dumps([scene.scene_id, derivation_version, identity],
+                                     sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                record["id"] = f"{scene.scene_id}:derivation:{digest}:0"
+        existing = repository.query_by_ids([record["id"] for record in records])
+        for record in records:
+            prior = existing.get(record["id"])
+            if (prior and prior.get("correction_target") and
+                    all(prior.get(key) == record.get(key) for key in
+                        ("text", "subject", "scope", "attribute", "provenance", "source_event_ids"))):
+                record["correction_target"] = prior["correction_target"]
+                record["correction_evidence"] = prior["correction_evidence"]
     records = append_memories(records)
     if scene is not None and persist_scene:
         append_scene(scene)
+    _complete_corrections(repository, records, source)
     return {"records": records, "fallback_used": fallback_used, "skipped_low_signal": False, "skip_reason": None}
+
+
+def _grounded_correction(memory, old, quote, scene, record):
+    from app.save_pipeline.extraction.comparison import _CORRECTION
+    if not isinstance(quote, str) or len(quote.split()) < 7 or not _CORRECTION.search(quote):
+        return False
+    if re.search(r'\b(?:if|maybe|might|could|would|hypothetical|quoted?|said|additionally|also|not|never|no|cannot|can.t|doesn.t|isn.t)\b|["“”]|not a correction', quote, re.I):
+        return False
+    if not all(record.get(k) and record[k] == old.get(k) for k in ("subject", "scope", "attribute")):
+        return False
+    if re.search(r"[.!?]\s+\S", quote.strip()):
+        return False
+    supported = {message.event_id for message in scene.messages
+                 if message.role == "user" and quote.strip() == message.content.strip() and message.event_id}
+    if not supported.intersection(record.get("source_event_ids") or []):
+        return False
+    words = lambda text: set(re.findall(r"[a-z0-9_]+", str(text).lower()))
+    quoted_words = words(quote)
+    if not all(words(record[key]).issubset(quoted_words) for key in ("subject", "scope", "attribute")):
+        return False
+    added = words(memory["text"]) - words(old["text"])
+    return bool(added) and added.issubset(quoted_words)
+
+
+def _complete_corrections(repository, records, source):
+    from app.storage.memory_relations import record_supersession
+    for record in records:
+        if not record.get("correction_target"):
+            continue
+        try:
+            record_supersession(repository, source=source, old_id=record["correction_target"],
+                                new_id=record["id"], evidence=record["correction_evidence"])
+        except ValueError as exc:
+            LOGGER.info("Correction retained both facts: %s", exc)
 
 
 def _build_trace_prompt(req: TracePacketRequest) -> tuple[str, str]:
@@ -828,6 +917,16 @@ def _retry_failed_extractions(session_id: str) -> Dict[str, int]:
         if scene is None:
             continue
         if scene.scene_id in existing_scene_ids:
+            from app.storage.memories import get_memory_repository
+            from app.runtime.context import get_runtime_context
+            repository = get_memory_repository()
+            try:
+                saved = repository.get_recent_memories(limit=None, session_id=session_id)
+                _complete_corrections(repository, [record for record in saved
+                                      if record.get("scene_id") == scene.scene_id],
+                                      get_runtime_context().agent_name)
+            except Exception:
+                continue
             remove_retry_entries(session_id, {event_id})
             recovered_retries += 1
             continue
@@ -1232,12 +1331,77 @@ def _is_tool_evidence_event(event: Dict[str, Any]) -> bool:
     return raw_type.startswith(("tool.", "file."))
 
 
+_TITAN_RECALL_METHODS = {
+    "query_memories", "get_scene_context", "get_recent_memories",
+    "inspect_clusters", "analyze_clusters",
+}
+_TITAN_SERVER_NAMES = {"titan-memory", "titan_memory"}
+
+
+def _is_titan_recall_tool(name: str, args: Any, metadata: Dict[str, Any]) -> bool:
+    """Recognize owned memory reads by tool identity, never by output text.
+
+    Doctor and writes are fresh execution evidence. A generic query_memories
+    from an unidentified or different provider is not a Titan recall result.
+    """
+    name = str(name or "").strip()
+    if name.startswith("functions."):
+        name = name[len("functions."):]
+    qualified = re.fullmatch(r"mcp__(titan[-_]memory)__([a-z_]+)", name)
+    if qualified:
+        return qualified.group(2) in _TITAN_RECALL_METHODS
+    if name in {f"titan_{method}" for method in _TITAN_RECALL_METHODS}:
+        return True
+    if name == "titan":
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except (ValueError, TypeError):
+                return False
+        action = args.get("action") if isinstance(args, dict) else None
+        return isinstance(action, str) and action in (_TITAN_RECALL_METHODS | {"recent"})
+    if name not in _TITAN_RECALL_METHODS:
+        return False
+    return any(isinstance(metadata.get(key), str) and metadata[key] in _TITAN_SERVER_NAMES
+               for key in ("server", "server_name", "mcp_server"))
+
+
+def _tool_call_projection_payload(tool_call: Any, event: Dict[str, Any], index: int) -> Dict[str, Any]:
+    payload = event.get("payload") or {}
+    if str(event.get("event_type") or "") != "trace_packet":
+        return payload
+    # Multiple same-name calls may have no call IDs. Their original order is
+    # retained in Scene.tool_calls, so match one exact ordinal, never any sibling.
+    calls = [call for call in payload.get("tool_calls") or [] if isinstance(call, dict)]
+    if index >= len(calls):
+        return {}
+    call = calls[index]
+    if str(call.get("name") or "tool") != str(_item_value(tool_call, "name") or ""):
+        return {}
+    call_id = _item_value(tool_call, "call_id")
+    if call_id and call.get("call_id") != call_id:
+        return {}
+    return call
+
+
+def _titan_recall_failure(payload: Dict[str, Any], status: str) -> Optional[str]:
+    """Keep explicit new diagnostics without forwarding the recalled payload."""
+    output = payload.get("output", payload.get("result"))
+    diagnostic = payload.get("error")
+    if isinstance(output, dict):
+        diagnostic = diagnostic or output.get("error") or output.get("stderr")
+    if diagnostic or payload.get("failed") is True or status.lower() in {"error", "failed", "failure"}:
+        return _compact_text(diagnostic, limit=500) if diagnostic else ""
+    return None
+
+
 def _scene_tool_projection_entries(
     raw_events: List[Dict[str, Any]],
     tool_calls: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """Return compact tool evidence plus explicit entries for omitted tools."""
 
+    raw_event_by_id = {str(event.get("event_id") or ""): event for event in raw_events}
     seq_by_event_id = {
         str(event.get("event_id") or ""): int(event.get("seq") or 0)
         for event in raw_events
@@ -1245,12 +1409,22 @@ def _scene_tool_projection_entries(
     }
     entries: List[Dict[str, Any]] = []
     seen_event_ids: set[str] = set()
+    call_index_by_event: Dict[str, int] = {}
     for tool_call in tool_calls:
         event_id = str(_item_value(tool_call, "event_id") or "").strip()
-        if event_id and event_id in seen_event_ids:
+        event = raw_event_by_id.get(event_id, {})
+        if event_id and event_id in seen_event_ids and event.get("event_type") != "trace_packet":
             continue
         if event_id:
             seen_event_ids.add(event_id)
+        call_index = call_index_by_event.get(event_id, 0)
+        call_index_by_event[event_id] = call_index + 1
+        payload = _tool_call_projection_payload(tool_call, event, call_index)
+        name = str(_item_value(tool_call, "name") or "tool")
+        status = str(_item_value(tool_call, "status") or "unknown")
+        recall_tool = _is_titan_recall_tool(name, payload.get("args"), payload)
+        failure = _titan_recall_failure(payload, status) if recall_tool else None
+        recalled_context = recall_tool and failure is None
         entries.append(
             {
                 "event_id": event_id or None,
@@ -1260,9 +1434,13 @@ def _scene_tool_projection_entries(
                 "summary": str(_item_value(tool_call, "summary") or "").strip(),
                 "file_paths": list(_item_value(tool_call, "file_paths") or []),
                 "excerpt": str(_item_value(tool_call, "excerpt") or "").strip(),
-                "omitted": not bool(str(_item_value(tool_call, "summary") or "").strip()),
+                "omitted": recalled_context or not bool(str(_item_value(tool_call, "summary") or "").strip()),
+                "recalled_context": recalled_context,
             }
         )
+        if failure is not None:
+            entries[-1].update({"status": "error", "summary": f"{name} reported a read failure",
+                                "file_paths": [], "excerpt": failure, "omitted": False})
 
     for event in raw_events:
         if not _is_tool_evidence_event(event):
@@ -1592,7 +1770,11 @@ def _scene_default_memory_event_ids(scene: Scene) -> List[str]:
                 break
     if selected:
         return list(dict.fromkeys(selected))
-    return [str(event_id) for event_id in scene.source_event_ids if str(event_id).strip()]
+    tools = _scene_tool_projection_entries(scene.raw_events, scene.tool_calls)
+    recalled_ids = {str(tool.get("event_id") or "") for tool in tools if tool.get("recalled_context")}
+    fresh_tool_ids = {str(tool.get("event_id") or "") for tool in tools if not tool.get("recalled_context")}
+    return [str(event_id) for event_id in scene.source_event_ids
+            if str(event_id).strip() and event_id not in recalled_ids - fresh_tool_ids]
 
 
 def _source_event_ids_for_memory(
@@ -2293,6 +2475,12 @@ def serialize_public_memory(memory: Any) -> Dict[str, Any]:
         source = {field: getattr(memory, field, None) for field in _PUBLIC_MEMORY_FIELDS}
     payload = {field: source.get(field) for field in _PUBLIC_MEMORY_FIELDS}
     payload["source_event_ids"] = list(source.get("source_event_ids") or [])
+    for field in ("event_date", "event_start", "event_end", "subject", "scope", "attribute",
+                  "result_kind", "correction_status", "superseded_by", "role"):
+        if source.get(field) is not None:
+            payload[field] = source[field]
+    if source.get("result_kind") == "source_passage":
+        payload["evidence_status"] = source.get("evidence_status", "partial")
     return payload
 
 
@@ -2308,6 +2496,7 @@ def retrieve_memory_brief(
     include_scenes: bool = False,
     sources: Optional[list[str] | tuple[str, ...] | str] = None,
     detail: Literal["full", "compact"] = "full",
+    date_basis: Optional[str] = None,
 ) -> Dict[str, Any]:
     from app.retrieval_pipeline.retriever import retrieve_memories
     if detail not in {"full", "compact"}:
@@ -2354,6 +2543,7 @@ def retrieve_memory_brief(
             intent=selected_intent,
             date_from=date_from,
             date_to=date_to,
+            **({"date_basis": date_basis} if date_basis is not None else {}),
         )
         # Local retrieval does not annotate its source. Work on copies so
         # neither serialization nor rendering mutates the retriever's hits.
@@ -2373,6 +2563,7 @@ def retrieve_memory_brief(
             intent=selected_intent,
             date_from=date_from,
             date_to=date_to,
+            **({"date_basis": date_basis} if date_basis is not None else {}),
         )
     settings = load_settings()
     step2_config = settings.get("step2", {}) or {}
@@ -2426,8 +2617,10 @@ def retrieve_memory_brief(
         memories = [
             {"id": memory.get("id"), "source_agent": memory.get("source_agent") or active_agent,
              "scene_id": memory.get("scene_id"),
-             **{field: memory[field] for field in ("ts", "source_reliability", "verification_status")
+             **{field: memory[field] for field in ("ts", "source_reliability", "verification_status", "result_kind", "correction_status", "event_date", "event_start", "event_end", "role")
                 if memory.get(field) is not None},
+             **({"source_event_ids": list(memory.get("source_event_ids") or [])}
+                if memory.get("result_kind") == "source_passage" else {}),
              **({"fallback_generated": True} if memory.get("fallback_generated") else {}),
              **({"evidence_refs": memory["evidence_refs"]} if memory.get("evidence_refs") else {}),
              **({"evidence_refs_truncated": True} if memory.get("evidence_refs_truncated") else {})}

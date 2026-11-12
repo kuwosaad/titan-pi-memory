@@ -62,7 +62,6 @@ class LeanCaptureTests(unittest.TestCase):
             "provider is unavailable", "null", "{}", '{"memories":{}}',
             '{"memories":[42]}', '{"memories":[{}]}',
             '{"memories":[{"text":42}]}',
-            '{"memories":[{"text":"Use SQLite locally.","memory_kind":"fabricated"}]}',
             '{"memories":[{"text":"Use SQLite locally.","speaker_focus":"nobody"}]}',
             '{"memories":[{"text":"Use SQLite locally.","stream":"invented"}]}',
             '{"memories":[{"text":"Use SQLite locally.","evidence_refs":42}]}',

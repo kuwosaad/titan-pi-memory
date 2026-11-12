@@ -516,6 +516,12 @@ class JsonSceneRepository:
         scenes = sorted(scenes, key=lambda item: str(item.get("ts") or ""), reverse=True)
         return scenes[:limit]
 
+    def iter_source_scenes(self, *, session_id: Optional[str] = None, batch_size: int = 200):
+        # JSON storage already loads the whole file for all operations.
+        for scene in self.load_all_scenes():
+            if not session_id or scene.get("session_id") == session_id:
+                yield scene
+
     def get_session_scenes(self, session_id: str) -> List[Dict[str, Any]]:
         session_id = str(session_id or "").strip()
         if not session_id:
@@ -792,6 +798,20 @@ class SqliteSceneRepository:
         with self._lock, self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_scene(row) for row in rows]
+
+    def iter_source_scenes(self, *, session_id: Optional[str] = None, batch_size: int = 200):
+        # Stream the full scoped store without creating an index or mutating
+        # foreign/old databases. Only one batch is held in memory at a time.
+        where = "WHERE session_id = ?" if session_id else ""
+        params = (session_id,) if session_id else ()
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(f"SELECT * FROM scenes {where}", params)
+            while True:
+                rows = cursor.fetchmany(max(1, min(int(batch_size), 1000)))
+                if not rows:
+                    break
+                for row in rows:
+                    yield self._row_to_scene(row)
 
     def get_session_scenes(self, session_id: str) -> List[Dict[str, Any]]:
         session_id = str(session_id or "").strip()

@@ -42,6 +42,10 @@ _ALLOWED_MEMORY_KINDS = {
     "issue",
 }
 _RETRIEVAL_REPOSITORY_KEY = "_retrieval_repository"
+_MEMORY_OPTIONAL_FIELDS = (
+    "event_date", "event_start", "event_end", "subject", "scope", "attribute",
+    "correction_target", "correction_evidence",
+)
 
 
 def _refresh_json_paths() -> None:
@@ -127,6 +131,9 @@ def _normalize_speaker_focus(value: Any) -> Optional[str]:
 
 def _normalize_memory(mem: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(mem)
+    for field in _MEMORY_OPTIONAL_FIELDS:
+        value = normalized.get(field)
+        normalized[field] = str(value).strip() or None if value is not None else None
     if normalized.get("source_agent") is not None:
         normalized["source_agent"] = str(normalized["source_agent"])
     normalized.setdefault("stream", "rough")
@@ -172,6 +179,7 @@ _MEMORY_IDENTITY_FIELDS = (
     "provenance",
     "speaker_focus",
     "memory_kind",
+    *_MEMORY_OPTIONAL_FIELDS,
     "embedding",
 )
 
@@ -444,6 +452,14 @@ class SqliteMemoryRepository:
             provenance_assistant TEXT NOT NULL,
             speaker_focus TEXT,
             memory_kind TEXT,
+            event_date TEXT,
+            event_start TEXT,
+            event_end TEXT,
+            subject TEXT,
+            scope TEXT,
+            attribute TEXT,
+            correction_target TEXT,
+            correction_evidence TEXT,
             embedding_blob BLOB,
             embedding_dim INTEGER,
             embedding_dtype TEXT CHECK(embedding_dtype IN ('f32') OR embedding_dtype IS NULL),
@@ -489,6 +505,9 @@ class SqliteMemoryRepository:
                 conn.execute("ALTER TABLE memories ADD COLUMN speaker_focus TEXT")
             if "memory_kind" not in existing_columns:
                 conn.execute("ALTER TABLE memories ADD COLUMN memory_kind TEXT")
+            for field in _MEMORY_OPTIONAL_FIELDS:
+                if field not in existing_columns:
+                    conn.execute(f"ALTER TABLE memories ADD COLUMN {field} TEXT")
             if "h" not in existing_columns:
                 conn.execute("ALTER TABLE memories ADD COLUMN h REAL NOT NULL DEFAULT 0.0")
             if "tau" not in existing_columns:
@@ -543,6 +562,7 @@ class SqliteMemoryRepository:
             "provenance_assistant": str((normalized.get("provenance") or {}).get("assistant", "")),
             "speaker_focus": normalized.get("speaker_focus"),
             "memory_kind": normalized.get("memory_kind"),
+            **{field: normalized.get(field) for field in _MEMORY_OPTIONAL_FIELDS},
             "h": float(normalized.get("h", 0.0)),
             "tau": float(normalized.get("tau", 0.5)),
             "outgoing_weights": outgoing_blob,
@@ -573,6 +593,7 @@ class SqliteMemoryRepository:
             "fallback_generated": bool(row["fallback_generated"]),
             "speaker_focus": row["speaker_focus"] if "speaker_focus" in row.keys() else None,
             "memory_kind": row["memory_kind"] if "memory_kind" in row.keys() else None,
+            **{field: row[field] if field in row.keys() else None for field in _MEMORY_OPTIONAL_FIELDS},
             "h": float(row["h"]) if "h" in row.keys() else 0.0,
             "tau": float(row["tau"]) if "tau" in row.keys() else 0.5,
             "embedding": None,
@@ -627,6 +648,7 @@ class SqliteMemoryRepository:
             "fallback_generated": bool(row["fallback_generated"]),
             "speaker_focus": row["speaker_focus"],
             "memory_kind": row["memory_kind"],
+            **{field: row[field] for field in _MEMORY_OPTIONAL_FIELDS},
             "embedding": None,
             "_embedding_blob": row["embedding_blob"],
             "_embedding_dim": row["embedding_dim"],
@@ -655,6 +677,8 @@ class SqliteMemoryRepository:
             id, session_id, turn, scene_id, idx, text, type, stream, ts, source_type,
             source_reliability, verification_status, fallback_generated,
             source_event_ids_json, provenance_user, provenance_assistant, speaker_focus, memory_kind,
+            event_date, event_start, event_end, subject, scope, attribute,
+            correction_target, correction_evidence,
             h, tau, outgoing_weights, incoming_weights,
             embedding_blob, embedding_dim, embedding_dtype
         )
@@ -662,6 +686,8 @@ class SqliteMemoryRepository:
             :id, :session_id, :turn, :scene_id, :idx, :text, :type, :stream, :ts, :source_type,
             :source_reliability, :verification_status, :fallback_generated,
             :source_event_ids_json, :provenance_user, :provenance_assistant, :speaker_focus, :memory_kind,
+            :event_date, :event_start, :event_end, :subject, :scope, :attribute,
+            :correction_target, :correction_evidence,
             :h, :tau, :outgoing_weights, :incoming_weights,
             :embedding_blob, :embedding_dim, :embedding_dtype
         )
@@ -845,6 +871,7 @@ class SqliteMemoryRepository:
                     "scene_id": "NULL",
                     "speaker_focus": "NULL",
                     "memory_kind": "NULL",
+                    **{field: "NULL" for field in _MEMORY_OPTIONAL_FIELDS},
                 }
                 projected = [
                     "id",

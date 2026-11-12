@@ -1,0 +1,1383 @@
+{
+  "schema_version": 2,
+  "frozen_at": "2026-11-11",
+  "construction": "Independent fictional corpora and labels frozen before retrieval outcomes. No expected labels are supplied to candidate expansion or ranking.",
+  "parameters": {
+    "seed_pool_k": 34,
+    "top_k": 3,
+    "max_chars": 2400,
+    "relationship_bonus_cap": 0.1,
+    "repeats": 3
+  },
+  "cases": [
+    {
+      "id": "decision-reason",
+      "query": "Why did Project Lumen choose SQLite for its offline ledger?",
+      "memories": [
+        {
+          "id": "lumen-choice:0",
+          "text": "Project Lumen chose SQLite for its offline ledger.",
+          "scene_id": "ledger",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "lumen-reason:0",
+          "text": "The decisive advantage was that records remain on the laptop without a network connection.",
+          "scene_id": "ledger",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "lumen-theme:0",
+          "text": "Project Lumen uses a dark purple dashboard theme.",
+          "scene_id": "theme",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "lumen-api:0",
+          "text": "Project Lumen exposes a read-only ledger API on port 6120.",
+          "scene_id": "api",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "other-db:0",
+          "text": "Project Solace chose PostgreSQL for the shared ledger.",
+          "scene_id": "other",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "lumen-choice:0",
+          "lumen-reason:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "lumen-choice:0",
+        "lumen-reason:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      }
+    },
+    {
+      "id": "event-outcome",
+      "query": "What happened when Harbor changed upload chunks, and what was the measured result?",
+      "memories": [
+        {
+          "id": "harbor-change:0",
+          "text": "Harbor reduced upload chunks from 64 megabytes to 8 megabytes.",
+          "scene_id": "upload",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "harbor-result:0",
+          "text": "The next run finished in nineteen seconds with zero abandoned batches.",
+          "scene_id": "upload",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "harbor-avatar:0",
+          "text": "Harbor selected a blue lighthouse as its team avatar.",
+          "scene_id": "upload",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "harbor-docs:0",
+          "text": "Harbor upload documentation was reorganized into three sections.",
+          "scene_id": "docs",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "other-result:0",
+          "text": "The unrelated Tide project completed its import in 41 seconds.",
+          "scene_id": "tide",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "harbor-change:0",
+          "harbor-result:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "harbor-change:0",
+        "harbor-result:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      }
+    },
+    {
+      "id": "pronoun-recovery",
+      "query": "What retry policy did Kestrel adopt for invoice exports, including its exact time limit?",
+      "memories": [
+        {
+          "id": "kestrel-policy:0",
+          "text": "Kestrel adopted a bounded retry window for invoice exports.",
+          "scene_id": "retry",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "kestrel-limit:0",
+          "text": "It is limited to two seconds, rather than the earlier eight.",
+          "scene_id": "retry",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "kestrel-schedule:0",
+          "text": "Kestrel invoice exports run at 07:30 UTC.",
+          "scene_id": "schedule",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "kestrel-pool:0",
+          "text": "Kestrel uses four workers for invoice exports.",
+          "scene_id": "workers",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "unrelated-window:0",
+          "text": "Lark limits its login window to twelve minutes.",
+          "scene_id": "lark",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "kestrel-policy:0",
+          "kestrel-limit:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "kestrel-limit:0",
+        "kestrel-policy:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      }
+    },
+    {
+      "id": "complementary-outside-pool",
+      "query": "Why did Ember choose embedded storage, and what deployment property did that deliver?",
+      "memories": [
+        {
+          "id": "ember-choice:0",
+          "text": "Project Ember selected embedded storage for its deployment architecture.",
+          "scene_id": "ember-decision",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-reason:0",
+          "text": "That eliminated the need for a resident service, keeping deployment to a single executable.",
+          "scene_id": "ember-decision",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-00:0",
+          "text": "Project Ember uses a permissive licence.",
+          "scene_id": "ember-licence",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-01:0",
+          "text": "Project Ember has a deployment architecture diagram.",
+          "scene_id": "ember-diagram",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-02:0",
+          "text": "Project Ember targets Linux and macOS.",
+          "scene_id": "ember-platform",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-03:0",
+          "text": "Project Ember releases every Thursday.",
+          "scene_id": "ember-release",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-04:0",
+          "text": "Project Ember stores dates in ISO 8601.",
+          "scene_id": "ember-format",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-05:0",
+          "text": "Project Ember uses port 7180 for diagnostics.",
+          "scene_id": "ember-port",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-06:0",
+          "text": "Project Ember is maintained by Nia.",
+          "scene_id": "ember-owner",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-07:0",
+          "text": "Project Ember keeps seven daily backups.",
+          "scene_id": "ember-backups",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-08:0",
+          "text": "Project Ember uses SHA256 checksums.",
+          "scene_id": "ember-checksum",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-09:0",
+          "text": "Project Ember rotates deployment logs daily.",
+          "scene_id": "ember-logs",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-10:0",
+          "text": "Project Ember exports an architecture health metric.",
+          "scene_id": "ember-metric",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-11:0",
+          "text": "Project Ember shows storage usage in its dashboard.",
+          "scene_id": "ember-dashboard",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-12:0",
+          "text": "Project Ember has a deployment status command.",
+          "scene_id": "ember-cli",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-13:0",
+          "text": "Project Ember documents embedded storage in chapter three.",
+          "scene_id": "ember-docs",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-14:0",
+          "text": "Project Ember builds with versioned artifacts.",
+          "scene_id": "ember-build",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-15:0",
+          "text": "Project Ember runs a deployment smoke test.",
+          "scene_id": "ember-test",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-16:0",
+          "text": "Project Ember adds storage trace identifiers.",
+          "scene_id": "ember-trace",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-17:0",
+          "text": "Project Ember uses English messages.",
+          "scene_id": "ember-locale",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-18:0",
+          "text": "Project Ember uses a charcoal interface.",
+          "scene_id": "ember-theme",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-19:0",
+          "text": "Project Ember caps its deployment queue at twelve jobs.",
+          "scene_id": "ember-queue",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-20:0",
+          "text": "Project Ember loads deployment settings from TOML.",
+          "scene_id": "ember-config",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-21:0",
+          "text": "Project Ember prefixes storage files with ember.",
+          "scene_id": "ember-naming",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-22:0",
+          "text": "Project Ember has a ten second diagnostic timeout.",
+          "scene_id": "ember-timeout",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-23:0",
+          "text": "Project Ember requires one deployment reviewer.",
+          "scene_id": "ember-review",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-24:0",
+          "text": "Project Ember writes an artifact manifest.",
+          "scene_id": "ember-manifest",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-25:0",
+          "text": "Project Ember uses a data subdirectory for storage.",
+          "scene_id": "ember-path",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-26:0",
+          "text": "Project Ember has schema version five.",
+          "scene_id": "ember-schema",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-27:0",
+          "text": "Project Ember includes architecture examples in help.",
+          "scene_id": "ember-help",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-28:0",
+          "text": "Project Ember checks storage health before deployment.",
+          "scene_id": "ember-health",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-29:0",
+          "text": "Project Ember prints its deployment tool version.",
+          "scene_id": "ember-version",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-30:0",
+          "text": "Project Ember numbers storage errors.",
+          "scene_id": "ember-errors",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-31:0",
+          "text": "Project Ember packages its icon as an SVG.",
+          "scene_id": "ember-assets",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-32:0",
+          "text": "Project Ember indexes the deployment documentation.",
+          "scene_id": "ember-search",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-33:0",
+          "text": "Project Ember retries diagnostic uploads once.",
+          "scene_id": "ember-retry",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-34:0",
+          "text": "Project Ember keeps an architecture decision log.",
+          "scene_id": "ember-history",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-35:0",
+          "text": "Project Ember records deployment duration.",
+          "scene_id": "ember-metrics",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-36:0",
+          "text": "Project Ember writes a storage report after tests.",
+          "scene_id": "ember-report",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-37:0",
+          "text": "Project Ember ships an example deployment file.",
+          "scene_id": "ember-sample",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-38:0",
+          "text": "Project Ember links a storage support guide.",
+          "scene_id": "ember-support",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-39:0",
+          "text": "Project Ember timestamps deployments in UTC.",
+          "scene_id": "ember-date",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-40:0",
+          "text": "Project Ember builds deployments from release branches.",
+          "scene_id": "ember-branch",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-41:0",
+          "text": "Project Ember records deployment approvals.",
+          "scene_id": "ember-audit",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-42:0",
+          "text": "Project Ember limits storage reports to 100 rows.",
+          "scene_id": "ember-limits",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-43:0",
+          "text": "Project Ember uses amber for deployment warnings.",
+          "scene_id": "ember-colour",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "ember-distractor-44:0",
+          "text": "Project Ember labels embedded storage nodes in diagrams.",
+          "scene_id": "ember-label",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "ember-choice:0",
+          "ember-reason:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "ember-choice:0",
+        "ember-reason:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      },
+      "requires_pool_probe": true
+    },
+    {
+      "id": "mixed-topic-scene",
+      "query": "Which database did Opal choose for its address book, and why?",
+      "memories": [
+        {
+          "id": "opal-db:0",
+          "text": "Opal chose SQLite for its address book.",
+          "scene_id": "meeting",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "opal-food:0",
+          "text": "During the same meeting, Ravi ordered mushroom pizza.",
+          "scene_id": "meeting",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "opal-reason:0",
+          "text": "It allows the address book to function while the device is offline.",
+          "scene_id": "meeting",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "opal-cache:0",
+          "text": "Opal uses Redis for a separate online analytics cache.",
+          "scene_id": "cache",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "opal-music:0",
+          "text": "Ravi played jazz after the meeting.",
+          "scene_id": "meeting",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "opal-db:0",
+          "opal-reason:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "opal-db:0",
+        "opal-reason:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      }
+    },
+    {
+      "id": "wrong-project-neighbor",
+      "query": "What caused Atlas search latency to fall?",
+      "memories": [
+        {
+          "id": "atlas-index:0",
+          "text": "Atlas added a trigram index to its search table.",
+          "scene_id": "review",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "atlas-result:0",
+          "text": "Atlas search latency fell from 800 milliseconds to 90 milliseconds after that index was added.",
+          "scene_id": "review",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "nova-change:0",
+          "text": "Nova search latency fell because its cache was moved closer to the database.",
+          "scene_id": "review",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "nova-budget:0",
+          "text": "Nova approved a 300 euro search monitoring budget.",
+          "scene_id": "review",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "atlas-index:0",
+          "atlas-result:0"
+        ],
+        [
+          "atlas-result:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "atlas-index:0",
+        "atlas-result:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      }
+    },
+    {
+      "id": "copies-not-independent",
+      "query": "Why did Cairn choose a single write queue?",
+      "memories": [
+        {
+          "id": "cairn-choice:0",
+          "text": "Cairn chose a single write queue for the journal.",
+          "scene_id": "choice",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "cairn-copy-a:0",
+          "text": "Cairn chose a single write queue for the journal.",
+          "scene_id": "copy-a",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "cairn-copy-b:0",
+          "text": "Cairn chose a single write queue for the journal.",
+          "scene_id": "copy-b",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "cairn-reason:0",
+          "text": "The reason was to preserve the order of journal entries during concurrent edits.",
+          "scene_id": "choice",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "cairn-limit:0",
+          "text": "The Cairn journal UI displays 200 entries per page.",
+          "scene_id": "ui",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "cairn-choice:0",
+          "cairn-reason:0"
+        ],
+        [
+          "cairn-copy-a:0",
+          "cairn-reason:0"
+        ],
+        [
+          "cairn-copy-b:0",
+          "cairn-reason:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "cairn-choice:0",
+        "cairn-copy-a:0",
+        "cairn-copy-b:0",
+        "cairn-reason:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      }
+    },
+    {
+      "id": "time-is-not-cause",
+      "query": "Why did Juniper switch its image format?",
+      "memories": [
+        {
+          "id": "juniper-format:0",
+          "text": "Juniper switched image assets from PNG to WebP.",
+          "scene_id": "images",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "juniper-reason:0",
+          "text": "The purpose was to reduce download size for users on slow mobile connections.",
+          "scene_id": "images",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "juniper-outage:0",
+          "text": "A database outage started one minute before the image format discussion.",
+          "scene_id": "outage",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T09:59:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "juniper-weather:0",
+          "text": "It rained during the release meeting.",
+          "scene_id": "images",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "juniper-format:0",
+          "juniper-reason:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "juniper-format:0",
+        "juniper-reason:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      }
+    },
+    {
+      "id": "correction-current",
+      "query": "What is the current Laurel production timeout after the correction?",
+      "memories": [
+        {
+          "id": "laurel-old:0",
+          "text": "Laurel production requests have an eight second timeout.",
+          "scene_id": "old",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-02-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "laurel-new:0",
+          "text": "Correction: Laurel production requests now have a three second timeout, replacing the old eight second limit.",
+          "scene_id": "new",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "laurel-staging:0",
+          "text": "Laurel staging requests have a fifteen second timeout.",
+          "scene_id": "new",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "laurel-owner:0",
+          "text": "The Laurel production service is maintained by Petra.",
+          "scene_id": "new",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "laurel-new:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "laurel-new:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      },
+      "forbidden_ids": [
+        "laurel-old:0",
+        "laurel-staging:0"
+      ]
+    },
+    {
+      "id": "unknown-attribute",
+      "query": "What is Elin's passport number?",
+      "memories": [
+        {
+          "id": "elin-name:0",
+          "text": "Elin maintains the Pebble project.",
+          "scene_id": "personal",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "elin-editor:0",
+          "text": "Elin prefers the Helix editor.",
+          "scene_id": "personal",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "elin-location:0",
+          "text": "Elin lives in Oslo.",
+          "scene_id": "personal",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "pebble-port:0",
+          "text": "The Pebble development server uses port 6080.",
+          "scene_id": "development",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        []
+      ],
+      "acceptable_ids": [],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      }
+    },
+    {
+      "id": "unknown-reason",
+      "query": "Why did Vega select the colour blue?",
+      "memories": [
+        {
+          "id": "vega-blue:0",
+          "text": "Vega selected blue as its interface accent colour.",
+          "scene_id": "design",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "vega-pilot:0",
+          "text": "Vega ran a pilot with twelve users in May.",
+          "scene_id": "design",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "vega-cache:0",
+          "text": "Vega uses an in-memory cache for icons.",
+          "scene_id": "design",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        []
+      ],
+      "acceptable_ids": [],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      }
+    },
+    {
+      "id": "source-scope",
+      "query": "Which storage engine did the private Finch prototype choose?",
+      "memories": [
+        {
+          "id": "finch-private:0",
+          "text": "The private Finch prototype chose SQLite.",
+          "scene_id": "private",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "finch-foreign:0",
+          "text": "The private Finch prototype chose PostgreSQL.",
+          "scene_id": "foreign",
+          "source_agent": "peer",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "finch-version:0",
+          "text": "The private Finch prototype is version 0.3.",
+          "scene_id": "private",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "finch-private:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "finch-private:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both"
+      },
+      "forbidden_ids": [
+        "finch-foreign:0"
+      ]
+    },
+    {
+      "id": "date-filter",
+      "query": "What timeout did Wren use in its April release?",
+      "memories": [
+        {
+          "id": "wren-march:0",
+          "text": "The Wren March release used a nine second timeout.",
+          "scene_id": "march",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-03-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "wren-april:0",
+          "text": "The Wren April release used a four second timeout.",
+          "scene_id": "april",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-04-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        },
+        {
+          "id": "wren-may:0",
+          "text": "The Wren May release used a seven second timeout.",
+          "scene_id": "may",
+          "source_agent": "eval",
+          "session_id": "fictional",
+          "ts": "2026-05-10T10:00:00+00:00",
+          "type": "fact",
+          "stream": "learnings",
+          "source_reliability": 0.95
+        }
+      ],
+      "required_sets": [
+        [
+          "wren-april:0"
+        ]
+      ],
+      "acceptable_ids": [
+        "wren-april:0"
+      ],
+      "filters": {
+        "sources": [
+          "eval"
+        ],
+        "mode": "both",
+        "date_from": "2026-04-01T00:00:00+00:00",
+        "date_to": "2026-04-30T23:59:59+00:00"
+      }
+    }
+  ],
+  "pre_outcome_budget_adjustment": {
+    "original_fixture_sha256": "871a05a716f2e48047a2716a8ef9f8828340b28bbce8501d6674383982946a50",
+    "original_max_chars": 900,
+    "effective_max_chars": 2400,
+    "mechanical_exemplar_chars": {
+      "one_record": 565,
+      "two_records": 1061,
+      "three_records": 1513
+    },
+    "reason": "Full public metadata renderer makes two-record context packets infeasible at900. Raised budget before computing embeddings, seeds, or outcomes; all cases and evidence labels unchanged."
+  }
+}

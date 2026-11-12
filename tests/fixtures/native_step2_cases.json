@@ -1,0 +1,2115 @@
+{
+  "version": 1,
+  "description": "Fresh fictional native Step2 on/off fixtures. Authored and labeled before embeddings or retrieval outcomes. Labels are for scoring only and must never be passed into ranking. Supporting facts occupy distinct scenes/events unless copies are the intentional stress.",
+  "params": {
+    "max_items": 6,
+    "max_chars": 700,
+    "diagnostic_max_chars": 2000,
+    "repeats": 3
+  },
+  "cases": [
+    {
+      "id": "cedar_constraints",
+      "query": "Which two field-device constraints justified Cedar choosing SQLite?",
+      "tags": [
+        "support_cluster",
+        "cross_stream",
+        "causal_evidence"
+      ],
+      "memories": [
+        {
+          "id": "cedar-choice",
+          "text": "Cedar selected SQLite for the field-device journal.",
+          "source_agent": "codex",
+          "scene_id": "cedar_constraints:scene:cedar-choice",
+          "session_id": "cedar_constraints:session",
+          "ts": "2026-09-10T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "cedar_constraints:event:cedar-choice"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "cedar-offline",
+          "text": "Cedar needed writes to continue without Wi-Fi; this was one reason for choosing SQLite.",
+          "source_agent": "codex",
+          "scene_id": "cedar_constraints:scene:cedar-offline",
+          "session_id": "cedar_constraints:session",
+          "ts": "2026-09-11T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "cedar_constraints:event:cedar-offline"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "cedar-restart",
+          "text": "Cedar required committed journal entries to survive abrupt power loss; this drove the SQLite choice.",
+          "source_agent": "codex",
+          "scene_id": "cedar_constraints:scene:cedar-restart",
+          "session_id": "cedar_constraints:session",
+          "ts": "2026-09-12T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "cedar_constraints:event:cedar-restart"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "cedar-fixture",
+          "text": "The Cedar SQLite test retained every committed journal entry after power cuts.",
+          "source_agent": "codex",
+          "scene_id": "cedar_constraints:scene:cedar-fixture",
+          "session_id": "cedar_constraints:session",
+          "ts": "2026-09-13T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "cedar_constraints:event:cedar-fixture"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "cedar-doc",
+          "text": "Cedar database-selection notes use the heading Field-device constraints.",
+          "source_agent": "codex",
+          "scene_id": "cedar_constraints:scene:cedar-doc",
+          "session_id": "cedar_constraints:session",
+          "ts": "2026-09-14T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "cedar_constraints:event:cedar-doc"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "cedar-color",
+          "text": "The Cedar field-device case is green.",
+          "source_agent": "codex",
+          "scene_id": "cedar_constraints:scene:cedar-color",
+          "session_id": "cedar_constraints:session",
+          "ts": "2026-09-15T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "cedar_constraints:event:cedar-color"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "birch-choice",
+          "text": "Birch chose PostgreSQL because its fleet has permanent network links.",
+          "source_agent": "codex",
+          "scene_id": "cedar_constraints:scene:birch-choice",
+          "session_id": "cedar_constraints:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "cedar_constraints:event:birch-choice"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "cedar-cache",
+          "text": "Cedar keeps map thumbnails in a disposable cache.",
+          "source_agent": "codex",
+          "scene_id": "cedar_constraints:scene:cedar-cache",
+          "session_id": "cedar_constraints:session",
+          "ts": "2026-09-17T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "cedar_constraints:event:cedar-cache"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "cedar-benchmark",
+          "text": "The Cedar benchmark ran on a desktop connected to office Wi-Fi.",
+          "source_agent": "codex",
+          "scene_id": "cedar_constraints:scene:cedar-benchmark",
+          "session_id": "cedar_constraints:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "cedar_constraints:event:cedar-benchmark"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:cedar-offline",
+          "codex:cedar-restart"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:cedar-choice",
+        "codex:cedar-offline",
+        "codex:cedar-restart",
+        "codex:cedar-fixture"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": false,
+      "evidence_notes": "Both stated constraints are needed; a database name or heading alone does not answer why."
+    },
+    {
+      "id": "lumen_release",
+      "query": "What did Lumen release, and which observed check justified the release?",
+      "tags": [
+        "cross_stream",
+        "raw_outcome",
+        "support_cluster"
+      ],
+      "memories": [
+        {
+          "id": "lumen-ship",
+          "text": "Release Lumen with the resumable-upload path enabled.",
+          "source_agent": "codex",
+          "scene_id": "lumen_release:scene:lumen-ship",
+          "session_id": "lumen_release:session",
+          "ts": "2026-09-10T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "lumen_release:event:lumen-ship"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "lumen-check",
+          "text": "Lumen resumed all 40 interrupted uploads without duplicate chunks; this check cleared the release.",
+          "source_agent": "codex",
+          "scene_id": "lumen_release:scene:lumen-check",
+          "session_id": "lumen_release:session",
+          "ts": "2026-09-11T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "lumen_release:event:lumen-check"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "lumen-retry",
+          "text": "The Lumen upload path persisted its chunk cursor before retrying.",
+          "source_agent": "codex",
+          "scene_id": "lumen_release:scene:lumen-retry",
+          "session_id": "lumen_release:session",
+          "ts": "2026-09-12T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "lumen_release:event:lumen-retry"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "lumen-plan",
+          "text": "Before testing, Lumen planned to validate resumable uploads.",
+          "source_agent": "codex",
+          "scene_id": "lumen_release:scene:lumen-plan",
+          "session_id": "lumen_release:session",
+          "ts": "2026-09-02T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "lumen_release:event:lumen-plan"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "lumen-heading",
+          "text": "Lumen release validation is the title of the checklist.",
+          "source_agent": "codex",
+          "scene_id": "lumen_release:scene:lumen-heading",
+          "session_id": "lumen_release:session",
+          "ts": "2026-09-14T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "lumen_release:event:lumen-heading"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "lumen-draft",
+          "text": "A draft announcement described Lumen as ready before validation completed.",
+          "source_agent": "codex",
+          "scene_id": "lumen_release:scene:lumen-draft",
+          "session_id": "lumen_release:session",
+          "ts": "2026-09-03T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "lumen_release:event:lumen-draft"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "lumen-ui",
+          "text": "The Lumen upload button uses a circular icon.",
+          "source_agent": "codex",
+          "scene_id": "lumen_release:scene:lumen-ui",
+          "session_id": "lumen_release:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "lumen_release:event:lumen-ui"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "nova-release",
+          "text": "Nova released its batch-export path after a load test.",
+          "source_agent": "codex",
+          "scene_id": "lumen_release:scene:nova-release",
+          "session_id": "lumen_release:session",
+          "ts": "2026-09-17T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "lumen_release:event:nova-release"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "lumen-docs",
+          "text": "Lumen documentation includes an upload troubleshooting page.",
+          "source_agent": "codex",
+          "scene_id": "lumen_release:scene:lumen-docs",
+          "session_id": "lumen_release:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "lumen_release:event:lumen-docs"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:lumen-ship",
+          "codex:lumen-check"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:lumen-ship",
+        "codex:lumen-check",
+        "codex:lumen-retry"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": false,
+      "evidence_notes": "An intention or announcement draft is not the observed release check."
+    },
+    {
+      "id": "meridian_theme",
+      "query": "Which recurring Meridian failure motivated the checkpoint rule, and what two incidents support that pattern?",
+      "tags": [
+        "repeated_theme",
+        "distinct_scenes",
+        "causal_evidence"
+      ],
+      "memories": [
+        {
+          "id": "meridian-rule",
+          "text": "Meridian must checkpoint before acknowledging work because restarts repeatedly lost uncheckpointed acknowledgements.",
+          "source_agent": "codex",
+          "scene_id": "meridian_theme:scene:meridian-rule",
+          "session_id": "meridian_theme:session",
+          "ts": "2026-09-10T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "meridian_theme:event:meridian-rule"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "meridian-first",
+          "text": "On September 10, Meridian acknowledged job A before checkpointing; a restart lost job A.",
+          "source_agent": "codex",
+          "scene_id": "meridian_theme:scene:meridian-first",
+          "session_id": "meridian_theme:session",
+          "ts": "2026-09-10T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "meridian_theme:event:meridian-first"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "meridian-second",
+          "text": "On September 12, Meridian acknowledged job B before checkpointing; another restart lost job B.",
+          "source_agent": "codex",
+          "scene_id": "meridian_theme:scene:meridian-second",
+          "session_id": "meridian_theme:session",
+          "ts": "2026-09-12T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "meridian_theme:event:meridian-second"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "meridian-fix",
+          "text": "A Meridian restart test preserved acknowledged jobs after the checkpoint rule was added.",
+          "source_agent": "codex",
+          "scene_id": "meridian_theme:scene:meridian-fix",
+          "session_id": "meridian_theme:session",
+          "ts": "2026-09-15T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "meridian_theme:event:meridian-fix"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "meridian-title",
+          "text": "The Meridian retrospective has a section named Recurring checkpoint failures.",
+          "source_agent": "codex",
+          "scene_id": "meridian_theme:scene:meridian-title",
+          "session_id": "meridian_theme:session",
+          "ts": "2026-09-14T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "meridian_theme:event:meridian-title"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "meridian-network",
+          "text": "Meridian retried one timed-out metrics request.",
+          "source_agent": "codex",
+          "scene_id": "meridian_theme:scene:meridian-network",
+          "session_id": "meridian_theme:session",
+          "ts": "2026-09-15T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "meridian_theme:event:meridian-network"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "meridian-format",
+          "text": "Meridian log timestamps use UTC.",
+          "source_agent": "codex",
+          "scene_id": "meridian_theme:scene:meridian-format",
+          "session_id": "meridian_theme:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "meridian_theme:event:meridian-format"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "aurora-job",
+          "text": "Aurora lost a job because its queue quota was exceeded.",
+          "source_agent": "codex",
+          "scene_id": "meridian_theme:scene:aurora-job",
+          "session_id": "meridian_theme:session",
+          "ts": "2026-09-17T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "meridian_theme:event:aurora-job"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "meridian-readme",
+          "text": "Meridian README examples show the checkpoint API.",
+          "source_agent": "codex",
+          "scene_id": "meridian_theme:scene:meridian-readme",
+          "session_id": "meridian_theme:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "meridian_theme:event:meridian-readme"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:meridian-rule",
+          "codex:meridian-first",
+          "codex:meridian-second"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:meridian-rule",
+        "codex:meridian-first",
+        "codex:meridian-second",
+        "codex:meridian-fix"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": false,
+      "evidence_notes": "One incident does not establish the requested recurrence; all three claims remain separate."
+    },
+    {
+      "id": "orion_timeline",
+      "query": "What was the order of Orion’s migration milestones: trial, approval, and production cutover?",
+      "tags": [
+        "timeline",
+        "related_scenes",
+        "planned_vs_observed"
+      ],
+      "memories": [
+        {
+          "id": "orion-trial",
+          "text": "Orion completed the SQLite migration trial on September 4.",
+          "source_agent": "codex",
+          "scene_id": "orion_timeline:scene:orion-trial",
+          "session_id": "orion_timeline:session",
+          "ts": "2026-09-04T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "orion_timeline:event:orion-trial"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "orion-approval",
+          "text": "Orion approved the migration on September 8 after reviewing the trial.",
+          "source_agent": "codex",
+          "scene_id": "orion_timeline:scene:orion-approval",
+          "session_id": "orion_timeline:session",
+          "ts": "2026-09-08T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "orion_timeline:event:orion-approval"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "orion-cutover",
+          "text": "Orion completed production cutover on September 14.",
+          "source_agent": "codex",
+          "scene_id": "orion_timeline:scene:orion-cutover",
+          "session_id": "orion_timeline:session",
+          "ts": "2026-09-14T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "orion_timeline:event:orion-cutover"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "orion-retro",
+          "text": "Orion’s retrospective links the trial, approval, and production-cutover notes.",
+          "source_agent": "codex",
+          "scene_id": "orion_timeline:scene:orion-retro",
+          "session_id": "orion_timeline:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "orion_timeline:event:orion-retro"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "orion-proposal",
+          "text": "On September 1, Orion proposed a production cutover for September 11; that date was not the actual cutover.",
+          "source_agent": "codex",
+          "scene_id": "orion_timeline:scene:orion-proposal",
+          "session_id": "orion_timeline:session",
+          "ts": "2026-09-01T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "orion_timeline:event:orion-proposal"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "orion-doc",
+          "text": "The Orion migration checklist lists trial, approval, and cutover as headings.",
+          "source_agent": "codex",
+          "scene_id": "orion_timeline:scene:orion-doc",
+          "session_id": "orion_timeline:session",
+          "ts": "2026-09-15T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "orion_timeline:event:orion-doc"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "orion-logo",
+          "text": "The Orion status page displays a new logo.",
+          "source_agent": "codex",
+          "scene_id": "orion_timeline:scene:orion-logo",
+          "session_id": "orion_timeline:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "orion_timeline:event:orion-logo"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "vega-cutover",
+          "text": "Vega completed its production cutover on September 6.",
+          "source_agent": "codex",
+          "scene_id": "orion_timeline:scene:vega-cutover",
+          "session_id": "orion_timeline:session",
+          "ts": "2026-09-06T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "orion_timeline:event:vega-cutover"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "orion-window",
+          "text": "The Orion maintenance window permits work from 02:00 to 03:00 UTC.",
+          "source_agent": "codex",
+          "scene_id": "orion_timeline:scene:orion-window",
+          "session_id": "orion_timeline:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "orion_timeline:event:orion-window"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:orion-trial",
+          "codex:orion-approval",
+          "codex:orion-cutover"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:orion-trial",
+        "codex:orion-approval",
+        "codex:orion-cutover",
+        "codex:orion-retro"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": false,
+      "evidence_notes": "Use observed milestone dates, not the abandoned proposal date."
+    },
+    {
+      "id": "maple_correction",
+      "query": "How did Maple’s authentication decision change, and what explicitly caused the correction?",
+      "tags": [
+        "explicit_correction",
+        "change_over_time",
+        "causal_evidence"
+      ],
+      "memories": [
+        {
+          "id": "maple-old",
+          "text": "Maple’s initial decision was to keep local password login.",
+          "source_agent": "codex",
+          "scene_id": "maple_correction:scene:maple-old",
+          "session_id": "maple_correction:session",
+          "ts": "2026-09-02T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "maple_correction:event:maple-old"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "maple-new",
+          "text": "Correction: remove local password login from Maple and use company SSO.",
+          "source_agent": "codex",
+          "scene_id": "maple_correction:scene:maple-new",
+          "session_id": "maple_correction:session",
+          "ts": "2026-09-09T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "maple_correction:event:maple-new"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "maple-cause",
+          "text": "Maple changed to company SSO because the signed enterprise contract required centralized account revocation.",
+          "source_agent": "codex",
+          "scene_id": "maple_correction:scene:maple-cause",
+          "session_id": "maple_correction:session",
+          "ts": "2026-09-09T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "maple_correction:event:maple-cause"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "maple-test",
+          "text": "Maple’s SSO test revoked a terminated account within one minute.",
+          "source_agent": "codex",
+          "scene_id": "maple_correction:scene:maple-test",
+          "session_id": "maple_correction:session",
+          "ts": "2026-09-11T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "maple_correction:event:maple-test"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "maple-color",
+          "text": "The Maple login screen uses a blue button.",
+          "source_agent": "codex",
+          "scene_id": "maple_correction:scene:maple-color",
+          "session_id": "maple_correction:session",
+          "ts": "2026-09-14T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "maple_correction:event:maple-color"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "maple-draft",
+          "text": "An early Maple draft described password reset emails.",
+          "source_agent": "codex",
+          "scene_id": "maple_correction:scene:maple-draft",
+          "session_id": "maple_correction:session",
+          "ts": "2026-09-03T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "maple_correction:event:maple-draft"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "elm-password",
+          "text": "Elm retains local passwords because it serves independent accounts.",
+          "source_agent": "codex",
+          "scene_id": "maple_correction:scene:elm-password",
+          "session_id": "maple_correction:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "maple_correction:event:elm-password"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "maple-heading",
+          "text": "Maple authentication decision change is a heading in the release notes.",
+          "source_agent": "codex",
+          "scene_id": "maple_correction:scene:maple-heading",
+          "session_id": "maple_correction:session",
+          "ts": "2026-09-17T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "maple_correction:event:maple-heading"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "maple-metrics",
+          "text": "Maple exports daily authentication metrics.",
+          "source_agent": "codex",
+          "scene_id": "maple_correction:scene:maple-metrics",
+          "session_id": "maple_correction:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "maple_correction:event:maple-metrics"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:maple-new",
+          "codex:maple-cause"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:maple-old",
+        "codex:maple-new",
+        "codex:maple-cause",
+        "codex:maple-test"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": false,
+      "evidence_notes": "The correction itself states the old-to-new authentication change; its explicit contract reason is also required. The earlier decision is useful context but not necessary."
+    },
+    {
+      "id": "atlas_false_opposition",
+      "query": "For Atlas production, what are the TLS and debug-log settings?",
+      "tags": [
+        "false_contradiction",
+        "distinct_predicates",
+        "production_scope"
+      ],
+      "memories": [
+        {
+          "id": "atlas-tls",
+          "text": "Enable TLS for Atlas production traffic.",
+          "source_agent": "codex",
+          "scene_id": "atlas_false_opposition:scene:atlas-tls",
+          "session_id": "atlas_false_opposition:session",
+          "ts": "2026-09-10T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "atlas_false_opposition:event:atlas-tls"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "atlas-debug",
+          "text": "Disable debug logs for Atlas production traffic.",
+          "source_agent": "codex",
+          "scene_id": "atlas_false_opposition:scene:atlas-debug",
+          "session_id": "atlas_false_opposition:session",
+          "ts": "2026-09-12T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "atlas_false_opposition:event:atlas-debug"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "atlas-tls-check",
+          "text": "Atlas production accepted TLS connections and rejected plaintext HTTP.",
+          "source_agent": "codex",
+          "scene_id": "atlas_false_opposition:scene:atlas-tls-check",
+          "session_id": "atlas_false_opposition:session",
+          "ts": "2026-09-12T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "atlas_false_opposition:event:atlas-tls-check"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "atlas-debug-check",
+          "text": "Atlas production emitted no debug-level log messages during the release check.",
+          "source_agent": "codex",
+          "scene_id": "atlas_false_opposition:scene:atlas-debug-check",
+          "session_id": "atlas_false_opposition:session",
+          "ts": "2026-09-13T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "atlas_false_opposition:event:atlas-debug-check"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "atlas-lab",
+          "text": "Enable debug logs in the isolated Atlas lab environment.",
+          "source_agent": "codex",
+          "scene_id": "atlas_false_opposition:scene:atlas-lab",
+          "session_id": "atlas_false_opposition:session",
+          "ts": "2026-09-14T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "atlas_false_opposition:event:atlas-lab"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "atlas-doc",
+          "text": "Atlas production settings documentation contains TLS and debug-log sections.",
+          "source_agent": "codex",
+          "scene_id": "atlas_false_opposition:scene:atlas-doc",
+          "session_id": "atlas_false_opposition:session",
+          "ts": "2026-09-15T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "atlas_false_opposition:event:atlas-doc"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "atlas-port",
+          "text": "Atlas production listens on port 8443.",
+          "source_agent": "codex",
+          "scene_id": "atlas_false_opposition:scene:atlas-port",
+          "session_id": "atlas_false_opposition:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "atlas_false_opposition:event:atlas-port"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "atlas-backup",
+          "text": "Atlas backups run every night.",
+          "source_agent": "codex",
+          "scene_id": "atlas_false_opposition:scene:atlas-backup",
+          "session_id": "atlas_false_opposition:session",
+          "ts": "2026-09-17T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "atlas_false_opposition:event:atlas-backup"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "comet-debug",
+          "text": "Comet production keeps debug logging enabled during its pilot.",
+          "source_agent": "codex",
+          "scene_id": "atlas_false_opposition:scene:comet-debug",
+          "session_id": "atlas_false_opposition:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "atlas_false_opposition:event:comet-debug"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:atlas-tls",
+          "codex:atlas-debug"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:atlas-tls",
+        "codex:atlas-debug",
+        "codex:atlas-tls-check",
+        "codex:atlas-debug-check"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": false,
+      "evidence_notes": "Enable TLS and disable debug logs are compatible settings, not a change of view."
+    },
+    {
+      "id": "harbor_copy_crowding",
+      "query": "Which two independent requirements led Harbor to use SQLite on survey tablets?",
+      "tags": [
+        "duplicate_crowding",
+        "independent_support",
+        "distinct_scenes"
+      ],
+      "memories": [
+        {
+          "id": "harbor-offline",
+          "text": "Harbor chose SQLite because survey tablets must record answers with no network connection.",
+          "source_agent": "codex",
+          "scene_id": "harbor_copy_crowding:scene:harbor-offline",
+          "session_id": "harbor_copy_crowding:session",
+          "ts": "2026-09-10T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "harbor_copy_crowding:event:harbor-offline"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "harbor-recovery",
+          "text": "Harbor chose SQLite because committed surveys must survive an unexpected tablet restart.",
+          "source_agent": "codex",
+          "scene_id": "harbor_copy_crowding:scene:harbor-recovery",
+          "session_id": "harbor_copy_crowding:session",
+          "ts": "2026-09-11T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "harbor_copy_crowding:event:harbor-recovery"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "harbor-copy-a",
+          "text": "Harbor uses SQLite on survey tablets.",
+          "source_agent": "codex",
+          "scene_id": "harbor_copy_crowding:scene:harbor-copy-a",
+          "session_id": "harbor_copy_crowding:session",
+          "ts": "2026-09-12T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "harbor_copy_crowding:event:harbor-copy-a"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "harbor-copy-b",
+          "text": "Harbor uses SQLite on survey tablets.",
+          "source_agent": "codex",
+          "scene_id": "harbor_copy_crowding:scene:harbor-copy-b",
+          "session_id": "harbor_copy_crowding:session",
+          "ts": "2026-09-13T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "harbor_copy_crowding:event:harbor-copy-b"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "harbor-copy-c",
+          "text": "Harbor uses SQLite on survey tablets.",
+          "source_agent": "codex",
+          "scene_id": "harbor_copy_crowding:scene:harbor-copy-c",
+          "session_id": "harbor_copy_crowding:session",
+          "ts": "2026-09-14T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "harbor_copy_crowding:event:harbor-copy-c"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "harbor-copy-d",
+          "text": "Harbor uses SQLite on survey tablets.",
+          "source_agent": "codex",
+          "scene_id": "harbor_copy_crowding:scene:harbor-copy-d",
+          "session_id": "harbor_copy_crowding:session",
+          "ts": "2026-09-15T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "harbor_copy_crowding:event:harbor-copy-d"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "harbor-copy-e",
+          "text": "Harbor uses SQLite on survey tablets.",
+          "source_agent": "codex",
+          "scene_id": "harbor_copy_crowding:scene:harbor-copy-e",
+          "session_id": "harbor_copy_crowding:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "harbor_copy_crowding:event:harbor-copy-e"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "harbor-heading",
+          "text": "Harbor SQLite survey-tablet requirements is the title of a note.",
+          "source_agent": "codex",
+          "scene_id": "harbor_copy_crowding:scene:harbor-heading",
+          "session_id": "harbor_copy_crowding:session",
+          "ts": "2026-09-17T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "harbor_copy_crowding:event:harbor-heading"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "harbor-case",
+          "text": "Harbor survey tablets use waterproof cases.",
+          "source_agent": "codex",
+          "scene_id": "harbor_copy_crowding:scene:harbor-case",
+          "session_id": "harbor_copy_crowding:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "harbor_copy_crowding:event:harbor-case"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "haven-db",
+          "text": "Haven selected a hosted database because its tablets are always online.",
+          "source_agent": "codex",
+          "scene_id": "harbor_copy_crowding:scene:haven-db",
+          "session_id": "harbor_copy_crowding:session",
+          "ts": "2026-09-19T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "harbor_copy_crowding:event:haven-db"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:harbor-offline",
+          "codex:harbor-recovery"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:harbor-offline",
+        "codex:harbor-recovery",
+        "codex:harbor-copy-a",
+        "codex:harbor-copy-b",
+        "codex:harbor-copy-c",
+        "codex:harbor-copy-d",
+        "codex:harbor-copy-e"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": false,
+      "evidence_notes": "Repeated copies add no independent requirement; sufficient evidence must retain both distinct reasons."
+    },
+    {
+      "id": "quartz_project_scope",
+      "query": "For Quartz, what triggers rollback and which version does rollback restore?",
+      "tags": [
+        "mixed_projects",
+        "same_shaped_facts",
+        "numbers"
+      ],
+      "memories": [
+        {
+          "id": "quartz-trigger",
+          "text": "Quartz rolls back when the checkout error rate exceeds 3 percent for five minutes.",
+          "source_agent": "codex",
+          "scene_id": "quartz_project_scope:scene:quartz-trigger",
+          "session_id": "quartz_project_scope:session",
+          "ts": "2026-09-10T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "quartz_project_scope:event:quartz-trigger"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "quartz-target",
+          "text": "Quartz rollback restores release 2.8.",
+          "source_agent": "codex",
+          "scene_id": "quartz_project_scope:scene:quartz-target",
+          "session_id": "quartz_project_scope:session",
+          "ts": "2026-09-11T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "quartz_project_scope:event:quartz-target"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "quartz-test",
+          "text": "The Quartz rollback drill restored release 2.8 after an injected checkout failure.",
+          "source_agent": "codex",
+          "scene_id": "quartz_project_scope:scene:quartz-test",
+          "session_id": "quartz_project_scope:session",
+          "ts": "2026-09-12T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "quartz_project_scope:event:quartz-test"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "boreal-trigger",
+          "text": "Boreal rolls back when the checkout error rate exceeds 1 percent for two minutes.",
+          "source_agent": "codex",
+          "scene_id": "quartz_project_scope:scene:boreal-trigger",
+          "session_id": "quartz_project_scope:session",
+          "ts": "2026-09-13T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "quartz_project_scope:event:boreal-trigger"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "boreal-target",
+          "text": "Boreal rollback restores release 7.4.",
+          "source_agent": "codex",
+          "scene_id": "quartz_project_scope:scene:boreal-target",
+          "session_id": "quartz_project_scope:session",
+          "ts": "2026-09-14T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "quartz_project_scope:event:boreal-target"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "boreal-test",
+          "text": "The Boreal rollback drill restored release 7.4 after a checkout failure.",
+          "source_agent": "codex",
+          "scene_id": "quartz_project_scope:scene:boreal-test",
+          "session_id": "quartz_project_scope:session",
+          "ts": "2026-09-15T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "quartz_project_scope:event:boreal-test"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "quartz-doc",
+          "text": "Quartz rollback trigger and restore-version notes are linked in the deployment guide.",
+          "source_agent": "codex",
+          "scene_id": "quartz_project_scope:scene:quartz-doc",
+          "session_id": "quartz_project_scope:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "quartz_project_scope:event:quartz-doc"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "quartz-color",
+          "text": "Quartz deployment status uses a yellow warning badge.",
+          "source_agent": "codex",
+          "scene_id": "quartz_project_scope:scene:quartz-color",
+          "session_id": "quartz_project_scope:session",
+          "ts": "2026-09-17T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "quartz_project_scope:event:quartz-color"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "quartz-cache",
+          "text": "Quartz caches product thumbnails for one hour.",
+          "source_agent": "codex",
+          "scene_id": "quartz_project_scope:scene:quartz-cache",
+          "session_id": "quartz_project_scope:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "quartz_project_scope:event:quartz-cache"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:quartz-trigger",
+          "codex:quartz-target"
+        ],
+        [
+          "codex:quartz-trigger",
+          "codex:quartz-test"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:quartz-trigger",
+        "codex:quartz-target",
+        "codex:quartz-test"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": false,
+      "evidence_notes": "Boreal facts are coherent but cannot answer the Quartz question."
+    },
+    {
+      "id": "tangent_missing_answer",
+      "query": "What exact queue-depth threshold triggers Tangent’s emergency failover?",
+      "tags": [
+        "missing_answer",
+        "related_junk",
+        "cross_project_distractor"
+      ],
+      "memories": [
+        {
+          "id": "tangent-health",
+          "text": "Tangent monitors queue depth and reports worker health.",
+          "source_agent": "codex",
+          "scene_id": "tangent_missing_answer:scene:tangent-health",
+          "session_id": "tangent_missing_answer:session",
+          "ts": "2026-09-10T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "tangent_missing_answer:event:tangent-health"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "tangent-config",
+          "text": "Tangent configuration has an emergency-failover section.",
+          "source_agent": "codex",
+          "scene_id": "tangent_missing_answer:scene:tangent-config",
+          "session_id": "tangent_missing_answer:session",
+          "ts": "2026-09-11T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "tangent_missing_answer:event:tangent-config"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "tangent-plan",
+          "text": "The Tangent team planned to choose an emergency-failover threshold after a load test.",
+          "source_agent": "codex",
+          "scene_id": "tangent_missing_answer:scene:tangent-plan",
+          "session_id": "tangent_missing_answer:session",
+          "ts": "2026-09-12T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "tangent_missing_answer:event:tangent-plan"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "tangent-doc",
+          "text": "The Tangent runbook links to the queue-depth chart.",
+          "source_agent": "codex",
+          "scene_id": "tangent_missing_answer:scene:tangent-doc",
+          "session_id": "tangent_missing_answer:session",
+          "ts": "2026-09-13T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "tangent_missing_answer:event:tangent-doc"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "tangent-owner",
+          "text": "Milo owns Tangent’s worker deployment.",
+          "source_agent": "codex",
+          "scene_id": "tangent_missing_answer:scene:tangent-owner",
+          "session_id": "tangent_missing_answer:session",
+          "ts": "2026-09-14T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "tangent_missing_answer:event:tangent-owner"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "tangent-restart",
+          "text": "Tangent workers restart after a failed health check.",
+          "source_agent": "codex",
+          "scene_id": "tangent_missing_answer:scene:tangent-restart",
+          "session_id": "tangent_missing_answer:session",
+          "ts": "2026-09-15T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "tangent_missing_answer:event:tangent-restart"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "tangent-color",
+          "text": "Tangent queue alerts appear in an orange panel.",
+          "source_agent": "codex",
+          "scene_id": "tangent_missing_answer:scene:tangent-color",
+          "session_id": "tangent_missing_answer:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "tangent_missing_answer:event:tangent-color"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "tangent-window",
+          "text": "Tangent maintenance normally occurs at 03:00 UTC.",
+          "source_agent": "codex",
+          "scene_id": "tangent_missing_answer:scene:tangent-window",
+          "session_id": "tangent_missing_answer:session",
+          "ts": "2026-09-17T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "tangent_missing_answer:event:tangent-window"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "delta-threshold",
+          "text": "Delta triggers emergency failover at a queue depth of 500 jobs.",
+          "source_agent": "codex",
+          "scene_id": "tangent_missing_answer:scene:delta-threshold",
+          "session_id": "tangent_missing_answer:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "tangent_missing_answer:event:delta-threshold"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [],
+      "acceptable_ids": [],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": true,
+      "evidence_notes": "No supplied Tangent claim states the requested threshold. A heading, plan, or Delta value cannot supply it."
+    },
+    {
+      "id": "kepler_entity_numbers",
+      "query": "What batch size is configured for Kepler-East and for Kepler-West?",
+      "tags": [
+        "different_entities",
+        "numbers",
+        "complementary_facts"
+      ],
+      "memories": [
+        {
+          "id": "kepler-east",
+          "text": "Kepler-East uses a batch size of 16 records.",
+          "source_agent": "codex",
+          "scene_id": "kepler_entity_numbers:scene:kepler-east",
+          "session_id": "kepler_entity_numbers:session",
+          "ts": "2026-09-10T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "kepler_entity_numbers:event:kepler-east"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "kepler-west",
+          "text": "Kepler-West uses a batch size of 64 records.",
+          "source_agent": "codex",
+          "scene_id": "kepler_entity_numbers:scene:kepler-west",
+          "session_id": "kepler_entity_numbers:session",
+          "ts": "2026-09-11T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "kepler_entity_numbers:event:kepler-west"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "kepler-east-check",
+          "text": "The Kepler-East test submitted batches containing 16 records.",
+          "source_agent": "codex",
+          "scene_id": "kepler_entity_numbers:scene:kepler-east-check",
+          "session_id": "kepler_entity_numbers:session",
+          "ts": "2026-09-12T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "kepler_entity_numbers:event:kepler-east-check"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "kepler-west-check",
+          "text": "The Kepler-West test submitted batches containing 64 records.",
+          "source_agent": "codex",
+          "scene_id": "kepler_entity_numbers:scene:kepler-west-check",
+          "session_id": "kepler_entity_numbers:session",
+          "ts": "2026-09-13T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "kepler_entity_numbers:event:kepler-west-check"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "kepler-draft",
+          "text": "An abandoned Kepler-East draft proposed a batch size of 64 records.",
+          "source_agent": "codex",
+          "scene_id": "kepler_entity_numbers:scene:kepler-draft",
+          "session_id": "kepler_entity_numbers:session",
+          "ts": "2026-09-02T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "kepler_entity_numbers:event:kepler-draft"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "kepler-title",
+          "text": "Kepler-East and Kepler-West batch-size configuration is a dashboard heading.",
+          "source_agent": "codex",
+          "scene_id": "kepler_entity_numbers:scene:kepler-title",
+          "session_id": "kepler_entity_numbers:session",
+          "ts": "2026-09-15T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "kepler_entity_numbers:event:kepler-title"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "kepler-timeout",
+          "text": "Kepler workers use a 30-second request timeout.",
+          "source_agent": "codex",
+          "scene_id": "kepler_entity_numbers:scene:kepler-timeout",
+          "session_id": "kepler_entity_numbers:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "kepler_entity_numbers:event:kepler-timeout"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "kepler-count",
+          "text": "The Kepler test dataset contains 1600 records.",
+          "source_agent": "codex",
+          "scene_id": "kepler_entity_numbers:scene:kepler-count",
+          "session_id": "kepler_entity_numbers:session",
+          "ts": "2026-09-17T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "kepler_entity_numbers:event:kepler-count"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "lyra-batch",
+          "text": "Lyra uses a batch size of 16 records.",
+          "source_agent": "codex",
+          "scene_id": "kepler_entity_numbers:scene:lyra-batch",
+          "session_id": "kepler_entity_numbers:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "kepler_entity_numbers:event:lyra-batch"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:kepler-east",
+          "codex:kepler-west"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:kepler-east",
+        "codex:kepler-west",
+        "codex:kepler-east-check",
+        "codex:kepler-west-check"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": false,
+      "evidence_notes": "Same-shaped claims with different subjects and numbers must remain distinct."
+    },
+    {
+      "id": "solace_date_scope",
+      "query": "During September 8 only, what Solace retry policy was approved and what observed failure justified it?",
+      "tags": [
+        "date_filter",
+        "explicit_reason",
+        "support_cluster"
+      ],
+      "memories": [
+        {
+          "id": "solace-sep8-policy",
+          "text": "Solace approved three retries with exponential backoff on September 8.",
+          "source_agent": "codex",
+          "scene_id": "solace_date_scope:scene:solace-sep8-policy",
+          "session_id": "solace_date_scope:session",
+          "ts": "2026-09-08T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "solace_date_scope:event:solace-sep8-policy"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "solace-sep8-cause",
+          "text": "Solace chose exponential backoff on September 8 because immediate retries synchronized and overloaded the gateway.",
+          "source_agent": "codex",
+          "scene_id": "solace_date_scope:scene:solace-sep8-cause",
+          "session_id": "solace_date_scope:session",
+          "ts": "2026-09-08T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "solace_date_scope:event:solace-sep8-cause"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "solace-sep8-test",
+          "text": "Solace gateway latency stabilized during the September 8 backoff test.",
+          "source_agent": "codex",
+          "scene_id": "solace_date_scope:scene:solace-sep8-test",
+          "session_id": "solace_date_scope:session",
+          "ts": "2026-09-08T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "solace_date_scope:event:solace-sep8-test"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "solace-sep7",
+          "text": "On September 7, Solace used one immediate retry.",
+          "source_agent": "codex",
+          "scene_id": "solace_date_scope:scene:solace-sep7",
+          "session_id": "solace_date_scope:session",
+          "ts": "2026-09-07T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "solace_date_scope:event:solace-sep7"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "solace-sep9",
+          "text": "On September 9, Solace replaced retries with a durable retry queue.",
+          "source_agent": "codex",
+          "scene_id": "solace_date_scope:scene:solace-sep9",
+          "session_id": "solace_date_scope:session",
+          "ts": "2026-09-09T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "solace_date_scope:event:solace-sep9"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "solace-sep8-title",
+          "text": "Solace September 8 retry-policy approval is the title of the meeting note.",
+          "source_agent": "codex",
+          "scene_id": "solace_date_scope:scene:solace-sep8-title",
+          "session_id": "solace_date_scope:session",
+          "ts": "2026-09-08T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "solace_date_scope:event:solace-sep8-title"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "solace-sep8-color",
+          "text": "Solace’s September 8 gateway chart uses a purple line.",
+          "source_agent": "codex",
+          "scene_id": "solace_date_scope:scene:solace-sep8-color",
+          "session_id": "solace_date_scope:session",
+          "ts": "2026-09-08T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "solace_date_scope:event:solace-sep8-color"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "solace-sep8-owner",
+          "text": "On September 8, Ivo owned Solace’s gateway rollout.",
+          "source_agent": "codex",
+          "scene_id": "solace_date_scope:scene:solace-sep8-owner",
+          "session_id": "solace_date_scope:session",
+          "ts": "2026-09-08T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "solace_date_scope:event:solace-sep8-owner"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "solace-sep8-count",
+          "text": "The Solace September 8 load-test fixture contained 300 requests.",
+          "source_agent": "codex",
+          "scene_id": "solace_date_scope:scene:solace-sep8-count",
+          "session_id": "solace_date_scope:session",
+          "ts": "2026-09-08T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "solace_date_scope:event:solace-sep8-count"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:solace-sep8-policy",
+          "codex:solace-sep8-cause"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:solace-sep8-policy",
+        "codex:solace-sep8-cause",
+        "codex:solace-sep8-test"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ],
+        "date_from": "2026-09-08",
+        "date_to": "2026-09-08"
+      },
+      "expect_abstain": false,
+      "evidence_notes": "September 7 and September 9 belong to the same project but fall outside the explicit query window."
+    },
+    {
+      "id": "rivet_context_scope",
+      "query": "How do Rivet’s WAN-sync and local-debug compression policies differ, and why?",
+      "tags": [
+        "conditional_opposition",
+        "scope",
+        "explicit_reasons"
+      ],
+      "memories": [
+        {
+          "id": "rivet-wan",
+          "text": "Enable compression for Rivet WAN sync because its satellite link has limited bandwidth.",
+          "source_agent": "codex",
+          "scene_id": "rivet_context_scope:scene:rivet-wan",
+          "session_id": "rivet_context_scope:session",
+          "ts": "2026-09-10T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "rivet_context_scope:event:rivet-wan"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "rivet-local",
+          "text": "Disable compression for Rivet local debugging because plain payloads simplify inspection.",
+          "source_agent": "codex",
+          "scene_id": "rivet_context_scope:scene:rivet-local",
+          "session_id": "rivet_context_scope:session",
+          "ts": "2026-09-11T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "rivet_context_scope:event:rivet-local"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "rivet-wan-check",
+          "text": "The Rivet WAN compression test cut transmitted bytes by 60 percent.",
+          "source_agent": "codex",
+          "scene_id": "rivet_context_scope:scene:rivet-wan-check",
+          "session_id": "rivet_context_scope:session",
+          "ts": "2026-09-12T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "rivet_context_scope:event:rivet-wan-check"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "rivet-local-check",
+          "text": "Rivet local-debug traces retained readable uncompressed payloads.",
+          "source_agent": "codex",
+          "scene_id": "rivet_context_scope:scene:rivet-local-check",
+          "session_id": "rivet_context_scope:session",
+          "ts": "2026-09-13T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "rivet_context_scope:event:rivet-local-check"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "rivet-doc",
+          "text": "Rivet compression policy differs by WAN-sync and local-debug context.",
+          "source_agent": "codex",
+          "scene_id": "rivet_context_scope:scene:rivet-doc",
+          "session_id": "rivet_context_scope:session",
+          "ts": "2026-09-14T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "rivet_context_scope:event:rivet-doc"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "rivet-obsolete",
+          "text": "An obsolete Rivet draft proposed compression for every environment.",
+          "source_agent": "codex",
+          "scene_id": "rivet_context_scope:scene:rivet-obsolete",
+          "session_id": "rivet_context_scope:session",
+          "ts": "2026-09-01T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "rivet_context_scope:event:rivet-obsolete"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "rivet-port",
+          "text": "Rivet local debugging listens on a Unix-domain socket.",
+          "source_agent": "codex",
+          "scene_id": "rivet_context_scope:scene:rivet-port",
+          "session_id": "rivet_context_scope:session",
+          "ts": "2026-09-16T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "rivet_context_scope:event:rivet-port"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "rivet-color",
+          "text": "Rivet’s WAN status icon is teal.",
+          "source_agent": "codex",
+          "scene_id": "rivet_context_scope:scene:rivet-color",
+          "session_id": "rivet_context_scope:session",
+          "ts": "2026-09-17T12:00:00+00:00",
+          "type": "fact",
+          "stream": "rough",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "rivet_context_scope:event:rivet-color"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        },
+        {
+          "id": "raven-policy",
+          "text": "Raven enables compression for both local debugging and WAN sync.",
+          "source_agent": "codex",
+          "scene_id": "rivet_context_scope:scene:raven-policy",
+          "session_id": "rivet_context_scope:session",
+          "ts": "2026-09-18T12:00:00+00:00",
+          "type": "decision",
+          "stream": "learnings",
+          "source_reliability": 0.9,
+          "source_event_ids": [
+            "rivet_context_scope:event:raven-policy"
+          ],
+          "verification_status": "unverified",
+          "fallback_generated": false
+        }
+      ],
+      "required_sets": [
+        [
+          "codex:rivet-wan",
+          "codex:rivet-local"
+        ]
+      ],
+      "acceptable_ids": [
+        "codex:rivet-wan",
+        "codex:rivet-local",
+        "codex:rivet-wan-check",
+        "codex:rivet-local-check",
+        "codex:rivet-doc"
+      ],
+      "filters": {
+        "sources": [
+          "codex"
+        ]
+      },
+      "expect_abstain": false,
+      "evidence_notes": "Opposite verbs apply to different environments; neither policy supersedes the other."
+    }
+  ]
+}

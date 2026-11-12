@@ -15,7 +15,10 @@ def _memory_line(hit: Dict[str, Any], prefix: str) -> str:
     text = str(mem.get("text") or "").strip()
     source = _source(hit)
     label = f"{source} · " if source else ""
-    return f"{prefix}[{label}{stream}/{mem_type}] {text}"
+    if mem.get("result_kind") == "source_passage":
+        return f"{prefix}[{label}{mem.get('role') or 'conversation'} source passage · recorded {str(mem.get('ts') or 'unknown')[:10]} · {mem.get('scene_id') or 'unknown scene'}] {text}"
+    status = f" · {mem['correction_status']}" if mem.get("correction_status") else ""
+    return f"{prefix}[{label}{stream}/{mem_type}{status}] {text}"
 
 
 def build_memory_notes(
@@ -108,7 +111,7 @@ def _build_clustered_notes(hits: List[Dict[str, Any]], max_items: int, max_chars
         delta = hit.get("step2_contradiction_delta", 0.0)
         marker = " ← LATER VIEW" if delta > 0 else " ← EARLIER VIEW" if delta < 0 else ""
         mem = hit.get("memory") or {}
-        line = f"  → [{mem.get('stream') or 'rough'}/{mem.get('type') or 'fact'}] {str(mem.get('text') or '').strip()}{marker}"
+        line = _memory_line(hit, "  → ") + marker
         needs_header = key != previous_cluster
         needed = 1 + len(line) + (1 + len(header) if needs_header else 0)
         if total_chars + needed > max_chars:
@@ -145,21 +148,22 @@ def build_timeline(
         text = str(mem.get("text") or "").strip()
         if not text or is_hidden_metadata_memory(mem):
             continue
-        source = f"{mem['source_agent']} · " if mem.get("source_agent") else ""
-        line = f"{mem.get('ts') or 'unknown'} -> [{source}{mem.get('stream') or 'rough'}] {text}"
+        line = _memory_line({"memory": mem}, f"{mem.get('ts') or 'unknown'} -> ")
         projected = total_chars + (1 if lines else 0) + len(line)
         if projected > max_chars:
             continue
         entry = {
             "timestamp": mem.get("ts"),
-            "stream": mem.get("stream") or "rough",
+            "stream": mem.get("stream") if mem.get("result_kind") == "source_passage" else (mem.get("stream") or "rough"),
             "type": mem.get("type"),
             "text": text,
-            "evidence_ids": [mem.get("id")] if mem.get("id") else [],
+            "evidence_ids": (list(mem.get("source_event_ids") or []) if mem.get("result_kind") == "source_passage"
+                             else [mem.get("id")] if mem.get("id") else []),
             "reliability": mem.get("source_reliability", 0.5),
         }
-        if mem.get("source_agent"):
-            entry["source_agent"] = mem["source_agent"]
+        for field in ("source_agent", "result_kind", "correction_status", "role", "scene_id", "source_event_ids", "evidence_refs"):
+            if mem.get(field) is not None:
+                entry[field] = mem[field]
         timeline.append(entry)
         lines.append(line)
         total_chars = projected

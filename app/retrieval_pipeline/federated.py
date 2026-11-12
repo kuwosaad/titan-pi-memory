@@ -333,7 +333,7 @@ class FederatedRecall:
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         from app.embedding.embedder import query_embedding_reuse_scope
-        from app.retrieval_pipeline.retriever import retrieve_memories
+        from app.retrieval_pipeline.retriever import retrieve_memories, _source_passage_hits, _combine_source_hits
 
         if int(limit) <= 0:
             return []
@@ -343,16 +343,32 @@ class FederatedRecall:
             for source_agent in selected:
                 try:
                     repository = self._memory_repository(source_agent)
-                    if repository is None:
+                    scene_repository = self._scene_repository(source_agent)
+                    if repository is None and not callable(getattr(scene_repository, "get_recent_scenes", None)):
                         continue
-                    source_hits = retrieve_memories(
-                        query=query,
-                        session_id=session_id,
-                        top_k=limit,
-                        mode=mode or "both",
-                        repository=repository,
-                        **kwargs,
-                    )
+                    # Never substitute the active namespace's memory store for
+                    # a missing foreign store.
+                    if repository is None:
+                        source_hits = _source_passage_hits(
+                            query, scene_repository, source_agent, limit=int(limit),
+                            session_id=session_id, mode=mode or "both", **{
+                                key: kwargs[key] for key in (
+                                    "memory_types", "date_from", "date_to", "date_basis",
+                                    "min_similarity", "min_reliability", "include_source_passages",
+                                ) if key in kwargs
+                            },
+                        )
+                    else:
+                        source_hits = retrieve_memories(
+                            query=query,
+                            session_id=session_id,
+                            top_k=limit,
+                            mode=mode or "both",
+                            repository=repository,
+                            source_agent=source_agent,
+                            scene_repository=scene_repository,
+                            **kwargs,
+                        )
                 except Exception as exc:
                     if source_agent == self.active_agent:
                         raise
@@ -366,6 +382,8 @@ class FederatedRecall:
                     hits.append(annotated)
 
         merged = self._merge_hits(hits, None)
+        passages = [hit for hit in merged if (hit.get("memory") or {}).get("result_kind") == "source_passage"]
+        merged = [hit for hit in merged if (hit.get("memory") or {}).get("result_kind") != "source_passage"]
         aspect_count = max((len(hit.get("query_aspects") or []) for hit in merged), default=0)
         if aspect_count > 1:
             from app.retrieval_pipeline.config import load_settings
@@ -375,8 +393,8 @@ class FederatedRecall:
             if selection.get("enabled", False):
                 # Apply the same facet allocation once across namespaces so a
                 # scalar merge cannot consume every slot with one question.
-                return _select_diverse_hits(merged, {}, int(limit), aspect_count, selection)
-        return merged[:int(limit)]
+                merged = _select_diverse_hits(merged, {}, int(limit), aspect_count, selection)
+        return _combine_source_hits(merged, passages, int(limit))
 
     def _merge_records(self, records: list[dict[str, Any]], limit: Optional[int]) -> list[dict[str, Any]]:
         selected: dict[tuple[str, ...], dict[str, Any]] = {}
@@ -399,7 +417,11 @@ class FederatedRecall:
         groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
         for hit in hits:
             memory = hit.get("memory") or {}
-            key = _display_group_key(memory) if _normalized_text(memory.get("text")) else ("id", *_identity(memory))
+            if memory.get("result_kind") == "source_passage":
+                key = ("source_passage", str(memory.get("source_agent") or ""),
+                       *(str(event) for event in memory.get("source_event_ids") or []))
+            else:
+                key = ("fact", *_display_group_key(memory)) if _normalized_text(memory.get("text")) else ("id", *_identity(memory))
             groups.setdefault(key, []).append(memory)
             current = selected.get(key)
             if current is None or self._prefer_hit(hit, current):
