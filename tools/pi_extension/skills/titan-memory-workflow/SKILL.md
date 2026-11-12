@@ -85,7 +85,9 @@ Titan supplies searchable pointers and source scenes.
    or clearly bounded as an inference or unknown.
 
 6. **Answer.** Answer the user directly. Distinguish remembered, scene-grounded,
-   currently verified, inferred, and unknown only when that changes trust.
+   currently verified, inferred, and unknown only when that changes trust. After
+   significant work, store one concise trace packet containing the durable decision,
+   verified outcome, and remaining work.
 
 ## Tool map
 
@@ -93,10 +95,17 @@ Titan supplies searchable pointers and source scenes.
   result set.
 - `titan-memory_get_recent_memories`: recover chronology and recent orientation.
 - `titan-memory_get_scene_context`: open source evidence with preserved provenance.
+- `titan-memory_store_trace_packet`: preserve a significant distilled outcome.
 
 Follow the live tool schema. Titan is the recall layer; the agent owns anchor
 extraction, hypothesis testing, connection inference, search-path choice, and the
 stopping decision.
+
+## Routing
+
+Use the pattern workflow for pattern lifecycle work, the cluster workflow for graph
+synthesis, the doctor workflow for runtime or setup failures, and memory-sync for
+historical imports. Use direct database inspection only when diagnosing Titan.
 
 The governing rule is: retrieve pointers, investigate through evidence, then compare
 with the present when current evidence is available.
