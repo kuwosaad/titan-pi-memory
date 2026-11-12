@@ -29,6 +29,7 @@ WARM_STARTUP_TIMEOUT_SEC = 30
 COLD_BOOTSTRAP_TIMEOUT_SEC = 5 * 60
 SUBPROCESS_TIMEOUT_SEC = WARM_STARTUP_TIMEOUT_SEC
 DIAGNOSTIC_LIMIT = 8 * 1024
+CORE_MCP_TOOLS = {"store_trace_packet", "query_memories", "get_scene_context", "doctor"}
 REQUIRED_MCP_TOOLS = {
     "store_trace_packet",
     "store_trace_event",
@@ -369,6 +370,11 @@ def verify(root: Path, requested_archive: Path | None) -> tuple[str, int, int, i
         if not installed_cli.is_file():
             raise RuntimeError(f"installed CLI is missing: {installed_cli}")
 
+        core_tools = list_installed_tools(installed_cli, cwd=temporary, env=env)
+        if core_tools != CORE_MCP_TOOLS:
+            raise RuntimeError(f"installed CLI core tool listing differs: {sorted(core_tools)}")
+
+        env["TITAN_MCP_TOOL_PROFILE"] = "full"
         tools = list_installed_tools(installed_cli, cwd=temporary, env=env)
         missing = sorted(REQUIRED_MCP_TOOLS - tools)
         if missing:

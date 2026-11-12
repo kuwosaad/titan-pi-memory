@@ -188,6 +188,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                     "TITAN_HOME": str(state / "titan-home"),
                     "TITAN_BASE_DIR": str(state / "titan-base"),
                     "TITAN_SPOOL_DIR": str(state / "spool"),
+                    "TITAN_MCP_TOOL_PROFILE": "full",
                     # Keep the venv launcher path.  Resolving it points at the
                     # base interpreter, which does not have the runtime deps.
                     "PYTHON": sys.executable,
