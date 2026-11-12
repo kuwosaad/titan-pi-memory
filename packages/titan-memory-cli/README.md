@@ -12,7 +12,7 @@ Run one command:
 npx -y titan-memory-cli@latest setup codex
 ```
 
-That command prepares Titan, creates the Codex memory folder, asks which extraction model to use, configures the required `nomic-embed-text:v1.5` embedding model, installs the Codex plugin, patches Codex MCP config, and runs a health check.
+That command opens local browser onboarding to choose models and configure keys, then sets up Titan and the Codex plugin. Use `--no-browser` to print the local onboarding URL, or `--terminal` for terminal prompts. Automated setup can use `--non-interactive`; `--dry-run` and `--verify` retain their existing behavior.
 
 Then do the one manual safety step Codex requires:
 

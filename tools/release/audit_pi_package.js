@@ -27,6 +27,18 @@ const requiredPiPayloads = [
   'entrypoints/__init__.py',
   'entrypoints/main.py',
   'entrypoints/mcp_server.py',
+  'tools/cli/__init__.py',
+  'tools/cli/onboarding.py',
+  'tools/cli/onboarding_checks.py',
+  'tools/cli/titan.py',
+  'tools/cli/titan_voice.py',
+  'tools/cli/onboarding_ui/index.html',
+  'tools/cli/onboarding_ui/style.css',
+  'tools/cli/onboarding_ui/app.js',
+  'tools/cli/onboarding_ui/source-serif-regular.ttf',
+  'tools/cli/onboarding_ui/FONT-LICENSE.md',
+  'tools/opencode/__init__.py',
+  'tools/opencode/install_plugin.py',
   'tools/pi_extension/index.ts',
   'tools/pi_extension/install.sh',
   'tools/pi_extension/README.md',
@@ -152,6 +164,7 @@ const forbiddenTextPatterns = [
 const founderTermPattern = /\b(?:Kuwo|Karu|Saad|Mohammad|Ayanokoji)\b/i;
 const allowedLegacyReferences = new Map([
   ['app/save_pipeline/pipeline.py', [/openclaw-hook:titan-karu-bridge/i]],
+  ['tools/cli/titan.py', [/^\s*"titan-memory@titan-karu-lab",$/, /^\s*"titan-karu-lab",$/]],
 ]);
 const forbiddenAgentNotePattern = /(^|\/)(?:AGENTS|CONTEXT)\.md$/i;
 

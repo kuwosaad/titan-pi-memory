@@ -4,7 +4,7 @@
 
 **Install:** `pi install npm:titan-pi-memory`
 
-**Setup in Pi:** `/titan-setup` then `/titan-key`
+**Setup in Pi:** `/titan-setup` and complete setup in your browser
 
 **Memory import:** `/memory-sync` imports useful local Claude Code/Codex session memories into Titan.
 

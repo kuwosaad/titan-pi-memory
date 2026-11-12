@@ -1,83 +1,127 @@
 from typing import Any, Dict, List, Optional
 
-from app.save_pipeline.extraction.extractor import classify_memory, is_hidden_metadata_memory
+from app.save_pipeline.extraction.extractor import is_hidden_metadata_memory
 
 from .config import load_settings
 
-_MEMORY_KIND_PRIORITY = {
-    "relationship": 0,
-    "user_preference": 1,
-    "decision": 2,
-    "commitment": 3,
-    "task": 4,
-    "outcome": 5,
-    "user_fact": 6,
-    "workflow": 7,
-    "issue": 8,
-}
+def _source(hit: Dict[str, Any]) -> str:
+    return str(hit.get("source_agent") or (hit.get("memory") or {}).get("source_agent") or "")
+
+
+def _memory_line(hit: Dict[str, Any], prefix: str) -> str:
+    mem = hit.get("memory") or {}
+    stream = str(mem.get("stream") or "rough")
+    mem_type = str(mem.get("type") or "fact")
+    text = str(mem.get("text") or "").strip()
+    source = _source(hit)
+    label = f"{source} · " if source else ""
+    return f"{prefix}[{label}{stream}/{mem_type}] {text}"
 
 
 def build_memory_notes(
     hits: List[Dict[str, Any]],
     max_items: Optional[int] = None,
     max_chars: Optional[int] = None,
+    cluster_mode: bool = False,
+    included_hits: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     if not hits:
         return ""
 
     settings = load_settings()
-    max_items = max_items or settings.get("notes_max_items", 6)
-    max_chars = max_chars or settings.get("notes_max_chars", 700)
-
-    filtered = [hit for hit in hits if not is_hidden_metadata_memory(hit.get("memory", {}))]
-    if not filtered:
+    max_items = settings.get("notes_max_items", 6) if max_items is None else max_items
+    max_chars = settings.get("notes_max_chars", 700) if max_chars is None else max_chars
+    if max_items <= 0 or max_chars <= 0:
         return ""
 
-    return _build_flat_notes(filtered, max_items, max_chars)
+    # Preserve the retriever’s selected order, including diversity or facet coverage.
+    filtered = []
+    seen = set()
+    for hit in hits:
+        memory = hit.get("memory") or {}
+        text = str(memory.get("text") or "").strip()
+        if not text or is_hidden_metadata_memory(memory):
+            continue
+        key = (_source(hit), " ".join(text.casefold().split()))
+        if key in seen:
+            continue
+        seen.add(key)
+        filtered.append(hit)
+
+    if cluster_mode and any(h.get("cluster_id") is not None for h in filtered):
+        return _build_clustered_notes(filtered, max_items, max_chars, included_hits)
+    return _build_flat_notes(filtered, max_items, max_chars, included_hits)
 
 
-def _build_flat_notes(
-    hits: List[Dict[str, Any]],
-    max_items: int,
-    max_chars: int,
-) -> str:
-    ordered_hits = sorted(
-        hits,
-        key=lambda hit: (
-            0 if str((hit.get("memory") or {}).get("stream") or "rough") == "learnings" else 1,
-            _MEMORY_KIND_PRIORITY.get(
-                str((hit.get("memory") or {}).get("memory_kind") or classify_memory(
-                    str((hit.get("memory") or {}).get("text") or ""), (hit.get("memory") or {}).get("type")
-                )[1]),
-                99,
-            ),
-            -float(hit.get("score") or 0.0),
-        ),
-    )
-
+def _build_flat_notes(hits: List[Dict[str, Any]], max_items: int, max_chars: int, included_hits: Optional[List[Dict[str, Any]]]) -> str:
     lines = ["MEMORY BRIEF:"]
     total_chars = len(lines[0])
-
-    for idx, hit in enumerate(ordered_hits[:max_items], start=1):
-        mem = hit.get("memory", {})
-        stream = str(mem.get("stream") or "rough")
-        mem_type = str(mem.get("type") or "fact")
-        text = str(mem.get("text") or "").strip()
-        if not text:
-            continue
-
-        prefix = f"{idx}. [{stream}/{mem_type}]"
-        line = f"{prefix} {text}"
-        projected = total_chars + len(line) + 1
-        if projected > max_chars:
+    count = 0
+    for hit in hits:
+        if count >= max_items:
             break
-
+        line = _memory_line(hit, f"{count + 1}. ")
+        projected = total_chars + 1 + len(line)
+        if projected > max_chars:
+            continue
         lines.append(line)
         total_chars = projected
+        count += 1
+        if included_hits is not None:
+            included_hits.append(hit)
+        if hit.get("tension_note"):
+            tension_line = f"   ⚠ TENSION: {hit['tension_note']}"
+            if total_chars + 1 + len(tension_line) <= max_chars:
+                lines.append(tension_line)
+                total_chars += 1 + len(tension_line)
+    return "\n".join(lines) if count else ""
 
-    if len(lines) == 1:
-        return ""
-    return "\n".join(lines)
+
+def _build_clustered_notes(hits: List[Dict[str, Any]], max_items: int, max_chars: int, included_hits: Optional[List[Dict[str, Any]]]) -> str:
+    lines = ["MEMORY BRIEF:"]
+    total_chars = len(lines[0])
+    count = 0
+    previous_cluster = None
+    for hit in hits:
+        if count >= max_items:
+            break
+        cid = hit.get("cluster_id")
+        clustered = cid is not None and hit.get("cluster_size", 1) > 1
+        if not clustered:
+            line = _memory_line(hit, f"{count + 1}. ")
+            if total_chars + 1 + len(line) <= max_chars:
+                lines.append(line)
+                total_chars += 1 + len(line)
+                count += 1
+                if included_hits is not None:
+                    included_hits.append(hit)
+                previous_cluster = None
+            continue
+
+        key = (_source(hit), cid)
+        size = hit.get("cluster_size", 1)
+        tension = " · ⚠ TENSION" if hit.get("cluster_has_tension") else ""
+        oldest, newest = hit.get("cluster_oldest_ts"), hit.get("cluster_newest_ts")
+        temporal = f" ({oldest} → {newest})" if oldest and newest else ""
+        source = f"{key[0]} · " if key[0] else ""
+        header = f"{source}INSIGHT {cid + 1} [{size} related{tension}]{temporal}"
+        delta = hit.get("step2_contradiction_delta", 0.0)
+        marker = " ← LATER VIEW" if delta > 0 else " ← EARLIER VIEW" if delta < 0 else ""
+        mem = hit.get("memory") or {}
+        line = f"  → [{mem.get('stream') or 'rough'}/{mem.get('type') or 'fact'}] {str(mem.get('text') or '').strip()}{marker}"
+        needs_header = key != previous_cluster
+        needed = 1 + len(line) + (1 + len(header) if needs_header else 0)
+        if total_chars + needed > max_chars:
+            continue
+        if needs_header:
+            lines.append(header)
+        lines.append(line)
+        total_chars += needed
+        count += 1
+        if included_hits is not None:
+            included_hits.append(hit)
+        previous_cluster = key
+    return "\n".join(lines) if count else ""
 
 
 def build_timeline(
@@ -89,32 +133,34 @@ def build_timeline(
         return {"timeline": [], "timeline_summary": ""}
 
     settings = load_settings()
-    max_items = max_items or settings.get("notes_max_items", 10)
-    max_chars = max_chars or settings.get("notes_max_chars", 900)
+    max_items = settings.get("notes_max_items", 10) if max_items is None else max_items
+    max_chars = settings.get("notes_max_chars", 900) if max_chars is None else max_chars
 
     timeline = []
-    for mem in sorted(memories, key=lambda item: str(item.get("ts") or ""))[:max_items]:
-        text = str(mem.get("text") or "").strip()
-        if not text:
-            continue
-        timeline.append(
-            {
-                "timestamp": mem.get("ts"),
-                "stream": mem.get("stream", "rough"),
-                "type": mem.get("type"),
-                "text": text,
-                "evidence_ids": [mem.get("id")] if mem.get("id") else [],
-                "reliability": mem.get("source_reliability", 0.5),
-            }
-        )
-
     lines = []
     total_chars = 0
-    for entry in timeline:
-        line = f"{entry.get('timestamp') or 'unknown'} -> [{entry.get('stream')}] {entry.get('text')}"
-        projected = total_chars + len(line) + 1
-        if projected > max_chars:
+    for mem in sorted(memories, key=lambda item: str(item.get("ts") or "")):
+        if len(timeline) >= max_items:
             break
+        text = str(mem.get("text") or "").strip()
+        if not text or is_hidden_metadata_memory(mem):
+            continue
+        source = f"{mem['source_agent']} · " if mem.get("source_agent") else ""
+        line = f"{mem.get('ts') or 'unknown'} -> [{source}{mem.get('stream') or 'rough'}] {text}"
+        projected = total_chars + (1 if lines else 0) + len(line)
+        if projected > max_chars:
+            continue
+        entry = {
+            "timestamp": mem.get("ts"),
+            "stream": mem.get("stream") or "rough",
+            "type": mem.get("type"),
+            "text": text,
+            "evidence_ids": [mem.get("id")] if mem.get("id") else [],
+            "reliability": mem.get("source_reliability", 0.5),
+        }
+        if mem.get("source_agent"):
+            entry["source_agent"] = mem["source_agent"]
+        timeline.append(entry)
         lines.append(line)
         total_chars = projected
 

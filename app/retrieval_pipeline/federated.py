@@ -21,6 +21,7 @@ from app.storage.scenes import JsonSceneRepository, SceneRepository, SqliteScene
 
 _AGENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 LOGGER = logging.getLogger(__name__)
+_MAX_EVIDENCE_REFS = 10
 
 
 def _validate_agent_name(agent_name: str) -> str:
@@ -113,6 +114,31 @@ def _normalized_text(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
+def _identity(record: Mapping[str, Any]) -> tuple[str, str]:
+    return (str(record.get("source_agent") or ""), str(record.get("id") or ""))
+
+
+def _evidence_ref(record: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (*_identity(record), str(record.get("scene_id") or ""))
+
+
+def _with_duplicate_evidence(winner: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Keep compact, source-qualified references for identical text only."""
+    winner_ref = _evidence_ref(winner)
+    references = {_evidence_ref(record) for record in records}
+    if len(references) < 2:
+        return winner
+    ordered = [winner_ref] + sorted(references - {winner_ref})
+    result = dict(winner)
+    result["evidence_refs"] = [
+        {"source_agent": source, "memory_id": memory_id, **({"scene_id": scene_id} if scene_id else {})}
+        for source, memory_id, scene_id in ordered[:_MAX_EVIDENCE_REFS]
+    ]
+    if len(ordered) > _MAX_EVIDENCE_REFS:
+        result["evidence_refs_truncated"] = True
+    return result
+
+
 class FederatedRecall:
     """One explicit, read-only seam for multi-agent memory and scene recall."""
 
@@ -190,6 +216,8 @@ class FederatedRecall:
         session_id: Optional[str] = None,
         sources: Optional[Sequence[str] | str] = None,
     ) -> list[dict[str, Any]]:
+        if limit is not None and int(limit) <= 0:
+            return []
         selected = self.sources(sources)
         records: list[dict[str, Any]] = []
         for source_agent in selected:
@@ -274,6 +302,8 @@ class FederatedRecall:
         from app.embedding.embedder import query_embedding_reuse_scope
         from app.retrieval_pipeline.retriever import retrieve_memories
 
+        if int(limit) <= 0:
+            return []
         selected = self.sources(sources)
         hits: list[dict[str, Any]] = []
         with query_embedding_reuse_scope():
@@ -307,24 +337,37 @@ class FederatedRecall:
 
     def _merge_records(self, records: list[dict[str, Any]], limit: Optional[int]) -> list[dict[str, Any]]:
         selected: dict[str, dict[str, Any]] = {}
+        groups: dict[str, list[dict[str, Any]]] = {}
         for record in records:
             key = _normalized_text(record.get("text")) or f"id:{record.get('source_agent')}:{record.get('id')}"
+            groups.setdefault(key, []).append(record)
             current = selected.get(key)
             if current is None or self._prefer(record, current):
                 selected[key] = record
-        merged = sorted(selected.values(), key=lambda item: _timestamp(item.get("ts")), reverse=True)
+        merged = sorted(
+            (_with_duplicate_evidence(record, groups[key]) for key, record in selected.items()),
+            key=lambda item: (item.get("source_agent") != self.active_agent, _identity(item)),
+        )
+        merged.sort(key=lambda item: _timestamp(item.get("ts")), reverse=True)
         return merged if limit is None else merged[: max(0, int(limit))]
 
     def _merge_hits(self, hits: list[dict[str, Any]], limit: Optional[int]) -> list[dict[str, Any]]:
         selected: dict[str, dict[str, Any]] = {}
+        groups: dict[str, list[dict[str, Any]]] = {}
         for hit in hits:
             memory = hit.get("memory") or {}
             key = _normalized_text(memory.get("text")) or f"id:{hit.get('source_agent')}:{memory.get('id')}"
+            groups.setdefault(key, []).append(memory)
             current = selected.get(key)
             if current is None or self._prefer_hit(hit, current):
                 selected[key] = hit
-        merged = sorted(
-            selected.values(),
+        merged = sorted((
+            {**hit, "memory": _with_duplicate_evidence(hit.get("memory") or {}, groups[key])}
+            for key, hit in selected.items()
+        ), key=lambda item: (
+            item.get("source_agent") != self.active_agent, _identity(item.get("memory") or {})
+        ))
+        merged.sort(
             key=lambda item: (float(item.get("score") or item.get("final_score") or 0.0), _timestamp((item.get("memory") or {}).get("ts"))),
             reverse=True,
         )
@@ -335,7 +378,9 @@ class FederatedRecall:
         current_active = current.get("source_agent") == self.active_agent
         if candidate_active != current_active:
             return candidate_active
-        return _timestamp(candidate.get("ts")) >= _timestamp(current.get("ts"))
+        candidate_time = _timestamp(candidate.get("ts"))
+        current_time = _timestamp(current.get("ts"))
+        return candidate_time > current_time or (candidate_time == current_time and _identity(candidate) < _identity(current))
 
     def _prefer_hit(self, candidate: dict[str, Any], current: dict[str, Any]) -> bool:
         candidate_active = candidate.get("source_agent") == self.active_agent
@@ -346,7 +391,11 @@ class FederatedRecall:
         current_score = float(current.get("score") or current.get("final_score") or 0.0)
         if candidate_score != current_score:
             return candidate_score > current_score
-        return _timestamp((candidate.get("memory") or {}).get("ts")) >= _timestamp((current.get("memory") or {}).get("ts"))
+        candidate_memory = candidate.get("memory") or {}
+        current_memory = current.get("memory") or {}
+        candidate_time = _timestamp(candidate_memory.get("ts"))
+        current_time = _timestamp(current_memory.get("ts"))
+        return candidate_time > current_time or (candidate_time == current_time and _identity(candidate_memory) < _identity(current_memory))
 
     def scene_references(
         self,
@@ -371,8 +420,13 @@ class FederatedRecall:
             grouped.setdefault(source_agent, []).append(scene_id)
 
         references: dict[tuple[str, str], dict[str, Any]] = {}
+        failed: set[tuple[str, str]] = set()
         for source_agent, scene_ids in grouped.items():
-            repository = self._scene_repository(source_agent)
+            try:
+                repository = self._scene_repository(source_agent)
+            except Exception:
+                failed.update((source_agent, scene_id) for scene_id in scene_ids)
+                continue
             if repository is None:
                 continue
             try:
@@ -383,6 +437,7 @@ class FederatedRecall:
                     try:
                         refs.extend(repository.get_scene_references([scene_id]))
                     except Exception:
+                        failed.add((source_agent, scene_id))
                         continue
             for reference in refs:
                 scene_id = str(reference.get("scene_id") or "").strip()
@@ -392,7 +447,15 @@ class FederatedRecall:
                 item = dict(reference)
                 item["source_agent"] = source_agent
                 references.setdefault(identity, item)
-        return [references[identity] for identity in order if identity in references]
+        return [
+            references.get(identity) or {
+                "source_agent": identity[0],
+                "scene_id": identity[1],
+                "scene_available": None if identity in failed else False,
+                "evidence_status": "partial",
+            }
+            for identity in order
+        ]
 
     def get_scene_context(self, scene_id: str, *, source_agent: Optional[str] = None) -> dict[str, Any]:
         normalized_scene_id = str(scene_id or "").strip()

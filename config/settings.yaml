@@ -62,12 +62,14 @@ retrieval_dedup:
   embedding_min_token_containment: 0.75
   candidate_scan_multiplier: 3
 
-# Final retrieval selection. Candidate recall remains permissive; only memories
-# with direct evidence of the query may become visible results.
+# Final retrieval selection keeps the direct query match in control.
 retrieval_selection:
   enabled: true
   hybrid_candidates_enabled: true
   candidate_pool_k: 34
+  # Recall must not re-embed the vectorless corpus on every query. These rows
+  # remain searchable by words; semantic paraphrases need an embedding repair.
+  missing_embedding_mode: keyword
 
   query_aspects_enabled: true
   profile_aspect_expansion_enabled: true
@@ -91,6 +93,80 @@ retrieval_selection:
   profile_score_boost: 0.20
   profile_pattern_anchor_boost: 0.08
   lexical_coverage_weight: 0.05
+  step2_score_weight: 0.10
+
+# ──────────────────────────────────────────────
+# Step 2.1: stateless attention between candidate memories (no LNN learning)
+# ──────────────────────────────────────────────
+step2:
+  enabled: true
+  alpha: 1.0
+  # Phase A: Query-conditioned attention mask (Extension 2)
+  attention_mask_enabled: true
+
+  # Phase B: Explanatory centrality (Extension 1)
+  centrality_enabled: true
+  centrality_lambda: 0.3
+  centrality_iterations: 2
+  centrality_diversity_penalty: true
+
+  # Shared attention matrix parameters
+  sim_floor: 0.45
+  softmax_temp: 0.5
+  gate_offset: 2.0
+  gate_steepness: 0.8
+  residual_weight: 0.3
+
+  # Intent-specific attention masks
+  attention_mask:
+    timeline:
+      rough_to_rough: 0.35
+      rough_to_learnings: 0.30
+      learnings_to_rough: 0.20
+      learnings_to_learnings: 0.15
+    explanatory:
+      rough_to_rough: 0.10
+      rough_to_learnings: 0.15
+      learnings_to_rough: 0.55
+      learnings_to_learnings: 0.20
+    pattern:
+      rough_to_rough: 0.10
+      rough_to_learnings: 0.10
+      learnings_to_rough: 0.20
+      learnings_to_learnings: 0.60
+    decision:
+      rough_to_rough: 0.15
+      rough_to_learnings: 0.30
+      learnings_to_rough: 0.10
+      learnings_to_learnings: 0.45
+    balanced:
+      rough_to_rough: 0.25
+      rough_to_learnings: 0.25
+      learnings_to_rough: 0.25
+      learnings_to_learnings: 0.25
+
+  # Extension 4: Contradiction detection
+  contradiction_enabled: true
+  contradiction_sim_threshold: 0.7
+  contradiction_tension_weight: 0.3
+  contradiction_antonyms:
+    - ["dark", "light"]
+    - ["accept", "reject"]
+    - ["use", "avoid"]
+    - ["prefer", "dislike"]
+    - ["work", "break"]
+    - ["enable", "disable"]
+    - ["keep", "remove"]
+    - ["add", "drop"]
+
+  # Extension 5: Cluster compression
+  cluster_compression_enabled: true
+
+  # Extension 6: Temporal attention head
+  temporal_head_enabled: true
+  temporal_tau_minutes: 30
+  temporal_head_weight: 0.2
+  semantic_head_weight: 0.8
 
 # Memory Notes Settings
 notes_max_items: 6

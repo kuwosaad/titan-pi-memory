@@ -56,6 +56,7 @@ exclude = [
 ]
 
 [tool.setuptools.package-data]
+"tools.cli" = ["onboarding_ui/*"]
 config = [
   ".env.example",
   "embedding_models.yaml",

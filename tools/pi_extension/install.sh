@@ -37,4 +37,4 @@ fi
 
 printf '%s\n' "[titan-pi] Done."
 printf '%s\n' "[titan-pi] Workspace: $TITAN_PI_HOME"
-printf '%s\n' "[titan-pi] Next: add your API key to $TITAN_PI_HOME/.env if needed, then start pi and run /titan-status."
+printf '%s\n' "[titan-pi] Next: start Pi and run /titan-setup to configure Titan in your browser."

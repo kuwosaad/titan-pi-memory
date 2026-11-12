@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Set up Titan Memory</title>
+  <link rel="icon" href="titan-logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar"><a class="brand" href="#" aria-label="Titan Memory"><img class="brand-mark" src="titan-logo.svg" alt=""><span>titan memory</span></a><button class="top-note cancel" id="cancel" type="button">Cancel setup</button></header>
+    <main id="main" class="layout">
+      <aside class="intro" aria-label="Setup progress">
+        <p class="eyebrow"><span class="dot"></span> a little context, kept close</p>
+        <h1>Make room<br> for <em>memory.</em></h1>
+        <p class="intro-copy">Set up Titan for your coding agent. Choose the tools that will help Titan remember.</p>
+        <ol class="steps" id="steps"></ol>
+        <p class="privacy">Memories are stored locally. Cloud providers receive text for extraction and embeddings.</p>
+      </aside>
+      <section class="panel" aria-labelledby="panel-title">
+        <div id="content"><p class="eyebrow">getting things ready</p><h2 id="panel-title">One moment.</h2><p>Loading your setup options…</p></div>
+        <div id="notice" class="notice" role="alert" hidden></div>
+        <div id="actions" class="actions"></div>
+      </section>
+    </main>
+    <footer>Built to remember what matters. <span>titan memory</span></footer>
+  </div>
+</body>
+</html>

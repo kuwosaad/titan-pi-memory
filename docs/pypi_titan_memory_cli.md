@@ -112,6 +112,11 @@ npx -y titan-memory-cli@latest setup codex
 titan codex verify
 ```
 
+Interactive setup opens a local browser page for model and API key configuration.
+Use `titan setup codex --no-browser` to print its URL, or add `--terminal` to
+use terminal prompts. `--non-interactive`, `--dry-run`, and `--verify` continue
+to use the existing command-line flow.
+
 If the local plugin registration needs repair, run:
 
 ```bash

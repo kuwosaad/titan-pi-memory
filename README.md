@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/titan-pi-banner.png" alt="Titan Memory" width="960" />
+  <img src="assets/titan-banner-geometric.png" alt="Titan Memory" width="960" />
 </p>
 
 <h1 align="center">Titan Memory</h1>
@@ -94,6 +94,12 @@ approve Titan Memory if you want passive capture.
 **Hook trust is manual.** MCP tools can work while passive capture remains
 unapproved. See the [Codex guide](integrations/codex_titan_plugin/README.md) for
 verification, repair, and provider setup.
+
+MCP exposes all tools by default. To reduce tool definitions in an agent's
+context, set `TITAN_MCP_TOOL_PROFILE=core` in its MCP server environment and
+restart the server. Core exposes `query_memories`, `store_trace_packet`,
+`get_scene_context`, and `doctor`. Use `TITAN_MCP_TOOL_PROFILE=full` to restore
+all tools.
 
 ### Claude Code, OpenCode, and Grok
 

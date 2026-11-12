@@ -1,0 +1,2 @@
+Source Serif 4 regular, copyright Adobe, licensed under the SIL Open Font License 1.1; see FONT-LICENSE.md.
+Font source: https://github.com/adobe-fonts/source-serif

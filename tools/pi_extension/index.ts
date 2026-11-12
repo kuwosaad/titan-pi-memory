@@ -62,6 +62,7 @@ let sessionId: string = "default";
 
 /** Reference to the Titan server subprocess (if started by extension) */
 let titanServerProcess: ChildProcess | null = null;
+let onboardingInProgress = false;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -119,6 +120,7 @@ function runProcess(
   command: string,
   args: string[],
   options: SpawnOptionsWithoutStdio = {},
+  onStdout?: (chunk: string) => void,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolvePromise) => {
     const proc = spawn(command, args, {
@@ -130,7 +132,9 @@ function runProcess(
     let stderr = "";
 
     proc.stdout?.on("data", (data: Buffer) => {
-      stdout += data.toString();
+      const chunk = data.toString();
+      stdout += chunk;
+      onStdout?.(chunk);
     });
     proc.stderr?.on("data", (data: Buffer) => {
       stderr += data.toString();
@@ -139,7 +143,7 @@ function runProcess(
       stderr += err.message;
       resolvePromise({ code: 1, stdout, stderr });
     });
-    proc.on("exit", (code) => {
+    proc.on("close", (code) => {
       resolvePromise({ code, stdout, stderr });
     });
   });
@@ -1985,28 +1989,56 @@ export default function titanPiExtension(pi: ExtensionAPI) {
   // =======================================================================
 
   pi.registerCommand("titan-setup", {
-    description: "Prepare the Titan Pi workspace and start the local memory server",
+    description: "Configure Titan Pi in your browser",
     handler: async (_args, ctx) => {
-      const { copiedConfigs, envCreated } = ensurePiWorkspace();
-      ctx.ui.notify("Checking Titan Python dependencies...", "info");
-      const deps = await ensurePythonDependencies();
-      const ok = deps.ok ? await ensureServerRunning() : false;
-
-      const lines = [
-        "Titan Pi setup complete.",
-        `Workspace: ${TITAN_HOME}`,
-        `Configs: ${copiedConfigs.length ? `copied ${copiedConfigs.join(", ")}` : "already present"}`,
-        `Env file: ${envCreated ? "created" : "already present"} (${resolve(TITAN_HOME, ".env")})`,
-        `Python deps: ${deps.ok ? "✅" : "❌"} ${deps.message}`,
-        `Server: ${ok ? "running on port 8002" : "not running — check Python/Titan dependencies"}`,
-        "",
-        "If extraction needs an API key, add it to the .env file above, e.g.",
-        "OPENCODE_GO_API_KEY=...",
-        "GEMINI_API_KEY=...",
-        "OPENAI_API_KEY=...",
-      ];
-
-      ctx.ui.notify(lines.join("\n"), ok ? "success" : "warning");
+      if (onboardingInProgress) {
+        ctx.ui.notify("Titan setup is already running.", "warning");
+        return;
+      }
+      onboardingInProgress = true;
+      try {
+        ensurePiWorkspace();
+        ctx.ui.notify("Checking Titan Python dependencies...", "info");
+        const deps = await ensurePythonDependencies();
+        if (!deps.ok) {
+          ctx.ui.notify(`Titan setup failed: ${deps.message}`, "error");
+          return;
+        }
+        const pythonCommand = await resolveTitanPython();
+        if (!pythonCommand) {
+          ctx.ui.notify("Titan setup failed: compatible Python was not found.", "error");
+          return;
+        }
+        ctx.ui.notify("Opening Titan setup in your browser...", "info");
+        let onboardingOutput = "";
+        const result = await runProcess(pythonCommand, ["-m", "tools.cli.onboarding", "--agent", "pi"], {
+          cwd: REPO_ROOT,
+          env: { ...process.env, TITAN_HOME, PYTHONPATH: REPO_ROOT, PYTHONUNBUFFERED: "1" },
+        }, (chunk) => {
+          onboardingOutput += chunk;
+          const match = onboardingOutput.match(/\[titan\] Open onboarding: (http:\/\/127\.0\.0\.1:\d+\/#[^\s]+)/);
+          if (match) {
+            ctx.ui.notify(`If your browser did not open, visit ${match[1]}`, "info");
+            onboardingOutput = "";
+          }
+        });
+        if (result.code !== 0) {
+          const detail = (result.stderr || result.stdout).trim().slice(-500);
+          ctx.ui.notify(`Titan setup did not complete${detail ? `: ${detail}` : "."}`, "warning");
+          return;
+        }
+        if (!titanServerProcess && await isServerHealthy()) {
+          ctx.ui.notify("Titan setup saved. Restart the existing Titan server to apply it.", "warning");
+          return;
+        }
+        const serverOk = await restartOwnedServer();
+        ctx.ui.notify(
+          serverOk ? "Titan setup complete. The memory server is running." : "Titan setup saved, but the server could not start. Run /titan-status.",
+          serverOk ? "success" : "warning",
+        );
+      } finally {
+        onboardingInProgress = false;
+      }
     },
   });
 

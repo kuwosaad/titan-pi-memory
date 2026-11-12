@@ -42,6 +42,14 @@
     "config/extraction_models.yaml",
     "config/settings.yaml",
     "config/visual_config.yaml",
+    "tools/cli/__init__.py",
+    "tools/cli/onboarding.py",
+    "tools/cli/onboarding_checks.py",
+    "tools/cli/titan.py",
+    "tools/cli/titan_voice.py",
+    "tools/opencode/__init__.py",
+    "tools/opencode/install_plugin.py",
+    "tools/cli/onboarding_ui/",
     "tools/pi_extension/index.ts",
     "tools/pi_extension/server.py",
     "tools/pi_extension/titan_dashboard.py",
@@ -50,7 +58,8 @@
     "tools/pi_extension/prompts/",
     "tools/pi_extension/skills/",
     "assets/titan-pi-card.png",
-    "assets/titan-pi-banner.png"
+    "assets/titan-pi-banner.png",
+    "assets/titan-banner-geometric.png"
   ],
   "repository": {
     "type": "git",

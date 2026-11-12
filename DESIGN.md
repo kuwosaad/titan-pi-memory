@@ -780,7 +780,8 @@ The site is responsive by reducing section spacing, collapsing grids, and constr
 - Hero background: `assets/web/titanwebsite/oland-first-slide-bg.png`
 - Section backgrounds: `bg-how.png`, `bg-graph.png`, `bg-start.png`, `bg-final.png`
 - Graph preview: `assets/web/titanwebsite/knowledge-graph-o2.png`
-- Logo used by hosted nav: inline SVG inside the HTML
+- Canonical logo: `assets/titan_logo.svg` — four inward-facing geometric chevrons, rotationally symmetric, monochrome, with an open square center. Keep the mark flat and unembellished.
+- The website and onboarding bundle identical copies at `assets/web/titanwebsite/titan-logo.svg` and `tools/cli/onboarding_ui/titan-logo.svg`. Codex PNG icons are raster exports of this SVG; the README banner and Pi package card use the same mark.
 
 ### Relationship to other Titan design systems
 

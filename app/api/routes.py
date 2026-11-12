@@ -330,13 +330,25 @@ def retrieve(
     to_date: Optional[str] = None,
     include_scenes: bool = False,
     sources: Optional[str] = None,
+    detail: str = "full",
 ) -> dict:
+    """Return full records by default, or a compact brief and pointers.
+
+    max_items and max_chars bound the brief; zero disables its content.
+    Limits are capped at 100 records/items and 20,000 brief characters.
+    """
+    if detail not in ("compact", "full"):
+        raise HTTPException(status_code=400, detail="detail must be 'compact' or 'full'")
+    for name, value, minimum, maximum in (("limit", limit, 1, 100), ("max_items", max_items, 0, 100), ("max_chars", max_chars, 0, 20000)):
+        if value is not None and not minimum <= value <= maximum:
+            raise HTTPException(status_code=400, detail=f"{name} must be between {minimum} and {maximum}")
     if sources is not None:
         try:
             for source in _source_list("", sources):
                 _validate_agent_name(source)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="invalid sources") from exc
+    detail_kwargs = {"detail": detail} if detail != "full" else {}
     return retrieve_memory_brief(
         query=query or "",
         session_id=session_id,
@@ -348,6 +360,7 @@ def retrieve(
         date_to=to_date,
         include_scenes=include_scenes,
         sources=sources,
+        **detail_kwargs,
     )
 
 

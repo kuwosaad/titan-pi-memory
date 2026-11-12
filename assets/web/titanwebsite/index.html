@@ -4,6 +4,7 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Titan Memory</title>
+    <link rel="icon" type="image/svg+xml" href="titan-logo.svg"/>
     <link rel="preconnect" href="https://fonts.googleapis.com"/>
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous"/>
     <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;0,8..60,600;0,8..60,700;1,8..60,400&amp;display=swap" rel="stylesheet"/>
@@ -34,7 +35,6 @@
         *, *::before, *::after { box-sizing: border-box; }
 
         html {
-            scroll-behavior: smooth;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
@@ -107,7 +107,7 @@
         .brand {
             display: inline-flex;
             align-items: center;
-            gap: 14px;
+            gap: 10px;
             color: var(--ink);
             font-size: 15px;
             font-weight: 600;
@@ -117,10 +117,10 @@
         }
 
         .brand-mark {
-            width: 80px;
-            height: 80px;
+            width: 32px;
+            height: 32px;
+            flex: none;
             color: #fff;
-            filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.22));
         }
 
         .nav-links {
@@ -1043,8 +1043,8 @@
         }
 
         .reveal {
-            opacity: 0;
-            transform: translateY(26px);
+            opacity: 1;
+            transform: none;
             transition: opacity 720ms var(--ease), transform 720ms var(--ease);
         }
 
@@ -1068,13 +1068,13 @@
         @media (max-width: 680px) {
             .nav { height: 72px; }
             .nav-links a:not(.nav-cta) { display: none; }
-            .nav-inner { width: calc(100vw - 24px); }
-            .brand { gap: 10px; }
-            .brand-mark { width: 64px; height: 64px; }
-            .hero { padding-inline: 12px; }
+            .nav-inner { width: calc(100vw - 32px); }
+            .brand { gap: 8px; }
+            .brand-mark { width: 28px; height: 28px; }
+            .hero { padding-inline: 16px; }
             h1 { font-size: clamp(52px, 18vw, 82px); }
             .hero-copy { font-size: 18px; }
-            .section { width: calc(100vw - 24px); padding: 82px 0; }
+            .section { width: calc(100vw - 32px); padding: 82px 0; }
             .memory-demo { border-radius: 22px; }
             .terminal-feed { min-height: auto; padding: 16px; }
             .terminal-memory { min-height: auto; padding: 20px; }
@@ -1104,19 +1104,13 @@
             }
         }
     </style>
+    <link rel="stylesheet" href="demo.css"/>
 </head>
 <body>
     <nav class="nav" aria-label="Primary navigation">
         <div class="nav-inner">
             <a class="brand" href="#top" aria-label="Titan home">
-                <svg class="brand-mark" viewBox="0 0 824 828" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <g fill="currentColor">
-                        <path d="M140 270 L334 471 L334 523 L390 485 L390 459 L418 441 L448 458 L450 486 L505 523 L505 470 L699 270 L440 422 L438 382 L463 354 L419 170 L375 356 L400 381 L399 422 Z"/>
-                        <path d="M35 293 L225 521 L306 544 L306 493 L290 466 Z"/>
-                        <path d="M803 293 L548 466 L533 493 L533 544 L611 522 Z"/>
-                        <path d="M437 500 L420 511 L400 501 L306 566 L418 698 L533 567 Z"/>
-                    </g>
-                </svg>
+                <img class="brand-mark" src="titan-logo.svg" alt=""/>
                 titan memory
             </a>
             <div class="nav-links">
@@ -1136,7 +1130,7 @@
                 <p class="hero-copy">Titan turns past sessions into local memory, so your agent can recall decisions, preferences, and project context when it needs them.</p>
                 <div class="hero-actions">
                     <a class="btn btn-primary" href="#start">install titan</a>
-                    <a class="btn btn-secondary" href="https://github.com/kuwosaad/titan-pi-memory" target="_blank" rel="noopener">view github</a>
+                    <a class="btn btn-secondary" href="#how">see memory in motion</a>
                 </div>
             </div>
         </section>
@@ -1150,55 +1144,31 @@
                 <p class="section-copy">Titan turns the messy parts of a session into the context your next agent actually needs.</p>
             </div>
 
-            <div class="memory-demo" aria-label="Animated Titan memory terminal demo">
-                <div class="memory-terminal-top">
-                    <div class="memory-window-controls" aria-hidden="true"><span></span><span></span><span></span></div>
-                    <span>pi</span>
+            <div class="memory-demo" id="memory-demo" aria-label="Illustrative Titan memory playback">
+                <div class="demo-topline"><div class="memory-window-controls" aria-hidden="true"><span></span><span></span><span></span></div><span>titan memory <span class="demo-top-separator">/</span> in your agent</span><span class="demo-simulation">illustrative playback</span></div>
+                <div class="agent-picker" hidden role="group" aria-label="Choose an agent interface">
+                    <span>see it in</span>
+                    <button type="button" data-agent="pi" aria-pressed="true">pi</button>
+                    <button type="button" data-agent="claude" aria-pressed="false">claude code</button>
+                    <button type="button" data-agent="codex" aria-pressed="false">codex</button>
+                    <div class="playback-actions"><button type="button" id="demo-step">next step</button><button type="button" id="demo-play" aria-label="Pause playback">Ⅱ <span>pause</span></button></div>
                 </div>
-                <div class="memory-terminal-body">
-                    <div class="terminal-feed">
-                        <div class="tui-prompt-head">
-                            <strong># Add the Product Hunt badge to the website footer</strong>
-                            <span class="tui-link">titanwebsite/index.html</span>
-                        </div>
-                        <div class="tui-box tui-message" style="--step: 0">
-                            <span class="terminal-tool"><svg class="tool-call-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6.35 1.45h3.3l.45 1.75c.34.13.66.31.96.53l1.72-.5 1.65 2.86-1.27 1.25c.03.22.05.44.05.66s-.02.44-.05.66l1.27 1.25-1.65 2.86-1.72-.5c-.3.22-.62.4-.96.53l-.45 1.75h-3.3L5.9 12.8a5.1 5.1 0 0 1-.96-.53l-1.72.5-1.65-2.86 1.27-1.25A4.6 4.6 0 0 1 2.79 8c0-.22.02-.44.05-.66L1.57 6.09l1.65-2.86 1.72.5c.3-.22.62-.4.96-.53l.45-1.75Z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.05" fill="currentColor"/></svg>read:</span> scanning footer section of <mark>index.html</mark>
-                            <span class="tui-meta">line 1238</span>
-                        </div>
-                        <div class="tui-box tui-diff" style="--step: 1">
-                            <span class="diff-title">Edit assets/web/titanwebsite/index.html</span>
-                            <span class="diff-row"><span class="diff-num">1241</span><span class="diff-num">1241</span><span>&lt;a href="github.com"&gt;github&lt;/a&gt;</span></span>
-                            <span class="diff-row diff-add"><span class="diff-num">1242</span><span class="diff-num">1242</span><span>+ &lt;a href="producthunt.com"&gt;<mark>🏆 PH Badge</mark>&lt;/a&gt;</span></span>
-                            <span class="diff-row"><span class="diff-num">1243</span><span class="diff-num">1243</span><span>&lt;/div&gt;</span></span>
-                        </div>
-                        <div class="tui-box tui-prompt-head" style="--step: 2; border-left: 3px solid rgba(69,255,141,0.58);">
-                            <strong style="color: var(--green);"># The GitHub links still point to the old Titan-Mem repo. Fix them too?</strong>
-                            <span class="tui-link">6 occurrences found</span>
-                        </div>
-                        <div class="tui-box tui-message" style="--step: 3">
-                            <span class="terminal-tool"><svg class="tool-call-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6.35 1.45h3.3l.45 1.75c.34.13.66.31.96.53l1.72-.5 1.65 2.86-1.27 1.25c.03.22.05.44.05.66s-.02.44-.05.66l1.27 1.25-1.65 2.86-1.72-.5c-.3.22-.62.4-.96.53l-.45 1.75h-3.3L5.9 12.8a5.1 5.1 0 0 1-.96-.53l-1.72.5-1.65-2.86 1.27-1.25A4.6 4.6 0 0 1 2.79 8c0-.22.02-.44.05-.66L1.57 6.09l1.65-2.86 1.72.5c.3-.22.62-.4.96-.53l.45-1.75Z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.05" fill="currentColor"/></svg>grep:</span> found <mark>6 references</mark> to Titan-Mem. All updated to titan-pi-memory.
-                            <span class="tui-meta">nav, hero, quickstart, footer</span>
-                        </div>
-                        <div class="tui-box tui-message" style="--step: 4">
-                            <span class="terminal-tool"><svg class="tool-call-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6.35 1.45h3.3l.45 1.75c.34.13.66.31.96.53l1.72-.5 1.65 2.86-1.27 1.25c.03.22.05.44.05.66s-.02.44-.05.66l1.27 1.25-1.65 2.86-1.72-.5c-.3.22-.62.4-.96.53l-.45 1.75h-3.3L5.9 12.8a5.1 5.1 0 0 1-.96-.53l-1.72.5-1.65-2.86 1.27-1.25A4.6 4.6 0 0 1 2.79 8c0-.22.02-.44.05-.66L1.57 6.09l1.65-2.86 1.72.5c.3-.22.62-.4.96-.53l.45-1.75Z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.05" fill="currentColor"/></svg>git:</span> committed + pushed. <mark>vercel --prod</mark> done.
-                            <span class="tui-meta">live at titanmemz.in ✅</span>
-                        </div>
-                        <div class="tui-input" aria-hidden="true"><span>&gt;</span><span class="tui-caret"></span></div>
+                <div class="agent-terminal" id="agent-terminal" aria-label="Example Pi session">
+                    <div class="agent-header"><strong>pi</strong><span>escape interrupt · / commands · ! bash · ctrl+o more</span></div>
+                    <div class="agent-transcript">
+                        <div class="agent-user">Add search to the notes screen.</div>
+                        <div class="agent-thought">Checking earlier context and the current code.</div>
+                        <div class="agent-tool"><strong>titan</strong> action="query_memories" query="notes search offline"<div class="agent-result">1. Keep SQLite so the app remains usable offline. <span>[source: pi · scene: earlier session]</span></div></div>
+                        <div class="agent-tool"><strong>read</strong> src/storage.ts<div class="agent-result">const db = new Database("notes.sqlite");</div></div>
+                        <div class="agent-answer">The current store is SQLite. I’ll add full-text search here so notes remain searchable offline.</div>
                     </div>
-                    <aside class="terminal-memory" aria-label="Saved memories">
-                        <div class="memory-card-title">
-                            <h3>What Titan keeps</h3>
-                            <span class="memory-live-pill">local</span>
-                        </div>
-                        <div class="memory-stack">
-                            <div class="memory-chip" style="--chip: 0"><strong>The request</strong>Add Product Hunt badge to the website footer.</div>
-                            <div class="memory-chip" style="--chip: 1"><strong>The context</strong>GitHub links still pointed to the old Titan-Mem repo.</div>
-                            <div class="memory-chip" style="--chip: 2"><strong>The fix</strong>Updated all 6 links to titan-pi-memory.</div>
-                            <div class="memory-chip" style="--chip: 3"><strong>The deploy</strong>Committed, pushed, and deployed to Vercel.</div>
-                            <div class="memory-chip" style="--chip: 4"><strong>The result</strong>Live at titanmemz.in with Product Hunt badge.</div>
-                        </div>
-                    </aside>
+                    <div class="agent-composer"><span class="agent-composer-prompt"></span><span class="agent-cursor" aria-hidden="true"></span></div>
+                    <div class="agent-footer"><span>~/notes</span><span>TITAN READY</span></div>
                 </div>
+                <details class="evidence-strip"><summary><span>✦</span> The context behind this answer <span class="evidence-chevron">⌄</span></summary><p><strong>Earlier decision</strong> · Keep SQLite so the app remains usable offline.</p><p><strong>Source</strong> · An earlier Pi session and its available evidence. The agent should verify historical context against the current code.</p></details>
+                <div class="playback-bar" hidden><div><span class="playback-dot"></span><span id="playback-state">ready to play</span></div></div>
+                <p class="demo-status sr-only" aria-live="polite" aria-atomic="true"></p>
+                <p class="demo-caption">A fictional example. Memory is stored locally; capture and processing depend on your integration and settings.</p>
             </div>
         </section>
 
@@ -1226,10 +1196,14 @@
                 </div>
             </div>
             <div class="terminal" aria-label="Install commands">
-                <div class="terminal-top"><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span><span>terminal</span></div>
-                <pre><span class="cmd">pi install</span> npm:titan-pi-memory
+                <div class="terminal-top"><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span><span>terminal</span><button type="button" id="copy-install" class="copy-install" hidden>copy pi command</button></div>
+                <pre><span class="cmd">ollama pull</span> nomic-embed-text:v1.5
+<span class="cmd">pi install</span> npm:titan-pi-memory
+
 <span class="cmd">/titan-setup</span>
+<span class="cmd">/titan-key</span>
 <span class="cmd">/titan-status</span></pre>
+                <p class="install-note">Pi also needs Python 3.10+ and an extraction provider. <a href="https://github.com/kuwosaad/titan-pi-memory#get-started" target="_blank" rel="noopener">See setup requirements</a>.</p>
             </div>
         </section>
 
@@ -1265,31 +1239,19 @@
 
     <div id="youtube-audio-player" class="youtube-audio-frame" aria-hidden="true"></div>
 
+    <script src="demo.js" defer></script>
     <script>
-        const revealObserver = new IntersectionObserver((entries) => {
-            entries.forEach((entry) => {
-                if (entry.isIntersecting) {
-                    entry.target.classList.add('visible');
-                    revealObserver.unobserve(entry.target);
-                }
-            });
-        }, { threshold: 0.12, rootMargin: '0px 0px -50px 0px' });
-
-        document.querySelectorAll('.reveal').forEach((el) => revealObserver.observe(el));
-
-        document.querySelectorAll('a[href^="#"]').forEach((link) => {
-            link.addEventListener('click', (event) => {
-                const href = link.getAttribute('href');
-                if (!href || href === '#') return;
-                const target = document.querySelector(href);
-                if (!target) return;
-                event.preventDefault();
-                window.scrollTo({
-                    top: target.getBoundingClientRect().top + window.pageYOffset - 72,
-                    behavior: 'smooth'
+        if ('IntersectionObserver' in window) {
+            const revealObserver = new IntersectionObserver((entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('visible');
+                        revealObserver.unobserve(entry.target);
+                    }
                 });
-            });
-        });
+            }, { threshold: 0.12, rootMargin: '0px 0px -50px 0px' });
+            document.querySelectorAll('.reveal').forEach((el) => revealObserver.observe(el));
+        }
 
         const musicToggle = document.querySelector('.music-toggle');
         const musicLabel = document.querySelector('.music-label');

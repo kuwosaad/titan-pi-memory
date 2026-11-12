@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, ContextManager, List, Optional, Sequence
 
 from app.storage.sqlite_schema import ensure_pattern_tables
+from app.storage.sqlite import sqlite_connection
 
 from .errors import PatternStorageUnavailable, PatternValidation
 from .models import Pattern, PatternApplication, PatternEvidence, now_iso
@@ -37,13 +38,18 @@ class PatternValidationError(PatternValidation):
 class PatternStore:
     """SQLite repository for durable pattern cards and their evidence."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, initialize: bool = True) -> None:
         self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._read_only = not initialize
+        if initialize:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._init_schema()
+        if initialize:
+            self._init_schema()
 
     def _connect(self) -> ContextManager[sqlite3.Connection]:
+        if self._read_only:
+            return sqlite_connection(self.db_path, read_only=True)
         return connect_pattern_db(self.db_path)
 
     def _init_schema(self) -> None:

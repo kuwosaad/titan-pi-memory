@@ -2,6 +2,9 @@ import json
 import unittest
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
 from unittest.mock import patch
 
 from entrypoints import mcp_server
@@ -34,7 +37,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             "scene_refs": [],
         }
         with patch.object(mcp_server, "retrieve_memory_brief", return_value=expected) as mock_retrieve:
-            payload = await mcp_server.query_memories(query="bounded scene", limit=4)
+            payload = await mcp_server.query_memories(query="bounded scene", limit=4, detail="full")
 
         self.assertEqual(payload["scenes"], [])
         self.assertEqual(payload["memories"][0]["scene_id"], "s1:scene:e-1")
@@ -47,7 +50,120 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             mode=None,
             limit=4,
             include_scenes=False,
+            detail="full",
         )
+
+    async def test_query_memories_defaults_to_compact_and_passes_brief_bounds(self):
+        expected = {
+            "count": 1,
+            "brief": "A useful decision",
+            "memories": [{"id": "m1", "scene_id": "scene-1", "source_agent": "pi"}],
+            "scene_refs": [{"scene_id": "scene-1", "source_agent": "pi"}],
+        }
+        with patch.object(mcp_server, "retrieve_memory_brief", return_value=expected) as recall:
+            payload = await mcp_server.query_memories(query="decision", max_items=3, max_chars=900)
+        self.assertEqual(payload, expected)
+        recall.assert_called_once_with(query="decision", session_id=None, mode=None, limit=20,
+                                       include_scenes=False, detail="compact", max_items=3, max_chars=900)
+
+    async def test_query_rejects_invalid_bounds_and_detail_before_search(self):
+        with patch.object(mcp_server, "retrieve_memory_brief") as recall:
+            for kwargs in ({"limit": 0}, {"limit": 101}, {"max_items": -1},
+                           {"max_chars": 20001}, {"detail": "verbose"}):
+                with self.subTest(kwargs=kwargs):
+                    self.assertEqual((await mcp_server.query_memories(query="test", **kwargs))["status_code"], 400)
+            recall.assert_not_called()
+
+    async def test_compact_search_integrates_sqlite_retrieval_and_scene_pointers(self):
+        from app.storage.memories import SqliteMemoryRepository
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo = SqliteMemoryRepository(Path(tmp_dir) / "memories.db")
+            repo.append_memories([{
+                "id": "s1:1:0", "text": "Use focused checks for retrieval changes.",
+                "type": "decision", "stream": "learnings", "embedding": [1.0, 0.0],
+                "ts": "2026-11-08T00:00:00+00:00", "session_id": "s1", "turn": 1,
+                "scene_id": "scene-1", "source_event_ids": ["e1"],
+                "source_type": "user", "source_reliability": 0.9,
+                "verification_status": "unverified",
+            }])
+            with (
+                patch("app.storage.memories.get_memory_repository", return_value=repo),
+                patch("app.retrieval_pipeline.federated.get_federated_recall", side_effect=lambda active_agent: SimpleNamespace(sources=lambda sources: [active_agent])),
+                patch("app.save_pipeline.pipeline.route_query", return_value={"use_memory": True, "mode": "both", "intent": "balanced"}),
+                patch("app.save_pipeline.pipeline.get_scene_references", return_value=[]),
+                patch("app.retrieval_pipeline.config.load_settings", return_value={
+                    "retrieval_min_similarity": 0.1, "retrieval": {"min_reliability": 0},
+                    "retrieval_selection": {"enabled": False},
+                }),
+                patch("app.retrieval_pipeline.retriever.embed", return_value=[np.array([1.0, 0.0])]),
+                patch("app.patterns.retrieval.retrieve_accepted_patterns", return_value=[]),
+            ):
+                payload = await mcp_server.query_memories(query="focused checks", max_chars=500)
+
+        self.assertIn("Use focused checks", payload["brief"], payload)
+        self.assertEqual(payload["memories"][0]["id"], "s1:1:0")
+        self.assertEqual(payload["memories"][0]["scene_id"], "scene-1")
+        self.assertTrue(payload["memories"][0]["source_agent"])
+        self.assertEqual(payload["scene_refs"][0]["scene_id"], "scene-1")
+        self.assertNotIn("embedding", payload["memories"][0])
+        self.assertNotIn("text", payload["memories"][0])
+
+    async def test_compact_recent_uses_same_budgets_without_embedding(self):
+        from app.storage.memories import SqliteMemoryRepository
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo = SqliteMemoryRepository(Path(tmp_dir) / "recent.db")
+            repo.append_memories([
+                {"id": f"s1:{i}:0", "text": f"Recent decision number {i}.",
+                 "type": "decision", "stream": "learnings", "embedding": [1.0, 0.0],
+                 "ts": f"2026-11-08T00:00:{i:02d}+00:00", "session_id": "s1", "turn": i,
+                 "scene_id": f"scene-{i}", "source_type": "user", "source_reliability": 0.9}
+                for i in range(8)
+            ])
+            with (
+                patch("app.storage.memories.get_memory_repository", return_value=repo),
+                patch("app.retrieval_pipeline.federated.get_federated_recall", side_effect=lambda active_agent: SimpleNamespace(sources=lambda sources: [active_agent])),
+                patch("app.save_pipeline.pipeline.route_query", return_value={"use_memory": True, "mode": "both", "intent": "balanced"}),
+                patch("app.save_pipeline.pipeline.load_settings", return_value={}),
+                patch("app.save_pipeline.pipeline.get_scene_references", return_value=[]),
+                patch("app.retrieval_pipeline.config.load_settings", return_value={"retrieval": {"min_reliability": 0}}),
+                patch("app.retrieval_pipeline.retriever.embed") as embed,
+            ):
+                default = await mcp_server.query_memories()
+                empty = await mcp_server.query_memories(query="")
+                no_items = await mcp_server.query_memories(max_items=0)
+                no_text = await mcp_server.query_memories(query="", max_chars=0)
+
+        self.assertEqual(default, empty)
+        self.assertEqual(len(default["memories"]), 6)
+        self.assertLessEqual(len(default["brief"]), 700)
+        self.assertEqual({(m["source_agent"], m["scene_id"]) for m in default["memories"]},
+                         {(r["source_agent"], r["scene_id"]) for r in default["scene_refs"]})
+        self.assertTrue(all(m.get("source_agent") and "text" not in m and "embedding" not in m
+                            for m in default["memories"]))
+        self.assertEqual(no_items["brief"], "")
+        self.assertEqual(no_items["memories"], [])
+        self.assertEqual(no_items["scene_refs"], [])
+        self.assertEqual(no_text["brief"], "")
+        self.assertLessEqual(len(no_text["memories"]), 6)
+        self.assertEqual({(m["source_agent"], m["scene_id"]) for m in no_text["memories"]},
+                         {(r["source_agent"], r["scene_id"]) for r in no_text["scene_refs"]})
+        embed.assert_not_called()
+
+    async def test_full_recent_query_keeps_existing_records(self):
+        records = [{"id": "s1:1:0", "text": "Full recent text", "scene_id": "scene-1"}]
+        with patch.object(mcp_server, "load_recent_memories", return_value=records), patch.object(
+            mcp_server, "scene_references_from_memories", return_value=[]
+        ):
+            payload = await mcp_server.query_memories(detail="full")
+        self.assertEqual(payload["memories"][0]["text"], "Full recent text")
+
+    async def test_query_passes_zero_brief_limits(self):
+        with patch.object(mcp_server, "retrieve_memory_brief", return_value={}) as recall:
+            await mcp_server.query_memories(query="test", max_items=0, max_chars=0)
+        self.assertEqual(recall.call_args.kwargs["max_items"], 0)
+        self.assertEqual(recall.call_args.kwargs["max_chars"], 0)
 
     async def test_get_scene_context_delegates_to_core_helper(self):
         expected = {"scene": {"scene_id": "s1:scene:e-1"}}
@@ -92,6 +208,11 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["memories"][0]["id"], "s1:1:0")
         self.assertEqual(payload["memories"][0]["source_event_ids"], ["e1"])
         mock_recent.assert_called_once_with(limit=5, session_id="s1")
+
+    async def test_recent_memories_rejects_unbounded_limit(self):
+        with patch.object(mcp_server, "load_recent_memories") as recent:
+            self.assertEqual((await mcp_server.get_recent_memories(limit=-1))["status_code"], 400)
+            recent.assert_not_called()
 
     async def test_inspect_clusters_delegates_to_cluster_helper(self):
         expected = {"clusters": []}
