@@ -118,6 +118,8 @@ class OptionalImportStartupTests(unittest.TestCase):
                     return None
 
             sys.meta_path.insert(0, BlockNetworkx())
+            import os
+            os.environ["TITAN_MCP_TOOL_PROFILE"] = "full"
             from entrypoints import mcp_server
 
             tools = asyncio.run(mcp_server.server.list_tools())

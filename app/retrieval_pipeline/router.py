@@ -1,37 +1,23 @@
-from typing import Dict, List
+import re
+from typing import Dict
 
 from .config import load_settings
 
 
-LEARNING_TRIGGERS = [
-    "how",
-    "pattern",
-    "rule",
-    "should",
-    "implement",
-    "best practice",
-    "decision",
-]
+# Only a direct instruction can disable recall. Mentions inside factual
+# questions ("why did 'no memory' appear?") must remain searchable.
+_QUOTED_TEXT = re.compile(r'''"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)''')
+_OPT_OUT = re.compile(
+    r"(?:^|[.!?;]\s+)(?:please\s+)?(?:for this (?:answer|query|request)[,:]?\s+)?"
+    r"(?:ignore memory|don['’]?t use memory|do not use memory|no memory|fresh only)"
+    r"(?=$|[,.!?;:]|\s+(?:for|in|on|this|please|and|to)\b)",
+    re.IGNORECASE,
+)
 
-ROUGH_TRIGGERS = [
-    "last time",
-    "previous",
-    "earlier",
-    "timeline",
-    "where did we leave",
-    "what happened",
-    "progress",
-    "history",
-]
 
-OPT_OUT_TRIGGERS = [
-    "ignore memory",
-    "dont use memory",
-    "don't use memory",
-    "do not use memory",
-    "fresh only",
-    "no memory",
-]
+def _contains_phrase(text: str, phrase: str) -> bool:
+    return re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", text) is not None
+
 
 INTENT_TRIGGERS = {
     "temporal": [
@@ -92,13 +78,11 @@ def route_query(query: str) -> Dict[str, object]:
     top_k = settings.get("retrieval_top_k", 8)
 
     lowered = query.lower().strip()
-    opt_out = any(trigger in lowered for trigger in OPT_OUT_TRIGGERS)
-    rough_match = any(trigger in lowered for trigger in ROUGH_TRIGGERS)
-    learning_match = any(trigger in lowered for trigger in LEARNING_TRIGGERS)
+    opt_out = bool(_OPT_OUT.search(_QUOTED_TEXT.sub(" ", lowered)))
 
     mode = "both"
     summary_mode = None
-    reason = "Ambiguous query; searching rough and learnings."
+    reason = "Searching rough and learnings; explicit mode filters streams."
 
     if opt_out:
         return {
@@ -110,15 +94,9 @@ def route_query(query: str) -> Dict[str, object]:
             "summary_mode": None,
         }
 
-    if rough_match and not learning_match:
-        mode = "rough"
-        reason = "Timeline query detected."
-        summary_mode = "timeline"
-    elif learning_match and not rough_match:
-        mode = "learnings"
-        reason = "Rule/pattern query detected."
-
     intent = route_intent(lowered)
+    if intent == "timeline":
+        summary_mode = "timeline"
 
     return {
         "schema_version": schema_version,
@@ -135,7 +113,7 @@ def route_intent(lowered_query: str) -> str:
     hits = {}
     for intent_name, triggers in INTENT_TRIGGERS.items():
         for trigger in triggers:
-            if trigger in lowered_query:
+            if _contains_phrase(lowered_query, trigger):
                 hits[intent_name] = hits.get(intent_name, 0) + 1
 
     if not hits:

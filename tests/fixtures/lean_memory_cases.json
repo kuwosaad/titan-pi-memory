@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-11-11",
+  "construction": "Human-readable cases constructed before experiment conclusions; fictional independent facts, not sampled from Titan audits or vector results.",
+  "embedding_notice": "Default embeddings are deterministic synthetic topic/word fixtures. They measure behavior under controlled candidates, never production semantic retrieval quality.",
+  "memories": [
+    {"id":"db", "text":"Project Aurora uses PostgreSQL for its primary database.", "scene_id":"aurora-architecture", "ts":"2026-02-03T09:00:00+00:00", "topics":["aurora","database"], "entities":["postgresql"]},
+    {"id":"cache", "text":"Project Aurora uses Redis for its cache.", "scene_id":"aurora-architecture", "ts":"2026-02-03T09:00:00+00:00", "topics":["aurora","cache"], "entities":["redis"]},
+    {"id":"explanation", "text":"Mira prefers short explanations with one concrete example before technical detail.", "scene_id":"style-session", "ts":"2026-02-04T09:00:00+00:00", "topics":["explanation","preference"]},
+    {"id":"old-deploy", "text":"Project Aurora deploys to Fly.io.", "scene_id":"deploy-before", "ts":"2026-01-02T09:00:00+00:00", "topics":["aurora","deployment"], "entities":["fly.io"]},
+    {"id":"new-deploy", "text":"Correction: Project Aurora now deploys to Render, replacing Fly.io.", "scene_id":"deploy-correction", "ts":"2026-03-02T09:00:00+00:00", "topics":["aurora","deployment"], "entities":["render","fly.io"]},
+    {"id":"no-weekends", "text":"Mira does not want production deployments on weekends.", "scene_id":"release-policy", "ts":"2026-03-03T09:00:00+00:00", "topics":["deployment","weekend","preference"]},
+    {"id":"port-aurora", "text":"Project Aurora's staging API listens on port 4100.", "scene_id":"ports", "ts":"2026-03-04T09:00:00+00:00", "topics":["aurora","port"], "entities":["4100"]},
+    {"id":"port-boreal", "text":"Project Boreal's staging API listens on port 4200.", "scene_id":"ports", "ts":"2026-03-04T09:00:00+00:00", "topics":["boreal","port"], "entities":["4200"]},
+    {"id":"personal-python", "text":"Mira prefers Python for personal automation scripts.", "scene_id":"language-scope", "ts":"2026-03-05T09:00:00+00:00", "topics":["personal","language","preference"], "entities":["python"]},
+    {"id":"work-typescript", "text":"Mira uses TypeScript for team web services at work.", "scene_id":"language-scope", "ts":"2026-03-05T09:00:00+00:00", "topics":["work","language"], "entities":["typescript"]},
+    {"id":"deadline-one", "text":"The Aurora beta launch is scheduled for 18 April 2026.", "scene_id":"launch-meeting", "ts":"2026-03-06T09:00:00+00:00", "topics":["aurora","deadline"], "entities":["18","april","2026"]},
+    {"id":"deadline-two", "text":"The Aurora beta launch is scheduled for 18 April 2026.", "scene_id":"launch-email", "ts":"2026-03-07T09:00:00+00:00", "topics":["aurora","deadline"], "entities":["18","april","2026"]},
+    {"id":"budget", "text":"The Boreal prototype budget is 900 euros, approved by Lena on 9 March 2026.", "scene_id":"budget-approval", "ts":"2026-03-09T09:00:00+00:00", "topics":["boreal","budget"], "entities":["900","euros","lena"]},
+    {"id":"editor", "text":"Mira's preferred editor is Neovim.", "scene_id":"tools", "ts":"2026-03-10T09:00:00+00:00", "topics":["editor","preference"], "entities":["neovim"]}
+  ],
+  "queries": [
+    {"id":"fact", "query":"Which primary database does Project Aurora use?", "topics":["aurora","database"], "entities":["postgresql"], "expected":["db"], "top_k":1},
+    {"id":"paraphrase", "query":"Where does Aurora keep relational application records?", "topics":["aurora","database"], "expected":["db"], "top_k":1},
+    {"id":"preference", "query":"How should I explain a technical idea to Mira?", "topics":["explanation","preference"], "expected":["explanation"], "top_k":1},
+    {"id":"multi-facet", "query":"What database and cache does Aurora use?", "topics":["aurora","database","cache"], "expected":["db","cache"], "top_k":2},
+    {"id":"correction", "query":"Where does Aurora deploy now, after the hosting correction?", "topics":["aurora","deployment"], "entities":["render"], "expected":["new-deploy"], "forbidden":["old-deploy"], "top_k":1},
+    {"id":"negative-preference", "query":"Does Mira want weekend production deployments?", "topics":["deployment","weekend","preference"], "expected":["no-weekends"], "top_k":1},
+    {"id":"numeric-entity", "query":"What is Aurora's staging API port?", "topics":["aurora","port"], "expected":["port-aurora"], "forbidden":["port-boreal"], "top_k":1},
+    {"id":"entity-boreal", "query":"What is Boreal's staging API port?", "topics":["boreal","port"], "expected":["port-boreal"], "forbidden":["port-aurora"], "top_k":1},
+    {"id":"scope-personal", "query":"Which language does Mira prefer for personal automation?", "topics":["personal","language","preference"], "expected":["personal-python"], "forbidden":["work-typescript"], "top_k":1},
+    {"id":"scope-work", "query":"Which language does Mira use for team web services?", "topics":["work","language"], "expected":["work-typescript"], "forbidden":["personal-python"], "top_k":1},
+    {"id":"repeated-evidence", "query":"When is Aurora's beta launch, and which scenes support that date?", "topics":["aurora","deadline"], "expected":["deadline-one","deadline-two"], "top_k":3},
+    {"id":"date-source", "query":"Who approved Boreal's 900 euro prototype budget, and when?", "topics":["boreal","budget"], "entities":["900","lena"], "expected":["budget"], "top_k":1},
+    {"id":"no-answer", "query":"What is Mira's passport number?", "topics":["passport"], "expected":[], "top_k":2}
+  ],
+  "capture_cases": [
+    {"id":"polite-save", "goal":"Please remember that my preferred editor is Neovim. Thanks!", "outcome":"I will remember your editor preference.", "should_extract":true},
+    {"id":"brief-save", "goal":"Remember: I prefer direct feedback on design proposals.", "outcome":"Understood.", "should_extract":true},
+    {"id":"polite-only", "goal":"Thanks, that's helpful!", "outcome":"You're welcome!", "should_extract":false},
+    {"id":"transport-only", "goal":"Goal: Conversation: hello\nThoughts: hello\nTool Calls: []\nIntent Phrase: telegram inbound memory capture\nContext: {'conversation_key': 'telegram:default:telegram:123456789'}", "outcome":"Outcome: User message in conversation with Aster", "should_extract":false},
+    {"id":"decision", "goal":"We decided to keep the Boreal prototype budget below 900 euros.", "outcome":"The budget limit is recorded.", "should_extract":true}
+  ]
+}

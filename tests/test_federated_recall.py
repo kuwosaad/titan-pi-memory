@@ -58,7 +58,7 @@ def memory(memory_id, text, **extra):
 def test_every_agent_defaults_to_all_known_namespaces_and_prefers_active_duplicate():
     repos = {
         "codex": MemoryRepo(recent=[memory("c1", "same text", ts="2026-01-01T00:00:00+00:00")]),
-        "pi": MemoryRepo(recent=[memory("p1", "  SAME   TEXT ", ts="2026-02-01T00:00:00+00:00"), memory("p2", "pi only")]),
+        "pi": MemoryRepo(recent=[memory("p1", "  same text ", ts="2026-02-01T00:00:00+00:00"), memory("p2", "pi only")]),
         "grok": MemoryRepo(recent=[memory("g1", "grok only")]),
     }
     recall = FederatedRecall(active_agent="pi", memory_repositories=repos)
@@ -112,7 +112,7 @@ def test_tied_federated_results_do_not_depend_on_source_order():
 
 def test_exact_duplicates_keep_source_qualified_evidence_without_mutating_repositories():
     active = memory("shared", "Same text", scene_id="scene-active")
-    foreign = memory("shared", " same  TEXT ", scene_id="scene-foreign")
+    foreign = memory("shared", " Same text ", scene_id="scene-foreign")
     original = deepcopy([active, foreign])
     repos = {"codex": MemoryRepo(recent=[active]), "pi": MemoryRepo(recent=[foreign])}
     recall = FederatedRecall(active_agent="codex", memory_repositories=repos)

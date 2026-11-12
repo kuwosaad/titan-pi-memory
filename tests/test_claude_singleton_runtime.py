@@ -239,8 +239,7 @@ def test_one_daemon_serves_multiple_mcp_clients(monkeypatch, tmp_path):
             first, second = await asyncio.gather(_remote_tools(state), _remote_tools(again))
             assert again.pid == state.pid
             assert first == second
-            assert len(first) == 18
-            assert {"query_memories", "store_trace_event", "get_scene_context"}.issubset(first)
+            assert set(first) == {"query_memories", "store_trace_packet", "get_scene_context", "doctor"}
             if os.name != "nt":
                 assert state_path(state.agent_name).stat().st_mode & 0o077 == 0
             unauthorized = httpx.get(f"http://127.0.0.1:{state.port}/health", timeout=1)
@@ -284,6 +283,8 @@ def test_one_daemon_serves_multiple_mcp_clients(monkeypatch, tmp_path):
 
 def test_stdio_proxy_mirrors_tools_and_blocks_external_pattern_paths(monkeypatch, tmp_path):
     env = _configure(monkeypatch, tmp_path, "claude-proxy-test")
+    monkeypatch.setenv("TITAN_MCP_TOOL_PROFILE", "full")
+    env["TITAN_MCP_TOOL_PROFILE"] = "full"
 
     async def exercise() -> None:
         params = StdioServerParameters(command=sys.executable, args=[str(LAUNCHER)], env=env, cwd=ROOT)

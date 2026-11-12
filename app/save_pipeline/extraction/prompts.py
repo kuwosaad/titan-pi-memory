@@ -73,7 +73,11 @@ Keep mechanism, execution outcome, and verification as separate memories only wh
 SELECTION_BLOCK = """<selection>
 Keep stable preferences and constraints, accepted decisions, committed plans, actual implementation states, verification evidence, root causes, fixes, durable warnings, deferrals, failures, and superseding updates.
 
-An assistant suggestion is not the user's decision unless the user accepts it. An assistant action report may support an action memory, but its confidence still comes from the source metadata.
+Scan the whole exchange, including secondary clauses in mixed-topic messages, for independently useful explicit facts and identity or state updates. Preserve concrete amounts, ages, dates, counts, rates, and frequencies when useful for future questions, even when another topic dominates the exchange. Retain whether a value is exact or approximate and its subject and time context; do not turn an estimate into an exact value or infer missing details. Apply the same durability and privacy filters, and do not duplicate facts merely to cover these categories.
+
+Before selecting, check each topic and side clause for a distinct qualifying fact, including completed events and original values; do not let the main question or response obscure them.
+
+Attribute each claim to the speaker who actually stated it; do not turn an assistant statement into a user fact. An assistant suggestion is not the user's decision unless the user accepts it. An assistant action report may support an action memory, but its confidence still comes from the source metadata.
 
 Return no memory for greetings, praise, conversational glue, generic planning narration, temporary moods, uncommitted exploration, unsupported speculation, transport metadata, or details that only make retrieval noisier.
 
@@ -92,15 +96,31 @@ If an exchange contradicts an older state, write an explicit update containing "
 </metadata>"""
 
 
+MEMORY_FEATURES_BLOCK = """<memory_updates_and_time>
+When explicit, include subject (named entity), scope (project/environment or personal), and attribute (the property being stated). Omit unclear slots.
+For an explicitly dated occurrence, optionally include event_date as YYYY-MM-DD or YYYY-MM, and event_evidence as an exact current-source quote containing that date. A capture timestamp is not an occurrence date. Leave dates absent when unknown.
+Only when read-only comparison memories are supplied, an explicit current correction may include supersedes (one supplied old memory id) and correction_evidence (an exact current user quote proving replacement). Subject, scope and attribute must match. Quotations of old statements, hypotheses, plans, different environments and compatible additions do not supersede facts. Ambiguity means keep both. Never extract comparison context as a new fact or cite it as current evidence.
+</memory_updates_and_time>"""
+
+
 OUTPUT_BLOCK = """<output_format>
-Return strict JSON exactly matching:
+Return strict JSON with this top-level shape and base memory fields:
 {"memories": [{"text": string, "type": string, "stream": "rough"|"learnings", "source": "user"|"assistant"|"mixed", "speaker_focus": "user"|"assistant"|"shared"|"system", "memory_kind": "user_fact"|"user_preference"|"task"|"decision"|"commitment"|"outcome"|"relationship"|"workflow"|"issue", "evidence_refs": [string]}]}
 
-`evidence_refs` uses only the short labels shown in the scene projection, such as `m1` for a projected message or `t1` for compact tool evidence. Omit it only when no label can honestly support the memory. Never invent labels or use event IDs that are not shown. Use the smallest useful set, usually 0 to 4 memories and never more than 10. Use {"memories": []} when nothing qualifies. Add no keys, commentary, reasoning, or Markdown.
+`evidence_refs` uses only the short labels shown in the scene projection, such as `m1` for a projected message or `t1` for compact tool evidence. Omit it only when no label can honestly support the memory. Never invent labels or use event IDs that are not shown. Use the smallest useful set, usually 0 to 4 memories and never more than 10. Use {"memories": []} when nothing qualifies. Each memory may additionally include these optional string fields when supported: subject, scope, attribute, event_date, event_evidence, supersedes, correction_evidence. Omit unsupported optional fields. Add no other keys, commentary, reasoning, or Markdown.
 </output_format>"""
 
 
 EXAMPLES_BLOCK = """<examples>
+<example>
+User: Should I explore a new career in design? I finished a ceramics course last month, and my bicycle originally cost about $720.
+Assistant: You could try a design workshop first.
+Output: {"memories":[
+  {"text":"The user finished a ceramics course last month.","type":"fact","stream":"rough","source":"user","speaker_focus":"user","memory_kind":"outcome"},
+  {"text":"The user's bicycle originally cost about $720.","type":"fact","stream":"rough","source":"user","speaker_focus":"user","memory_kind":"user_fact"}
+]}
+</example>
+
 <example>
 User: Preference research is finished. Model training has not started; we plan to begin next week.
 Assistant: Understood.
@@ -161,6 +181,7 @@ def build_extract_system_prompt(
             MEMORY_CONTRACT_BLOCK,
             SELECTION_BLOCK,
             METADATA_BLOCK,
+            MEMORY_FEATURES_BLOCK,
             OUTPUT_BLOCK,
             EXAMPLES_BLOCK,
         ]

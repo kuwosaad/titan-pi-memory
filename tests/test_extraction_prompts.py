@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from app.save_pipeline.extraction.prompts import (
@@ -21,6 +22,18 @@ class ExtractionPromptTests(unittest.TestCase):
         self.assertIn("smallest useful set", prompt)
         self.assertNotIn("<user_side_lens>", prompt)
         self.assertNotIn("<negative_prompting>", prompt)
+
+    def test_mixed_topic_example_keeps_independent_user_facts(self):
+        prompt = build_extract_system_prompt()
+        self.assertIn("check each topic and side clause", prompt)
+        example = prompt.split("<example>", 1)[1].split("</example>", 1)[0]
+        memories = json.loads(example.split("Output: ", 1)[1])["memories"]
+
+        self.assertEqual(len(memories), 2)
+        self.assertIn("finished a ceramics course", memories[0]["text"])
+        self.assertIn("originally cost about $720", memories[1]["text"])
+        self.assertTrue(all(m["source"] == "user" and m["speaker_focus"] == "user"
+                            for m in memories))
 
     def test_messages_keep_policy_and_exchange_in_separate_roles(self):
         messages = build_extract_messages(

@@ -20,6 +20,11 @@ class MemoryStore(Protocol):
     """Feature-complete durable memory query/append contract."""
 
     def append_memories(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Atomically append, returning one persisted canonical record per input.
+
+        Exact evidence retries may return an older ID. Immutable-ID collisions
+        reject the whole batch; returned IDs always address durable records.
+        """
         ...
 
     def load_all_memories(self) -> List[Dict[str, Any]]:

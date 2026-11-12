@@ -1,0 +1,632 @@
+{
+  "baseline_commit": "b2c134c",
+  "limits": "Frozen fictional 14-record, 13-query sample. No production accuracy, extraction-model quality, throughput, or disk-space claim. Both versions fail local no-answer abstention.",
+  "reports": {
+    "synthetic": {
+      "raw_report_sha256": "e85322e5044655a24b3301725f4fa9fe9033da2bd7cdbbdf522cb036b5ff628f",
+      "fixture_sha256": "62a75dc2d9a75887d402bff0b1af77584ef6d7c4c7ae7785e586c9387904f188",
+      "repeats_after_first": 5,
+      "results": [
+        {
+          "label": "baseline",
+          "ablation": "default",
+          "configured_step2": true,
+          "embedding_mode": "synthetic_controlled_fixture",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "e4e6dd6cb4363cb9fa3150452fc36f4d60ac38f10d5205127af10aee200d6daa",
+          "seed_embedding_sha256": "711028e9048ba8939e60533d36fefe11dbd7a0940314e0ae8bad0ed24f5b4f9c",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 1.0,
+            "bootstrap_import_ms": 224.3100420000701,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 5,
+            "capture_passes": 4,
+            "embedding_input_bytes": 4896,
+            "embedding_provider_calls": 78,
+            "embedding_provider_inputs": 102,
+            "evidence_retention": 0.8571428571428571,
+            "false_negative": 2,
+            "false_positive": 2,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 6.788707999930921,
+              "p95_ms": 57.130858400068824
+            },
+            "precision": 0.8571428571428571,
+            "query_count": 13,
+            "query_passes": 11,
+            "recall": 0.8571428571428571,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 0,
+            "seed_ms": 29.655791000095633,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 96630,
+            "sqlite_bytes_after_capture": 360448,
+            "steady_query": {
+              "n": 65,
+              "p50_ms": 5.881374999717082,
+              "p95_ms": 9.220800600269285
+            },
+            "total_embedding_provider_calls_including_seed": 84,
+            "true_positive": 12
+          }
+        },
+        {
+          "label": "baseline",
+          "ablation": "on",
+          "configured_step2": true,
+          "embedding_mode": "synthetic_controlled_fixture",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "e4e6dd6cb4363cb9fa3150452fc36f4d60ac38f10d5205127af10aee200d6daa",
+          "seed_embedding_sha256": "711028e9048ba8939e60533d36fefe11dbd7a0940314e0ae8bad0ed24f5b4f9c",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 1.0,
+            "bootstrap_import_ms": 207.24108300009902,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 5,
+            "capture_passes": 4,
+            "embedding_input_bytes": 4896,
+            "embedding_provider_calls": 78,
+            "embedding_provider_inputs": 102,
+            "evidence_retention": 0.8571428571428571,
+            "false_negative": 2,
+            "false_positive": 2,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 5.704833999971015,
+              "p95_ms": 34.98045860005725
+            },
+            "precision": 0.8571428571428571,
+            "query_count": 13,
+            "query_passes": 11,
+            "recall": 0.8571428571428571,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 0,
+            "seed_ms": 34.731749999991735,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 96630,
+            "sqlite_bytes_after_capture": 360448,
+            "steady_query": {
+              "n": 65,
+              "p50_ms": 4.982959000244591,
+              "p95_ms": 14.472432999900773
+            },
+            "total_embedding_provider_calls_including_seed": 84,
+            "true_positive": 12
+          }
+        },
+        {
+          "label": "baseline",
+          "ablation": "off",
+          "configured_step2": false,
+          "embedding_mode": "synthetic_controlled_fixture",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "e4e6dd6cb4363cb9fa3150452fc36f4d60ac38f10d5205127af10aee200d6daa",
+          "seed_embedding_sha256": "711028e9048ba8939e60533d36fefe11dbd7a0940314e0ae8bad0ed24f5b4f9c",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 1.0,
+            "bootstrap_import_ms": 271.4040420000856,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 5,
+            "capture_passes": 4,
+            "embedding_input_bytes": 4896,
+            "embedding_provider_calls": 78,
+            "embedding_provider_inputs": 102,
+            "evidence_retention": 0.8571428571428571,
+            "false_negative": 2,
+            "false_positive": 2,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 4.906666999886511,
+              "p95_ms": 15.618091800206432
+            },
+            "precision": 0.8571428571428571,
+            "query_count": 13,
+            "query_passes": 11,
+            "recall": 0.8571428571428571,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 0,
+            "seed_ms": 26.904083999852446,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 94830,
+            "sqlite_bytes_after_capture": 360448,
+            "steady_query": {
+              "n": 65,
+              "p50_ms": 4.411666999658337,
+              "p95_ms": 8.77569999975094
+            },
+            "total_embedding_provider_calls_including_seed": 84,
+            "true_positive": 12
+          }
+        },
+        {
+          "label": "experiment",
+          "ablation": "default",
+          "configured_step2": false,
+          "embedding_mode": "synthetic_controlled_fixture",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "4079239edfecbea1a245d1846ddf5a864f8183d25ac02e92b76ddd0bb0ab8e1c",
+          "seed_embedding_sha256": "711028e9048ba8939e60533d36fefe11dbd7a0940314e0ae8bad0ed24f5b4f9c",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 1.0,
+            "bootstrap_import_ms": 171.49474999996528,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 3,
+            "capture_passes": 5,
+            "embedding_input_bytes": 4896,
+            "embedding_provider_calls": 78,
+            "embedding_provider_inputs": 102,
+            "evidence_retention": 1.0,
+            "false_negative": 0,
+            "false_positive": 2,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 6.714874999943277,
+              "p95_ms": 25.2751834002083
+            },
+            "precision": 0.875,
+            "query_count": 13,
+            "query_passes": 12,
+            "recall": 1.0,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 4,
+            "seed_ms": 42.04529199978424,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 101550,
+            "sqlite_bytes_after_capture": 360448,
+            "steady_query": {
+              "n": 65,
+              "p50_ms": 8.363833000203158,
+              "p95_ms": 19.65509120009301
+            },
+            "total_embedding_provider_calls_including_seed": 82,
+            "true_positive": 14
+          }
+        },
+        {
+          "label": "experiment",
+          "ablation": "on",
+          "configured_step2": true,
+          "embedding_mode": "synthetic_controlled_fixture",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "4079239edfecbea1a245d1846ddf5a864f8183d25ac02e92b76ddd0bb0ab8e1c",
+          "seed_embedding_sha256": "711028e9048ba8939e60533d36fefe11dbd7a0940314e0ae8bad0ed24f5b4f9c",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 1.0,
+            "bootstrap_import_ms": 142.7949579997403,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 3,
+            "capture_passes": 5,
+            "embedding_input_bytes": 4896,
+            "embedding_provider_calls": 78,
+            "embedding_provider_inputs": 102,
+            "evidence_retention": 1.0,
+            "false_negative": 0,
+            "false_positive": 2,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 5.117208000228857,
+              "p95_ms": 31.631792199823312
+            },
+            "precision": 0.875,
+            "query_count": 13,
+            "query_passes": 12,
+            "recall": 1.0,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 4,
+            "seed_ms": 29.997125000136293,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 103350,
+            "sqlite_bytes_after_capture": 360448,
+            "steady_query": {
+              "n": 65,
+              "p50_ms": 5.457959000068513,
+              "p95_ms": 7.821099600005254
+            },
+            "total_embedding_provider_calls_including_seed": 82,
+            "true_positive": 14
+          }
+        },
+        {
+          "label": "experiment",
+          "ablation": "off",
+          "configured_step2": false,
+          "embedding_mode": "synthetic_controlled_fixture",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "4079239edfecbea1a245d1846ddf5a864f8183d25ac02e92b76ddd0bb0ab8e1c",
+          "seed_embedding_sha256": "711028e9048ba8939e60533d36fefe11dbd7a0940314e0ae8bad0ed24f5b4f9c",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 1.0,
+            "bootstrap_import_ms": 137.3953329998585,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 3,
+            "capture_passes": 5,
+            "embedding_input_bytes": 4896,
+            "embedding_provider_calls": 78,
+            "embedding_provider_inputs": 102,
+            "evidence_retention": 1.0,
+            "false_negative": 0,
+            "false_positive": 2,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 4.947834000176954,
+              "p95_ms": 10.809099800280816
+            },
+            "precision": 0.875,
+            "query_count": 13,
+            "query_passes": 12,
+            "recall": 1.0,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 4,
+            "seed_ms": 28.90566599990052,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 101550,
+            "sqlite_bytes_after_capture": 360448,
+            "steady_query": {
+              "n": 65,
+              "p50_ms": 4.438250000021071,
+              "p95_ms": 6.49285859972224
+            },
+            "total_embedding_provider_calls_including_seed": 82,
+            "true_positive": 14
+          }
+        }
+      ]
+    },
+    "local": {
+      "raw_report_sha256": "55b53523363bda2d57d3376ca20f7749d770f2e6a12ba7dc371288beedb7ab9b",
+      "fixture_sha256": "62a75dc2d9a75887d402bff0b1af77584ef6d7c4c7ae7785e586c9387904f188",
+      "repeats_after_first": 3,
+      "results": [
+        {
+          "label": "baseline",
+          "ablation": "default",
+          "configured_step2": true,
+          "embedding_mode": "explicit_local_provider",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "e4e6dd6cb4363cb9fa3150452fc36f4d60ac38f10d5205127af10aee200d6daa",
+          "seed_embedding_sha256": "e8287e29588f5fd33a4f56417bff1291b1f0f5ea6c78bdbddf391233c6b21e4f",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 0.0,
+            "bootstrap_import_ms": 221.74883399975442,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 5,
+            "capture_passes": 4,
+            "embedding_input_bytes": 3264,
+            "embedding_provider_calls": 52,
+            "embedding_provider_inputs": 68,
+            "evidence_retention": 0.8571428571428571,
+            "false_negative": 2,
+            "false_positive": 5,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 27.89637500018216,
+              "p95_ms": 63.69932499992495
+            },
+            "precision": 0.7058823529411765,
+            "query_count": 13,
+            "query_passes": 10,
+            "recall": 0.8571428571428571,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 0,
+            "seed_ms": 212.76499999976295,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 74836,
+            "sqlite_bytes_after_capture": 421888,
+            "steady_query": {
+              "n": 39,
+              "p50_ms": 25.228708000213373,
+              "p95_ms": 40.76203389990951
+            },
+            "total_embedding_provider_calls_including_seed": 58,
+            "true_positive": 12
+          }
+        },
+        {
+          "label": "baseline",
+          "ablation": "on",
+          "configured_step2": true,
+          "embedding_mode": "explicit_local_provider",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "e4e6dd6cb4363cb9fa3150452fc36f4d60ac38f10d5205127af10aee200d6daa",
+          "seed_embedding_sha256": "e8287e29588f5fd33a4f56417bff1291b1f0f5ea6c78bdbddf391233c6b21e4f",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 0.0,
+            "bootstrap_import_ms": 193.53591700019024,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 5,
+            "capture_passes": 4,
+            "embedding_input_bytes": 3264,
+            "embedding_provider_calls": 52,
+            "embedding_provider_inputs": 68,
+            "evidence_retention": 0.8571428571428571,
+            "false_negative": 2,
+            "false_positive": 5,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 31.212916000185942,
+              "p95_ms": 55.25359200019006
+            },
+            "precision": 0.7058823529411765,
+            "query_count": 13,
+            "query_passes": 10,
+            "recall": 0.8571428571428571,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 0,
+            "seed_ms": 172.58087499976682,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 74836,
+            "sqlite_bytes_after_capture": 421888,
+            "steady_query": {
+              "n": 39,
+              "p50_ms": 23.613750000095024,
+              "p95_ms": 37.6638080002067
+            },
+            "total_embedding_provider_calls_including_seed": 58,
+            "true_positive": 12
+          }
+        },
+        {
+          "label": "baseline",
+          "ablation": "off",
+          "configured_step2": false,
+          "embedding_mode": "explicit_local_provider",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "e4e6dd6cb4363cb9fa3150452fc36f4d60ac38f10d5205127af10aee200d6daa",
+          "seed_embedding_sha256": "e8287e29588f5fd33a4f56417bff1291b1f0f5ea6c78bdbddf391233c6b21e4f",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 0.0,
+            "bootstrap_import_ms": 218.82041700018817,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 5,
+            "capture_passes": 4,
+            "embedding_input_bytes": 3264,
+            "embedding_provider_calls": 52,
+            "embedding_provider_inputs": 68,
+            "evidence_retention": 0.8571428571428571,
+            "false_negative": 2,
+            "false_positive": 5,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 25.048332999631384,
+              "p95_ms": 38.700033399982196
+            },
+            "precision": 0.7058823529411765,
+            "query_count": 13,
+            "query_passes": 10,
+            "recall": 0.8571428571428571,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 0,
+            "seed_ms": 164.03604200013433,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 72056,
+            "sqlite_bytes_after_capture": 421888,
+            "steady_query": {
+              "n": 39,
+              "p50_ms": 25.275666000197816,
+              "p95_ms": 37.84811669988812
+            },
+            "total_embedding_provider_calls_including_seed": 58,
+            "true_positive": 12
+          }
+        },
+        {
+          "label": "experiment",
+          "ablation": "default",
+          "configured_step2": false,
+          "embedding_mode": "explicit_local_provider",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "4079239edfecbea1a245d1846ddf5a864f8183d25ac02e92b76ddd0bb0ab8e1c",
+          "seed_embedding_sha256": "e8287e29588f5fd33a4f56417bff1291b1f0f5ea6c78bdbddf391233c6b21e4f",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 0.0,
+            "bootstrap_import_ms": 200.15445799981535,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 3,
+            "capture_passes": 5,
+            "embedding_input_bytes": 3264,
+            "embedding_provider_calls": 52,
+            "embedding_provider_inputs": 68,
+            "evidence_retention": 1.0,
+            "false_negative": 0,
+            "false_positive": 4,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 22.0187499999156,
+              "p95_ms": 40.06851659987659
+            },
+            "precision": 0.7777777777777778,
+            "query_count": 13,
+            "query_passes": 11,
+            "recall": 1.0,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 4,
+            "seed_ms": 178.38412500032064,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 73668,
+            "sqlite_bytes_after_capture": 421888,
+            "steady_query": {
+              "n": 39,
+              "p50_ms": 20.56108300030246,
+              "p95_ms": 39.721187499935695
+            },
+            "total_embedding_provider_calls_including_seed": 56,
+            "true_positive": 14
+          }
+        },
+        {
+          "label": "experiment",
+          "ablation": "on",
+          "configured_step2": true,
+          "embedding_mode": "explicit_local_provider",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "4079239edfecbea1a245d1846ddf5a864f8183d25ac02e92b76ddd0bb0ab8e1c",
+          "seed_embedding_sha256": "e8287e29588f5fd33a4f56417bff1291b1f0f5ea6c78bdbddf391233c6b21e4f",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 0.0,
+            "bootstrap_import_ms": 153.8511670000844,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 3,
+            "capture_passes": 5,
+            "embedding_input_bytes": 3264,
+            "embedding_provider_calls": 52,
+            "embedding_provider_inputs": 68,
+            "evidence_retention": 1.0,
+            "false_negative": 0,
+            "false_positive": 4,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 26.56662499975937,
+              "p95_ms": 60.10488339970829
+            },
+            "precision": 0.7777777777777778,
+            "query_count": 13,
+            "query_passes": 11,
+            "recall": 1.0,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 4,
+            "seed_ms": 179.40158400006112,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 76476,
+            "sqlite_bytes_after_capture": 421888,
+            "steady_query": {
+              "n": 39,
+              "p50_ms": 26.02508400013903,
+              "p95_ms": 41.979666399947746
+            },
+            "total_embedding_provider_calls_including_seed": 56,
+            "true_positive": 14
+          }
+        },
+        {
+          "label": "experiment",
+          "ablation": "off",
+          "configured_step2": false,
+          "embedding_mode": "explicit_local_provider",
+          "embedding_model": "nomic-embed-text:v1.5",
+          "runtime_source_sha256": "4079239edfecbea1a245d1846ddf5a864f8183d25ac02e92b76ddd0bb0ab8e1c",
+          "seed_embedding_sha256": "e8287e29588f5fd33a4f56417bff1291b1f0f5ea6c78bdbddf391233c6b21e4f",
+          "isolation": {
+            "blocked_network_attempts": [],
+            "bytecode_disabled": true,
+            "fresh_titan_home": true,
+            "source_unchanged_during_run": true
+          },
+          "metrics": {
+            "abstention_accuracy": 0.0,
+            "bootstrap_import_ms": 204.55070800016983,
+            "capture_count": 5,
+            "capture_embedding_provider_calls": 3,
+            "capture_passes": 5,
+            "embedding_input_bytes": 3264,
+            "embedding_provider_calls": 52,
+            "embedding_provider_inputs": 68,
+            "evidence_retention": 1.0,
+            "false_negative": 0,
+            "false_positive": 4,
+            "first_query_per_case": {
+              "n": 13,
+              "p50_ms": 19.141334000323695,
+              "p95_ms": 41.33299160002934
+            },
+            "precision": 0.7777777777777778,
+            "query_count": 13,
+            "query_passes": 11,
+            "recall": 1.0,
+            "response_schema_errors": 0,
+            "schema_count": 4,
+            "schema_passes": 4,
+            "seed_ms": 167.39387500001612,
+            "seed_provider_calls": 1,
+            "serialized_response_bytes": 73668,
+            "sqlite_bytes_after_capture": 421888,
+            "steady_query": {
+              "n": 39,
+              "p50_ms": 19.209832999877108,
+              "p95_ms": 41.718637499707256
+            },
+            "total_embedding_provider_calls_including_seed": 56,
+            "true_positive": 14
+          }
+        }
+      ]
+    }
+  }
+}

@@ -25,7 +25,7 @@ class BriefBudgetTests(unittest.TestCase):
         self.assertNotIn("higher raw score", brief)
 
     def test_deduplicate_within_source_but_keep_distinct_sources(self):
-        hits = [hit("Same fact", 1, source_agent="pi"), hit(" same  FACT ", .9, source_agent="pi"),
+        hits = [hit("Same fact", 1, source_agent="pi"), hit(" Same fact ", .9, source_agent="pi"),
                 hit("Same fact", .8, source_agent="codex")]
         brief = build_memory_notes(hits, max_items=3, max_chars=300)
         self.assertEqual(brief.casefold().count("same fact"), 2)

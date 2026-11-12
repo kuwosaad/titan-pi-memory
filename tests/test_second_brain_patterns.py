@@ -42,19 +42,23 @@ def test_runtime_settings_control_pattern_retrieval(tmp_path):
         assert len(retrieve_accepted_patterns("billing", db_path=path, record_applications=False)) == 1
 
 
-def test_no_record_lookup_is_read_only_and_default_keeps_logging(tmp_path):
+def test_lookup_is_read_only_by_default_and_logging_is_opt_in(tmp_path):
     path = tmp_path / "patterns.db"
     store = _store(path)
     context = _context(tmp_path, "patterns:\n  enabled: true\n  retrieve_limit: 2\n")
     before = path.stat().st_mtime_ns
     with patch("app.retrieval_pipeline.config.get_runtime_context", return_value=context):
-        hits = retrieve_accepted_patterns("billing", db_path=path, record_applications=False)
+        hits = retrieve_accepted_patterns("billing", db_path=path)
         assert len(hits) == 2
         assert store.list_applications() == []
         assert path.stat().st_mtime_ns == before
         record_pattern_applications("billing", hits[:1], db_path=path)
-        assert [a.pattern_id for a in store.list_applications()] == [hits[0]["pattern"]["id"]]
-        retrieve_accepted_patterns("billing", db_path=path)
+        assert store.list_applications() == []
+        retrieve_accepted_patterns("billing", db_path=path, record_applications=True)
+    assert len(store.list_applications()) == 2
+    context = _context(tmp_path, "patterns:\n  enabled: true\n  record_applications_on_retrieval: true\n")
+    with patch("app.retrieval_pipeline.config.get_runtime_context", return_value=context):
+        record_pattern_applications("billing", hits[:1], db_path=path)
     assert len(store.list_applications()) == 3
     with pytest.raises(sqlite3.OperationalError):
         PatternStore(path, initialize=False).record_application(PatternApplication(pattern_id=hits[0]["pattern"]["id"], query="x"))

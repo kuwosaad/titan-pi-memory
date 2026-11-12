@@ -10,7 +10,7 @@ class ExtractionFallbackTests(unittest.TestCase):
             patch("app.save_pipeline.pipeline.get_extraction_adapter", return_value=object()),
             patch("app.save_pipeline.pipeline.extract_atomic_memories", return_value=[]),
             patch("app.save_pipeline.pipeline.embed", return_value=[]),
-            patch("app.save_pipeline.pipeline.append_memories"),
+            patch("app.save_pipeline.pipeline.append_memories", side_effect=lambda records: records),
             patch("app.save_pipeline.pipeline.append_memory_notes"),
         ):
             outcome = run_memory_pipeline_outcome(
@@ -31,7 +31,7 @@ class ExtractionFallbackTests(unittest.TestCase):
             patch("app.save_pipeline.pipeline.get_extraction_adapter", return_value=object()),
             patch("app.save_pipeline.pipeline.extract_atomic_memories") as extract_atomic_memories,
             patch("app.save_pipeline.pipeline.embed", return_value=[]),
-            patch("app.save_pipeline.pipeline.append_memories"),
+            patch("app.save_pipeline.pipeline.append_memories", side_effect=lambda records: records),
             patch("app.save_pipeline.pipeline.append_memory_notes"),
         ):
             outcome = run_memory_pipeline_outcome(

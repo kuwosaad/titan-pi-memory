@@ -203,7 +203,7 @@ class ScenePipelineTests(unittest.TestCase):
                 return_value=[{"text": "Use session_id and event_id for dedupe.", "stream": "learnings", "type": "decision"}],
             ),
             patch("app.save_pipeline.pipeline.embed", return_value=[]),
-            patch("app.save_pipeline.pipeline.append_memories") as mock_append_memories,
+            patch("app.save_pipeline.pipeline.append_memories", side_effect=lambda records: records) as mock_append_memories,
             patch("app.save_pipeline.pipeline.append_scene") as mock_append_scene,
             patch("app.save_pipeline.pipeline.append_memory_notes"),
         ):
@@ -369,7 +369,7 @@ class ScenePipelineTests(unittest.TestCase):
             ),
             patch("app.save_pipeline.pipeline.embed", return_value=[]),
             patch("app.save_pipeline.pipeline.load_settings", return_value={"verification": {"enabled": False}}),
-            patch("app.save_pipeline.pipeline.append_memories") as append_memories,
+            patch("app.save_pipeline.pipeline.append_memories", side_effect=lambda records: records) as append_memories,
             patch("app.save_pipeline.pipeline.append_scene"),
             patch("app.save_pipeline.pipeline.append_memory_notes"),
         ):
@@ -1195,7 +1195,7 @@ class ScenePipelineTests(unittest.TestCase):
             ),
             patch("app.save_pipeline.pipeline.embed", return_value=[]),
             patch("app.save_pipeline.pipeline.load_settings", return_value={"verification": {"enabled": False}, "dedup": {"enabled": True}}),
-            patch("app.save_pipeline.pipeline.append_memories") as mock_append_memories,
+            patch("app.save_pipeline.pipeline.append_memories", side_effect=lambda records: records) as mock_append_memories,
             patch("app.save_pipeline.pipeline.append_memory_notes"),
         ):
             outcome = run_memory_pipeline_outcome(

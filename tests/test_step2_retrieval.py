@@ -46,7 +46,7 @@ class StepTwoRetrievalTests(unittest.TestCase):
             (Path(__file__).resolve().parents[1] / "config" / "settings.yaml").read_text(encoding="utf-8")
         )
 
-    def test_default_retrieval_marks_change_and_keeps_lnn_stateless(self):
+    def test_default_retrieval_preserves_change_without_antonym_recency_nudge(self):
         rows = [
             memory("old", "We use SQLite storage.", "learnings", "2026-01-01T00:00:00+00:00", (1.0, 0.0)),
             memory("new", "We avoid SQLite storage.", "learnings", "2026-02-01T00:00:00+00:00", (1.0, 0.0)),
@@ -71,10 +71,20 @@ class StepTwoRetrievalTests(unittest.TestCase):
 
         self.assertEqual([hit["memory"]["id"] for hit in hits], ["new", "old"])
         self.assertEqual([hit["memory"]["id"] for hit in repeated], ["new", "old"])
-        self.assertGreater(hits[0]["step2_contradiction_delta"], 0)
-        self.assertLess(hits[1]["step2_contradiction_delta"], 0)
+        self.assertTrue(all("step2_contradiction_delta" not in hit for hit in hits))
         self.assertEqual(repository.rows, rows)
-        self.assertIn("TENSION", build_memory_notes(hits, max_items=2, max_chars=700, cluster_mode=True))
+        self.assertNotIn("TENSION", build_memory_notes(hits, max_items=2, max_chars=700, cluster_mode=True))
+
+    def test_explicit_step2_ablation_retains_change_annotations(self):
+        config = {**self.settings["step2"], "enabled": True, "contradiction_enabled": True}
+        rows = [memory("old", "We use SQLite storage.", "learnings", "2026-01-01", (1., 0.)),
+                memory("new", "We avoid SQLite storage.", "learnings", "2026-02-01", (1., 0.))]
+        hits = [{"memory": row, "base_score": 1.0} for row in rows]
+        vectors = {row["id"]: np.asarray(row["embedding"], dtype=np.float32) for row in rows}
+        ranked = retriever._step2_1_rerank(hits, "SQLite storage", vectors, 1.0, config)
+        deltas = {hit["memory"]["id"]: hit["step2_contradiction_delta"] for hit in ranked}
+        self.assertGreater(deltas["new"], 0)
+        self.assertLess(deltas["old"], 0)
 
     def test_related_evidence_changes_final_selection_score(self):
         hits = [

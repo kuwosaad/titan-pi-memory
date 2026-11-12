@@ -21,7 +21,7 @@ class SaveIntegrityTests(unittest.TestCase):
             patch.object(pipeline, "get_extraction_adapter", return_value=object()),
             patch.object(pipeline, "extract_atomic_memories", return_value=[extracted]),
             patch.object(pipeline, "embed", return_value=[]),
-            patch.object(pipeline, "append_memories") as append_memories,
+            patch.object(pipeline, "append_memories", side_effect=lambda records: records) as append_memories,
             patch.object(pipeline, "append_memory_notes"),
         ):
             outcome = pipeline.run_memory_pipeline_outcome(
@@ -45,7 +45,7 @@ class SaveIntegrityTests(unittest.TestCase):
             patch.object(pipeline, "get_extraction_adapter", return_value=object()),
             patch.object(pipeline, "extract_atomic_memories", return_value=[extracted]),
             patch.object(pipeline, "embed", return_value=[]),
-            patch.object(pipeline, "append_memories"),
+            patch.object(pipeline, "append_memories", side_effect=lambda records: records),
             patch.object(pipeline, "append_memory_notes"),
         ):
             result = pipeline.run_memory_pipeline_outcome(
