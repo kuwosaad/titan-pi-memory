@@ -1,0 +1,4 @@
+# Frozen benchmarks hash the exact fixture bytes on every supported platform.
+/tests/fixtures/lean_memory_cases.json text eol=lf
+/tests/fixtures/native_step2_cases.json text eol=lf
+/tests/fixtures/scene_context_cases.json text eol=lf

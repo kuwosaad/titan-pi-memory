@@ -8,12 +8,14 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from scripts.verify_packed_artifact import npm_command
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class PiWebOnboardingTests(unittest.TestCase):
     def test_pi_waits_for_success_before_restarting_server(self):
-        source = (ROOT / 'tools/pi_extension/index.ts').read_text()
+        source = (ROOT / 'tools/pi_extension/index.ts').read_text(encoding='utf-8')
         command = source[source.index('pi.registerCommand("titan-setup"'):source.index('pi.registerCommand("titan-key"')]
         self.assertIn('await ensurePythonDependencies()', command)
         self.assertIn('"-m", "tools.cli.onboarding", "--agent", "pi"', command)
@@ -26,7 +28,7 @@ class PiWebOnboardingTests(unittest.TestCase):
     def test_npm_package_contains_the_onboarding_runtime(self):
         with tempfile.TemporaryDirectory() as cache:
             output = subprocess.check_output(
-                ['npm', 'pack', '--dry-run', '--json', '--ignore-scripts'], cwd=ROOT, text=True,
+                [npm_command(), 'pack', '--dry-run', '--json', '--ignore-scripts'], cwd=ROOT, text=True,
                 env={**os.environ, 'npm_config_cache': cache},
             )
         files = {entry['path'] for entry in json.loads(output)[0]['files']}
@@ -41,7 +43,7 @@ class PiWebOnboardingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             env = {**os.environ, 'npm_config_cache': directory}
             output = subprocess.check_output(
-                ['npm', 'pack', '--json', '--ignore-scripts', '--pack-destination', directory],
+                [npm_command(), 'pack', '--json', '--ignore-scripts', '--pack-destination', directory],
                 cwd=ROOT, env=env, text=True,
             )
             archive = Path(directory) / json.loads(output)[0]['filename']

@@ -118,10 +118,11 @@ def _iter_scenes(repository: SceneRepository, session_id: str | None, batch_size
 
 
 def _capture_timestamp(value: str | None, *, end_of_day: bool = False) -> datetime | None:
-    if not value:
+    if not isinstance(value, str) or not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value)
+        # Python 3.10 requires an explicit offset for the ISO UTC designator.
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
     except (TypeError, ValueError):
         return None
     if end_of_day and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
