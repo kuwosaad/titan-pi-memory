@@ -1,5 +1,6 @@
 import http.client
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -11,6 +12,12 @@ from tools.cli import onboarding, titan
 
 class OnboardingTests(unittest.TestCase):
     def setUp(self):
+        # Runtime imports can hydrate config overrides from other test homes.
+        self.patch_env = patch.dict(os.environ, {
+            key: value for key, value in os.environ.items() if not key.startswith('TITAN_')
+        }, clear=True)
+        self.patch_env.start()
+        self.addCleanup(self.patch_env.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.patch_home = patch.object(titan, 'TITAN_HOME', Path(self.temp.name))
         self.patch_explicit = patch.object(titan, '_explicit_titan_home', None)
@@ -99,7 +106,9 @@ class OnboardingTests(unittest.TestCase):
         headers = {'X-Titan-Token': self.server.token, 'Content-Type': 'application/json'}
         data = {'agent': 'pi', 'extraction': {'backend': 'ollama', 'model': 'llama'},
                 'embedding': {'backend': 'ollama', 'model': 'nomic'}, 'keys': {}}
-        self.assertEqual(self.request('POST', '/api/validate', json.dumps(data), headers)[0], 400)
+        with patch.object(onboarding, 'check_configuration') as check:
+            self.assertEqual(self.request('POST', '/api/validate', json.dumps(data), headers)[0], 400)
+            check.assert_not_called()
 
     def test_existing_store_blocks_embedding_change(self):
         home = Path(self.temp.name) / 'agents' / 'pi'

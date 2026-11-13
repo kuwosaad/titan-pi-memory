@@ -1,6 +1,7 @@
 """Exercise browser onboarding over a real loopback socket with isolated data."""
 import http.client
 import json
+import os
 import threading
 import time
 from unittest.mock import patch
@@ -12,6 +13,9 @@ from tools.cli import onboarding, titan
 
 @pytest.fixture
 def server(tmp_path, monkeypatch):
+    for key in list(os.environ):
+        if key.startswith('TITAN_'):
+            monkeypatch.delenv(key)
     monkeypatch.setattr(titan, 'TITAN_HOME', tmp_path / 'titan')
     monkeypatch.setattr(titan, '_explicit_titan_home', False)
     instance = onboarding.OnboardingServer('pi')
@@ -69,7 +73,9 @@ def test_install_persists_only_to_agent_namespace_and_redacts_secret(server, tmp
     assert json.loads(body)['state'] == 'complete'
     env = tmp_path / 'titan' / 'agents' / 'pi' / '.env'
     assert secret in env.read_text()
-    assert env.stat().st_mode & 0o077 == 0
+    # Windows chmod only controls the read-only flag, not POSIX access bits.
+    if os.name == 'posix':
+        assert env.stat().st_mode & 0o077 == 0
     assert not (tmp_path / 'titan' / '.env').exists()
     status, body = request(server, 'GET', '/api/state', headers=auth(server))
     assert status == 200 and secret.encode() not in body

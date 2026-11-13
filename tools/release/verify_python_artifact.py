@@ -10,7 +10,24 @@ import tempfile
 
 # Reuse the protocol check and environment isolation used by the npm verifier.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from verify_packed_artifact import REQUIRED_MCP_TOOLS, clean_environment, mcp_stdio_handshake, run_checked
+from verify_packed_artifact import (
+    CORE_MCP_TOOLS,
+    REQUIRED_MCP_TOOLS,
+    clean_environment,
+    mcp_stdio_handshake,
+    run_checked,
+)
+
+
+def check_tools(names: set[str], *, surface: str, profile: str) -> None:
+    expected = REQUIRED_MCP_TOOLS if profile == "full" else CORE_MCP_TOOLS
+    missing = expected - names
+    unexpected = names - expected if profile != "full" else set()
+    if missing or unexpected:
+        raise RuntimeError(
+            f"Installed Python {surface} {profile} tool listing differs: "
+            f"missing={sorted(missing)}, unexpected={sorted(unexpected)}"
+        )
 
 
 def verify(artifact: Path) -> None:
@@ -28,14 +45,17 @@ def verify(artifact: Path) -> None:
         )
         cli = binary / ("titan.exe" if sys.platform == "win32" else "titan")
         run_checked([str(cli), "--help"], cwd=root, env=env)
-        result = run_checked([str(cli), "codex", "list-tools", "--json"], cwd=root, env=env)
-        names = set(json.loads(result.stdout)["tools"])
-        if not REQUIRED_MCP_TOOLS <= names:
-            raise RuntimeError("Installed Python CLI is missing required tools")
-        names = set(mcp_stdio_handshake([str(cli), "mcp", "--agent", "codex"], cwd=root, env=env))
-        if not REQUIRED_MCP_TOOLS <= names:
-            raise RuntimeError("Installed Python MCP is missing required tools")
-        print(f"Python artifact verified: {artifact.name}; MCP {len(names)} tools")
+        for profile in ("default", "core", "full"):
+            # Leave the first invocation unset to verify the packaged default.
+            profile_env = env.copy()
+            if profile != "default":
+                profile_env["TITAN_MCP_TOOL_PROFILE"] = profile
+            result = run_checked([str(cli), "codex", "list-tools", "--json"], cwd=root, env=profile_env)
+            names = set(json.loads(result.stdout)["tools"])
+            check_tools(names, surface="CLI", profile=profile)
+            names = set(mcp_stdio_handshake([str(cli), "mcp", "--agent", "codex"], cwd=root, env=profile_env))
+            check_tools(names, surface="MCP", profile=profile)
+            print(f"Python artifact verified: {artifact.name}; {profile} MCP {len(names)} tools")
 
 
 def main() -> None:

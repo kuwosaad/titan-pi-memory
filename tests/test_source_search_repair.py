@@ -1,6 +1,7 @@
 import pytest
+from datetime import datetime, timezone
 
-from app.retrieval_pipeline.source_search import canonical_scene_messages, search_source_passages
+from app.retrieval_pipeline.source_search import _capture_timestamp, canonical_scene_messages, search_source_passages
 from app.storage.scenes import JsonSceneRepository, SqliteSceneRepository
 
 
@@ -16,6 +17,19 @@ def event(event_id, event_type, content):
 
 def search(repo, query, **kwargs):
     return search_source_passages(query, repository=repo, source_agent='agent-a', **kwargs)
+
+
+@pytest.mark.parametrize('value', [
+    '2025-01-01T12:00:00Z', '2025-01-01T12:00:00+00:00',
+    '2025-01-01T17:30:00+05:30', '2025-01-01T12:00:00',
+])
+def test_capture_timestamp_accepts_utc_and_offsets(value):
+    assert _capture_timestamp(value) == datetime(2025, 1, 1, 12, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize('value', [None, '', 'invalid', 123])
+def test_capture_timestamp_rejects_invalid_values(value):
+    assert _capture_timestamp(value) is None
 
 
 @pytest.mark.parametrize('backend', ['json', 'sqlite'])
