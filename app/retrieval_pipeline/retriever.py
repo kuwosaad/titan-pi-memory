@@ -1293,7 +1293,13 @@ def _combine_source_hits(
             if scene_id:
                 seen_scenes.add(scene)
             first.append(hit)
-    unique = (first + remaining)[:source_slots]
+    from .source_search import _round_robin_equal_scores
+
+    score_key = lambda hit: hit.get("score", (hit.get("memory") or {}).get("score", 0))
+    session_key = lambda hit: (str((hit.get("memory") or {}).get("source_agent") or hit.get("source_agent") or ""),
+                               str((hit.get("memory") or {}).get("session_id") or ""))
+    unique = (_round_robin_equal_scores(first, score_key, session_key)
+              + _round_robin_equal_scores(remaining, score_key, session_key))[:source_slots]
     return [*hits[:limit - len(unique)], *unique]
 
 

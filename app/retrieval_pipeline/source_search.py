@@ -8,6 +8,8 @@ response budget (including citation metadata).
 from __future__ import annotations
 
 import re
+from collections import deque
+from itertools import groupby
 from datetime import datetime, timezone
 from typing import Any
 
@@ -29,6 +31,27 @@ def _terms(text: str) -> set[str]:
     return terms
 
 
+
+def _verb_forms(term: str) -> set[str]:
+    """Small English verb inflection family; leave identifiers and compounds alone."""
+    if len(term) < 4 or not term.isascii() or not term.isalpha():
+        return set()
+    stems = {term}
+    if term.endswith("ing") and len(term) > 5:
+        stem = term[:-3]
+        stems.update((stem, stem + "e"))
+        if len(stem) > 2 and stem[-1] == stem[-2]:
+            stems.add(stem[:-1])
+    elif term.endswith("ed") and len(term) > 4:
+        stem = term[:-2]
+        stems.update((stem, stem + "e"))
+        if len(stem) > 2 and stem[-1] == stem[-2]:
+            stems.add(stem[:-1])
+    elif term.endswith("e"):
+        stems.add(term[:-1])
+    return stems
+
+
 def _passage(text: str, query_terms: set[str]) -> tuple[str, float] | None:
     # Rank fixed-size overlapping windows so a relevant sentence late in a
     # long message can be recovered without returning the whole message.
@@ -37,13 +60,31 @@ def _passage(text: str, query_terms: set[str]) -> tuple[str, float] | None:
     anchors = {term for term in query_terms if "&" in term or "+" in term}
     for start in range(0, len(text), step):
         window = text[start:start + MAX_PASSAGE_CHARS]
-        matches = _terms(window) & query_terms
+        source_terms = _terms(window)
+        matches = source_terms & query_terms
         if not anchors <= matches:
             continue
+        # Each source term can satisfy only one query anchor. Exact matches
+        # take priority, and variants never increase the query denominator.
+        inflected = 0
+        if matches != query_terms:
+            available = source_terms - matches
+            by_form: dict[str, set[str]] = {}
+            for source in available:
+                for form in _verb_forms(source):
+                    by_form.setdefault(form, set()).add(source)
+            for term in sorted(query_terms - matches):
+                options = set().union(*(by_form.get(form, set()) for form in _verb_forms(term)))
+                options &= available
+                if not term.endswith(("ed", "ing")):
+                    options = {option for option in options if option.endswith(("ed", "ing"))}
+                if options:
+                    available.remove(min(options))
+                    inflected += 1
         required = 1 if len(query_terms) == 1 else 2
-        if len(matches) < required:
+        if len(matches) + inflected < required:
             continue
-        score = len(matches) / len(query_terms)
+        score = (len(matches) + 0.9 * inflected) / len(query_terms)
         candidate = (score, -start, window.strip())
         if best is None or candidate[:2] > best[:2]:
             best = candidate
@@ -142,7 +183,26 @@ def _diverse_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]
         else:
             seen.add(key)
             first.append(item)
-    return (first + remaining)[:MAX_CANDIDATES]
+    session_key = lambda item: (item.get("source_agent", ""), item["session_id"])
+    return (_round_robin_equal_scores(first, lambda item: item["score"], session_key)
+            + _round_robin_equal_scores(remaining, lambda item: item["score"], session_key))[:MAX_CANDIDATES]
+
+
+def _round_robin_equal_scores(items, score_key, session_key):
+    """Distribute only equal-score ties, keeping their incoming order."""
+    ordered = []
+    for _, bucket in groupby(items, key=score_key):
+        sessions = {}
+        for item in bucket:
+            sessions.setdefault(session_key(item), deque()).append(item)
+        active = deque(sessions.values())
+        while active:
+            queue = active.popleft()
+            ordered.append(queue.popleft())
+            if queue:
+                active.append(queue)
+    return ordered
+
 
 
 def search_source_passages(
