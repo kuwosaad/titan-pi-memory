@@ -43,6 +43,7 @@ from app.retrieval_pipeline.router import route_query
 from app.storage.memories import (
     append_memories,
     create_memory_record,
+    get_memory_repository,
     get_recent_memories,
 )
 from app.storage.models import IngestResult, Scene, SceneMessage, SceneReference, TraceEvent, TracePacketRequest
@@ -2340,22 +2341,31 @@ def handle_trace_packet(req: TracePacketRequest) -> Dict[str, Any]:
     ingest_result = ingest_trace_event(event)
     save_intent = req.save_intent if req.save_intent is not None else True
     records: List[Dict[str, Any]] = []
+    duplicate = ingest_result.get("status") == "duplicate"
+    if save_intent and not duplicate and (ingest_result.get("stored_memories") or ingest_result.get("queued_retries")):
+        # An ingest pass can also store older retries from this session.
+        recent = get_memory_repository().get_recent_memories(limit=None, session_id=session_id)
+        records = [record for record in recent if event.event_id in (record.get("source_event_ids") or ())]
 
-    if save_intent and ingest_result.get("stored_memories"):
-        recent = get_recent_memories(limit=3, session_id=session_id)
-        records = [mem.model_dump() for mem in recent]
-
-    recap = _recap_from_records(records) if save_intent else "Memory storage skipped (save_intent=false)."
-    memory_status = "stored" if save_intent else "skipped"
-    if ingest_result.get("status") == "duplicate":
-        memory_status = "duplicate"
+    if duplicate:
+        memory_status, reason, recap = "duplicate", "event already captured", "Trace already captured."
+    elif not save_intent:
+        memory_status, reason, recap = "skipped", "save_intent=false", "Memory storage skipped (save_intent=false)."
+    elif records:
+        memory_status, reason, recap = "stored", None, _recap_from_records(records)
+    elif any(row.get("event_id") == event.event_id for row in load_retry_queue(session_id)):
+        memory_status = "pending"
+        reason = "memory extraction pending retry"
+        recap = "Trace captured. Memory extraction is pending retry."
+    else:
+        memory_status, reason, recap = "captured", "no memory created", "Trace captured. No memory created."
 
     return {
         "session_id": session_id,
         "memory_status": memory_status,
         "recap": recap,
-        "stored": bool(save_intent and ingest_result.get("status") != "duplicate"),
-        "store_reason": None if save_intent else "save_intent=false",
+        "stored": bool(records),
+        "store_reason": reason,
         "ingest": ingest_result,
     }
 

@@ -19,6 +19,7 @@ _default_home = ROOT_DIR if (ROOT_DIR / ".git").exists() else (Path.home() / ".t
 sys.path.insert(0, str(ROOT_DIR))
 
 from app.runtime.context import get_runtime_context, hydrate_process_environment
+from app.runtime.mcp_tools import CORE_MCP_TOOLS
 
 _RUNTIME_CONTEXT = get_runtime_context(root_dir=ROOT_DIR, default_home=_default_home)
 hydrate_process_environment(_RUNTIME_CONTEXT)
@@ -710,9 +711,6 @@ async def get_scene_context(scene_id: str, source_agent: Optional[str] = None) -
 server.tool()(get_scene_context)
 
 
-_CORE_TOOLS = frozenset({"query_memories", "store_trace_packet", "get_scene_context", "doctor"})
-
-
 def _apply_tool_profile() -> None:
     """Apply TITAN_MCP_TOOL_PROFILE (core by default, or full for all tools)."""
     profile = os.getenv("TITAN_MCP_TOOL_PROFILE", "core").strip().lower()
@@ -725,7 +723,7 @@ def _apply_tool_profile() -> None:
     with ThreadPoolExecutor(max_workers=1) as executor:
         tools = executor.submit(lambda: asyncio.run(server.list_tools())).result()
     for tool in tools:
-        if tool.name not in _CORE_TOOLS:
+        if tool.name not in CORE_MCP_TOOLS:
             server.remove_tool(tool.name)
 
 

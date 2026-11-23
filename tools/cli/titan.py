@@ -59,6 +59,7 @@ _default_home = Path.home() / ".titan"
 TITAN_HOME = Path(_explicit_titan_home or str(_default_home)).expanduser()
 os.environ.setdefault("TITAN_BASE_DIR", str(TITAN_HOME))
 
+from app.runtime.mcp_tools import CORE_MCP_TOOLS
 from app.storage.models import TracePacketRequest
 from tools.cli import titan_voice as voice
 from tools.opencode.install_plugin import InstallScope, install_opencode_plugin
@@ -2150,26 +2151,7 @@ def codex_mcp_stdio_handshake(
                     pass
 
 
-CODEX_REQUIRED_MCP_TOOLS = [
-    "store_trace_packet",
-    "store_trace_event",
-    "query_memories",
-    "get_scene_context",
-    "get_recent_memories",
-    "doctor",
-    "inspect_clusters",
-    "analyze_clusters",
-    "patterns_status",
-    "patterns_list",
-    "pattern_get",
-    "pattern_create",
-    "pattern_accept",
-    "pattern_reject",
-    "patterns_evidence_packet",
-    "patterns_mark_processed",
-    "patterns_export_bundle",
-    "patterns_import_bundle",
-]
+CODEX_REQUIRED_MCP_TOOLS = sorted(CORE_MCP_TOOLS)
 
 
 def _codex_plugin_files_ok() -> tuple[bool, List[str]]:
@@ -2420,8 +2402,7 @@ def run_codex_verify(*, config_path: Optional[Path] = None) -> int:
         if hook["plugin_enabled"] and hook["stop_configured"] and hook["stop_enabled"]:
             print("[ok] Codex Stop hook capture is enabled")
         else:
-            ok = False
-            print("[missing] Codex Stop hook capture is disabled or untrusted")
+            print("[action] For automatic capture, open Codex, run /hooks, and approve or enable Titan's Stop hook. Manual memory tools can run independently.")
         pending = recover_pending_sessions(
             apply=False,
             pending_file=trace_dir / "pending_user_messages.json",
@@ -2451,22 +2432,44 @@ def run_codex_verify(*, config_path: Optional[Path] = None) -> int:
         print(f"[missing] Titan MCP launcher: {handshake_detail}")
     else:
         print(f"[ok] Titan MCP launcher: {handshake_detail}")
-    missing_tools = [tool for tool in CODEX_REQUIRED_MCP_TOOLS if tool not in tools]
-    if missing_tools:
-        ok = False
-        print(f"[missing] Titan MCP tools: {', '.join(missing_tools)}")
-    else:
-        print(f"[ok] Titan MCP tools: {len(tools)} exported")
+        missing_tools = [tool for tool in CODEX_REQUIRED_MCP_TOOLS if tool not in tools]
+        if missing_tools:
+            ok = False
+            print(f"[missing] Titan MCP tools: {', '.join(missing_tools)}")
+        else:
+            print(f"[ok] Titan core MCP tools present ({len(tools)} tools exported)")
 
-    if ok:
-        print("[titan] Codex setup looks ready. In Codex, run /mcp and /hooks to verify the live session.")
-        return 0
-    print("[titan] Fix: titan setup codex")
-    return 1
+    if not ok:
+        print("[titan] Resolve the installation checks above, then rerun titan codex verify.")
+    try:
+        _require_public_model_credentials(resolve_agent_titan_home(CODEX_AGENT_NAME), CODEX_AGENT_NAME)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        print(f"[missing] {exc}")
+        return 1
+    if not ok:
+        return 1
+    print("[titan] Codex memory tools are configured. Start a fresh Codex session to load them.")
+    return 0
 
 
 def run_codex_doctor(*, config_path: Optional[Path] = None) -> int:
     return run_codex_verify(config_path=config_path)
+
+
+def _require_public_model_credentials(
+    agent_home: Path, agent_name: str, env_updates: Optional[Dict[str, str]] = None
+) -> None:
+    effective_env = _read_agent_effective_env(agent_home, env_updates or {})
+    for kind in ("extraction", "embedding"):
+        env_name = f"TITAN_{kind.upper()}_CONFIG_PATH"
+        local_path = agent_home / "config" / f"{kind}_models.yaml"
+        if env_name not in effective_env and local_path.is_file():
+            effective_env[env_name] = str(local_path)
+    provider_info = get_required_provider_envs(ROOT_DIR, effective_env)
+    missing_keys = [key for key in provider_info["required_envs"] if not effective_env.get(key, "").strip()]
+    if missing_keys:
+        commands = "\n".join(f"  titan key set {key} --agent {agent_name}" for key in missing_keys)
+        raise ValueError(f"Titan model credentials required: {', '.join(missing_keys)}.\n{commands}")
 
 
 def _setup_public_agent_model_config(
@@ -2483,22 +2486,31 @@ def _setup_public_agent_model_config(
     embedding_cfg = _load_yaml(ROOT_DIR / "config" / "embedding_models.yaml")
 
     if non_interactive:
-        extraction_choice = str(extraction_cfg.get("current") or "openai")
-        if agent_name == CLAUDE_AGENT_NAME and extraction_choice == "opencode_go":
-            extraction_choice = "ollama"
-        extraction_block = extraction_cfg.get(extraction_choice) or {}
-        extraction_model = str(extraction_block.get("model") or "gpt-4o-mini")
-        embedding_choice = str(embedding_cfg.get("current") or "ollama")
-        embedding_block = embedding_cfg.get(embedding_choice) or {}
-        embedding_model = str(embedding_block.get("model") or "nomic-embed-text:v1.5")
-        extraction_cfg = _set_config_backend_model(extraction_cfg, extraction_choice, extraction_model)
-        embedding_cfg = _set_config_backend_model(embedding_cfg, embedding_choice, embedding_model)
-        extraction_path, embedding_path = _write_agent_model_configs(agent_home, extraction_cfg, embedding_cfg)
-        env_updates: Dict[str, str] = {
-            "TITAN_EXTRACTION_CONFIG_PATH": str(extraction_path),
-            "TITAN_EMBEDDING_CONFIG_PATH": str(embedding_path),
-        }
-        _save_env_updates_for_agent(agent_home, env_updates)
+        effective_env = _read_agent_effective_env(agent_home, {})
+        env_updates: Dict[str, str] = {}
+        for kind, cfg in (("extraction", extraction_cfg), ("embedding", embedding_cfg)):
+            env_name = f"TITAN_{kind.upper()}_CONFIG_PATH"
+            default_path = agent_home / "config" / f"{kind}_models.yaml"
+            path = Path(effective_env.get(env_name) or default_path).expanduser().resolve()
+            if path == default_path.resolve() and not path.exists():
+                backend = cfg["current"]
+                if kind == "extraction" and agent_name == CLAUDE_AGENT_NAME and backend == "opencode_go":
+                    backend = "ollama"
+                model = cfg[backend]["model"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    with path.open("x", encoding="utf-8") as stream:
+                        yaml.safe_dump(_set_config_backend_model(cfg, backend, model), stream, sort_keys=False)
+                except FileExistsError:
+                    pass
+            local_config = _load_yaml(path)
+            if not isinstance(local_config, dict) or not isinstance(local_config.get(local_config.get("current")), dict):
+                raise ValueError(f"Select a valid {kind} backend in {path}.")
+            env_updates[env_name] = str(path)
+        env_file = agent_home / ".env"
+        existing = load_env_file(env_file)
+        upsert_env_keys(env_file, {key: value for key, value in env_updates.items() if value != existing.get(key)})
+        _require_public_model_credentials(agent_home, agent_name, env_updates)
         return env_updates
 
     voice.section(
@@ -2576,19 +2588,8 @@ def _setup_public_agent_model_config(
         "TITAN_EXTRACTION_CONFIG_PATH": str(extraction_path),
         "TITAN_EMBEDDING_CONFIG_PATH": str(embedding_path),
     }
-    _save_env_updates_for_agent(agent_home, env_updates)
-
-    effective_env = _read_agent_effective_env(agent_home, env_updates)
-    required_keys: List[str] = []
-    for cfg, backend in ((extraction_cfg, extraction_choice), (embedding_cfg, embedding_choice)):
-        key_name = cfg.get(backend, {}).get("api_key_env")
-        if isinstance(key_name, str) and key_name and key_name not in required_keys:
-            required_keys.append(key_name)
-    missing_keys = [key for key in required_keys if not effective_env.get(key)]
-    if missing_keys:
-        voice.warn(f"Missing key(s): {', '.join(missing_keys)}. Memory extraction may not work until set.")
-        for key in missing_keys:
-            voice.info(f"Run: titan key set {key} --agent {agent_name}")
+    upsert_env_keys(agent_home / ".env", env_updates)
+    _require_public_model_credentials(agent_home, agent_name, env_updates)
 
     voice.success(f"Config saved to {agent_home}")
     voice.model_picked(extraction_model, extraction_choice)
@@ -2647,10 +2648,11 @@ def run_setup_codex(
 
     agent_home = bootstrap_agent_home(CODEX_AGENT_NAME)
     trace_dir.mkdir(parents=True, exist_ok=True)
-    if non_interactive:
-        _setup_codex_model_config(agent_home, non_interactive=True)
-    else:
-        _setup_codex_model_config(agent_home)
+    try:
+        _setup_codex_model_config(agent_home, non_interactive=non_interactive)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        print(f"[titan] Codex setup needs attention: {exc}", file=sys.stderr)
+        return 1
     marketplace_ok, marketplace_detail = ensure_codex_marketplace_snapshot()
     if not marketplace_ok:
         print(f"[titan] Codex marketplace setup failed: {marketplace_detail}")
@@ -2978,7 +2980,11 @@ def run_setup_claude(
 
     agent_home = bootstrap_agent_home(CLAUDE_AGENT_NAME)
     trace_dir.mkdir(parents=True, exist_ok=True)
-    _setup_claude_model_config(agent_home, non_interactive=non_interactive)
+    try:
+        _setup_claude_model_config(agent_home, non_interactive=non_interactive)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        print(f"[titan] Claude Code setup needs attention: {exc}", file=sys.stderr)
+        return 1
     marketplace_ok, detail = ensure_claude_marketplace_snapshot()
     if not marketplace_ok:
         print(f"[titan] Claude marketplace setup failed: {detail}")
