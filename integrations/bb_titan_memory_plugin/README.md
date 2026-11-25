@@ -1,8 +1,8 @@
 # Titan Memory Explorer BB plugin
 
 Browse Titan memories in a native panel beside your BB chat. The panel includes
-an interactive 3D similarity graph, memory search, agent/type/date filters, and memory
-details. Agent and type selections update the graph and list immediately. Every
+an interactive 3D graph, memory search, agent/type/date filters, and an evidence
+inspector. Agent and type selections update the graph and list immediately. Every
 available agent appears in the source menu, including agents outside the recent
 graph subset. Hide the memory list for more graph space; use numbered pages or
 Go to page to jump through matching records. It reads existing stores; opening it never generates embeddings or
@@ -33,11 +33,13 @@ previous release directories remain available for rollback. Without `--install`,
 the script only prepares and validates the build.
 
 Open **Titan Memory** from the thread's panel actions to browse beside chat.
-The graph shows at most 150 memories and 450 similarity links. It is a subset
-of storage, not a complete inventory. Missing embeddings leave memories visible
-without inferred links. Similarity indicates vector similarity, not a proven
-factual relationship. Hover to highlight neighbors; orbit, pan, zoom, and drag
-nodes to inspect the memory field, then use Fit to restore the overview. The
+The graph shows up to 150 matching memories and 450 links. Use the relationship
+filter to view stored corrections or vector similarity. Correction arrows point
+from the replacement to the earlier memory. Memories without stored embeddings
+stay visible and can still have correction links. Select a memory to inspect its
+source scene, pattern evidence, or correction history. The inspector can open
+linked revisions outside the graph without changing the active filters. Hover to
+highlight neighbors, then use Fit to restore the overview. The
 force layout is bounded to 36 ticks, the renderer pauses after interaction, and
 closing the panel disposes its WebGL resources and cancels its reads. Refresh
 is manual. Search is debounced by 200 ms. The agent/type catalog loads only on

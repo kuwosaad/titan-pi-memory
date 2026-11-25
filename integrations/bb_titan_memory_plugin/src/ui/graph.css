@@ -1,33 +1,28 @@
 .titan-graph-shell {
-  --titan-node-a: #d77f95;
-  --titan-node-b: #b09ac5;
-  --titan-node-c: #96b5a8;
-  --titan-node-d: #c5a27e;
-  --titan-node-e: #9daec3;
   min-width: 0;
-  padding: 8px 10px 4px;
+  padding: 8px 12px 4px;
 }
 
 .titan-graph-toolbar {
   display: flex;
-  min-height: 26px;
+  min-height: 28px;
   justify-content: flex-end;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .titan-graph-controls { display: inline-flex; gap: 4px; }
 .titan-graph-fit,
 .titan-graph-control {
-  min-width: 38px;
-  height: 25px;
-  padding: 0 9px;
+  min-width: 40px;
+  height: 28px;
+  padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 6px;
   color: var(--muted-foreground);
   background: color-mix(in srgb, var(--card) 86%, transparent);
   font: inherit;
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
 }
 .titan-graph-fit:hover,
@@ -46,10 +41,7 @@
   height: clamp(340px, 48vh, 560px);
   overflow: hidden;
   border-radius: calc(var(--radius) - 3px);
-  background:
-    radial-gradient(circle at 48% 44%, rgba(106, 52, 84, 0.28), transparent 68%),
-    radial-gradient(circle at 70% 76%, rgba(62, 76, 91, 0.13), transparent 45%),
-    #100d18;
+  background: #171a1f;
 }
 
 .titan-graph3d-host {
@@ -74,20 +66,19 @@
   display: grid;
   max-width: min(280px, calc(100% - 24px));
   gap: 4px;
-  padding: 9px 11px;
-  border: 1px solid rgba(214, 138, 155, 0.24);
-  border-radius: 9px;
-  color: #f2e5e8;
-  background: rgba(17, 13, 19, 0.86);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+  padding: 8px 12px;
+  border: 1px solid #3d424a;
+  border-radius: 8px;
+  color: #edeff2;
+  background: #22262d;
   pointer-events: none;
   font-size: 11px;
 }
-.titan-graph-hover span { color: #d7899c; font-size: 11px; }
+.titan-graph-hover span { color: #b3bbc5; font-size: 11px; }
 .titan-graph-hover strong {
   display: -webkit-box;
   overflow: hidden;
-  color: #f4e8ea;
+  color: #edeff2;
   font-size: 13px;
   font-weight: 500;
   line-height: 1.38;
@@ -102,10 +93,10 @@
   z-index: 3;
   max-width: calc(100% - 32px);
   transform: translate(-50%, -50%);
-  padding: 8px 11px;
+  padding: 8px 12px;
   border-radius: 8px;
-  color: #d9c5cb;
-  background: rgba(14, 11, 17, 0.72);
+  color: #c1c7ce;
+  background: #22262d;
   font-size: 11px;
   pointer-events: none;
 }
@@ -131,8 +122,7 @@
   color: var(--subtle-foreground);
   font-size: 11px;
 }
-.titan-graph-footer span { display: inline-flex; align-items: center; gap: 4px; }
-.titan-graph-swatch { width: 7px; height: 7px; border-radius: 50%; background: #d77f95; }
+.titan-graph-footer span { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 
 @container titan-panel (max-width: 520px) {
   .titan-graph3d-stage { height: 380px; }
@@ -142,3 +132,9 @@
 @media (prefers-reduced-motion: reduce) {
   .titan-graph3d-host canvas { scroll-behavior: auto; }
 }
+
+.titan-graph-filter { display: inline-flex; align-items: center; gap: 8px; color: var(--muted-foreground); font-size: 11px; }
+.titan-graph-filter select { max-width: 150px; min-height: 28px; padding: 4px; border: 1px solid var(--border); border-radius: 6px; color: var(--ink); background: var(--card); font: inherit; }
+.titan-graph-line { position: relative; display: inline-block; width: 20px; height: 2px; background: #818b99; }
+.titan-graph-line--correction { color: #559ca9; background: currentColor; }
+.titan-graph-line--correction::after { position: absolute; inset: -3px 0 auto auto; content: ""; border-block: 4px solid transparent; border-left: 6px solid currentColor; }

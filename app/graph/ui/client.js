@@ -1,511 +1,430 @@
-/* ── Starfield ── */
-(function(){
-    const c = document.getElementById('starfield');
-    const ctx = c.getContext('2d');
-    let stars = [];
-    function resize() { c.width = window.innerWidth; c.height = window.innerHeight; init(); }
-    function init() {
-        stars = [];
-        for (let i = 0; i < 90; i++) {
-            stars.push({
-                x: Math.random() * c.width,
-                y: Math.random() * c.height,
-                r: Math.random() * 1.1 + 0.2,
-                a: Math.random() * 0.35 + 0.08,
-                dx: (Math.random() - 0.5) * 0.06,
-                dy: (Math.random() - 0.5) * 0.04,
-                flicker: Math.random() * Math.PI * 2
-            });
-        }
-    }
-    function draw() {
-        ctx.clearRect(0, 0, c.width, c.height);
-        const now = Date.now() * 0.001;
-        for (const s of stars) {
-            s.x += s.dx; s.y += s.dy;
-            if (s.x < 0) s.x = c.width;
-            if (s.x > c.width) s.x = 0;
-            if (s.y < 0) s.y = c.height;
-            if (s.y > c.height) s.y = 0;
-            const flickerAlpha = s.a * (0.7 + 0.3 * Math.sin(now * 0.8 + s.flicker));
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(200, 180, 220, ' + flickerAlpha + ')';
-            ctx.fill();
-        }
-        requestAnimationFrame(draw);
-    }
-    resize();
-    window.addEventListener('resize', resize);
-    draw();
-})();
-
-/* ── Stat count-up animation ── */
-document.querySelectorAll('.stat-num[data-count]').forEach(el => {
-    const target = parseInt(el.dataset.count, 10) || 0;
-    let current = 0;
-    const duration = 800;
-    const start = performance.now();
-    function tick(now) {
-        const progress = Math.min((now - start) / duration, 1);
-        const eased = 1 - Math.pow(1 - progress, 3);
-        current = Math.round(eased * target);
-        el.textContent = current;
-        if (progress < 1) requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
-});
-
-/* ── Sidebar search & filter ── */
-const searchInput = document.getElementById('sidebarSearch');
-const filterContainer = document.getElementById('sidebarFilters');
-const memoryItems = Array.from(document.querySelectorAll('.memory-item'));
-const sidebarSubtitle = document.getElementById('memorySidebarSubtitle');
-const memoryViewSwitch = document.getElementById('memoryViewSwitch');
-const memoryEmptyState = document.getElementById('memoryEmptyState');
-const showAllMemoriesBtn = document.getElementById('showAllMemoriesBtn');
-const memoryList = document.getElementById('memoryList');
-const types = new Set();
-memoryItems.forEach(item => { if (item.dataset.type) types.add(item.dataset.type); });
-types.forEach(t => {
-    const pill = document.createElement('span');
-    pill.className = 'filter-pill';
-    pill.dataset.filter = t;
-    pill.textContent = t;
-    filterContainer.appendChild(pill);
-});
-const sidebarCounts = { recent: ${recent_count}, all: ${total_count} };
-let activeView = 'recent';
-let activeFilter = 'all';
-function updateSidebarSubtitle(visibleCount) {
-    const total = sidebarCounts.all;
-    if (activeView === 'recent') {
-        sidebarSubtitle.textContent = '${scope_label} \u00b7 ' + visibleCount + ' of ' + sidebarCounts.recent + ' recent \u00b7 ' + total + ' total';
-    } else {
-        sidebarSubtitle.textContent = '${scope_label} \u00b7 ' + visibleCount + ' of ' + total + ' memories';
-    }
-}
-function setActiveView(nextView) {
-    activeView = nextView;
-    memoryViewSwitch.querySelectorAll('.memory-view-pill').forEach(pill => {
-        pill.classList.toggle('active', pill.dataset.view === nextView);
-    });
-    applyFilters();
-}
-memoryViewSwitch.addEventListener('click', e => {
-    const pill = e.target.closest('.memory-view-pill');
-    if (!pill) return;
-    setActiveView(pill.dataset.view);
-});
-if (showAllMemoriesBtn) {
-    showAllMemoriesBtn.addEventListener('click', () => setActiveView('all'));
-}
-filterContainer.addEventListener('click', e => {
-    const pill = e.target.closest('.filter-pill');
-    if (!pill) return;
-    filterContainer.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
-    pill.classList.add('active');
-    activeFilter = pill.dataset.filter;
-    applyFilters();
-});
-
-let searchDebounce = null;
-searchInput.addEventListener('input', () => {
-    clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => applyFilters(), 120);
-});
-
-function applyFilters() {
-    const q = searchInput.value.toLowerCase();
-    let visibleCount = 0;
-    memoryItems.forEach(item => {
-        const matchView = activeView === 'all' || item.dataset.recent === 'true';
-        const matchType = activeFilter === 'all' || item.dataset.type === activeFilter;
-        const matchSearch = !q || (item.dataset.text || '').includes(q) || (item.dataset.session || '').includes(q);
-        const visible = matchView && matchType && matchSearch;
-        item.classList.toggle('hidden-filter', !visible);
-        if (visible) visibleCount += 1;
-    });
-    if (memoryEmptyState) memoryEmptyState.classList.toggle('visible', visibleCount === 0 && activeView === 'recent');
-    updateSidebarSubtitle(visibleCount);
-}
-applyFilters();
-
-/* ── Force Graph ── */
 const graphData = {
     nodes: ${nodes_json},
     links: ${links_json}
 };
 
-const nodeMap = {};
-graphData.nodes.forEach(n => { nodeMap[n.id] = n; });
+const byId = new Map(graphData.nodes.map(node => [node.id, node]));
+const qualified = (agent, id) => agent + '::' + id;
+const byMemory = new Map(graphData.nodes.map(node => [qualified(node.source_agent, node.raw_id), node]));
+const sidebar = document.getElementById('memorySidebar');
+const sidebarToggle = document.getElementById('sidebarToggle');
+const sidebarScrim = document.getElementById('sidebarScrim');
+const compact = window.matchMedia('(max-width: 720px)');
+const workspace = document.getElementById('workspace');
+const graphStage = document.getElementById('graphStage');
+const canvas = document.getElementById('graph');
+const searchInput = document.getElementById('sidebarSearch');
+const typeFilter = document.getElementById('typeFilter');
+const relationshipFilter = document.getElementById('relationshipFilter');
+const graphLayout = document.getElementById('graphLayout');
+const graphLayoutForm = document.getElementById('graphLayoutForm');
+const localDepthField = document.getElementById('localDepthField');
+const localDepth = graphLayoutForm.elements.namedItem('localDepth');
+const legendEntries = document.querySelectorAll('[data-link-kind]');
+const memoryList = document.getElementById('memoryList');
+const memoryViewSwitch = document.getElementById('memoryViewSwitch');
+const graphStats = document.getElementById('graphStats');
+const graphEmpty = document.getElementById('graphEmpty');
+const focusContext = document.getElementById('focusContext');
+const focusAnchor = document.getElementById('focusAnchor');
+const clearFocus = document.getElementById('clearFocus');
+const zoomValue = document.getElementById('zoomValue');
+const dialog = document.getElementById('memoryPreview');
+const previewTitle = document.getElementById('memoryPreviewTitle');
+const previewLoadStatus = document.getElementById('previewLoadStatus');
+const previewScroll = document.getElementById('previewScroll');
+const previewContent = document.getElementById('previewContent');
+const previewText = document.getElementById('memoryPreviewBody');
+const previewMeta = document.getElementById('memoryPreviewMeta');
+const previewIdentifiers = document.getElementById('memoryIdentifiers');
+const previewEvidence = document.getElementById('memoryPreviewEvidence');
+const previewConnections = document.getElementById('memoryPreviewConnections');
+const previewScope = document.getElementById('previewScope');
+const similarMemories = document.getElementById('similarMemories');
+const previewActions = document.getElementById('previewActions');
+const focusMemory = document.getElementById('focusMemory');
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const listRows = new Map();
+let dateRange = graphData.nodes.some(node => node.recent) ? 'recent' : 'all';
+let focusedId = null;
+let selected = null;
+let evidenceRequest = null;
+let previewMotion = null;
+let visibleIds = new Set();
+let desktopSidebarOpen = true;
 
-const Graph = ForceGraph3D()
-    (document.getElementById('graph'))
-    .backgroundColor('rgba(0,0,0,0)')
-    .graphData(graphData)
-    .nodeLabel('')
-    .nodeVal(node => Math.max(node.val * 2.2, 4))
-    .nodeColor(node => node.color)
-    .nodeResolution(${node_resolution})
-    .nodeOpacity(${node_opacity})
-    .linkColor(link => link.color)
-    .linkWidth(link => link.width)
-    .linkOpacity(${link_opacity})
-    .linkCurvature(0)
-    .linkDirectionalParticles(link => link.kind === 'similarity' ? Math.ceil(link.weight * 3) : 0)
-    .linkDirectionalParticleWidth(0.4)
-    .linkDirectionalParticleSpeed(0.004)
-    .linkDirectionalParticleColor(link => link.color)
-    .enableNodeDrag(true)
-    .enableNavigationControls(true)
-    .controlType('orbit')
-    .cameraPosition({ x: ${cam_x}, y: ${cam_y}, z: ${cam_z} })
-    .fov(${cam_fov})
-    .width(window.innerWidth)
-    .height(window.innerHeight);
-
-/* ── Scene lighting ── */
-Graph.scene().add(new THREE.AmbientLight('${ambient_light_color}', ${ambient_light_intensity}));
-const keyLight = new THREE.DirectionalLight('${key_light_color}', ${key_light_intensity});
-keyLight.position.set(${key_light_x}, ${key_light_y}, ${key_light_z});
-Graph.scene().add(keyLight);
-const fillLight = new THREE.DirectionalLight('${fill_light_color}', ${fill_light_intensity});
-fillLight.position.set(${fill_light_x}, ${fill_light_y}, ${fill_light_z});
-Graph.scene().add(fillLight);
-
-${auto_rotate_code}
-
-/* ── Physics ── */
-Graph.d3Force('charge').strength(${charge_strength});
-Graph.d3Force('link').distance(${link_distance});
-Graph.d3Force('link').strength(${link_strength});
-if (Graph.d3Force('collision')) Graph.d3Force('collision').radius(${collision_radius});
-
-/* ── Node Inspector interactions ── */
-const nodeInfoEl = document.getElementById('nodeInfo');
-const inspectorPanel = document.getElementById('nodeInspector');
-const closeBtn = document.getElementById('inspectorClose');
-const graphContainer = document.getElementById('graph');
-const memoryPreview = document.getElementById('memoryPreview');
-const memoryPreviewClose = document.getElementById('memoryPreviewClose');
-const memoryPreviewKicker = document.getElementById('memoryPreviewKicker');
-const memoryPreviewTitle = document.getElementById('memoryPreviewTitle');
-const memoryPreviewBody = document.getElementById('memoryPreviewBody');
-const memoryPreviewMeta = document.getElementById('memoryPreviewMeta');
-const memoryPreviewConnections = document.getElementById('memoryPreviewConnections');
-const memoryPreviewDim = document.getElementById('memoryPreviewDim');
-const nodeHoverCard = document.getElementById('nodeHoverCard');
-const nodeHoverKicker = document.getElementById('nodeHoverKicker');
-const nodeHoverText = document.getElementById('nodeHoverText');
-let selectedNode = null;
-let hoveredNode = null;
-let lastPointerEvent = null;
-let pointerDown = null;
-let lastOpenAt = 0;
-let lastOpenNodeId = null;
-
-function escapeHtml(value) {
-    return String(value || '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
+function append(parent, tag, className, text) {
+    const child = document.createElement(tag);
+    if (className) child.className = className;
+    if (text != null) child.textContent = text;
+    parent.appendChild(child);
+    return child;
 }
 
-function getConnectedNodes(nodeId) {
-    const connected = [];
+function numberLabel(count, singular, plural = singular + 's') {
+    return count + ' ' + (count === 1 ? singular : plural);
+}
+
+function formatRecorded(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return Number.isNaN(date.valueOf()) ? timestamp : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function titleCase(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function setSidebar(open) {
+    const overlay = open && compact.matches;
+    const active = document.activeElement;
+    if ((!open && sidebar.contains(active)) || (overlay && graphStage.contains(active))) {
+        sidebarToggle.focus({ preventScroll: true });
+    }
+    sidebar.hidden = !open;
+    sidebarScrim.hidden = !overlay;
+    graphStage.inert = overlay;
+    workspace.classList.toggle('sidebar-hidden', !open);
+    sidebarToggle.setAttribute('aria-expanded', String(open));
+}
+
+for (const type of [...new Set(graphData.nodes.map(node => node.type))].sort()) {
+    const option = append(typeFilter, 'option', '', titleCase(type));
+    option.value = type;
+}
+for (const node of graphData.nodes) {
+    const row = append(memoryList, 'div');
+    row.setAttribute('role', 'listitem');
+    const button = append(row, 'button', 'memory-item');
+    button.type = 'button';
+    button.dataset.id = node.id;
+    button.dataset.recent = String(node.recent);
+    button.setAttribute('aria-pressed', 'false');
+    button.style.setProperty('--memory-color', node.color);
+    append(button, 'span', 'memory-dot').setAttribute('aria-hidden', 'true');
+    append(button, 'span', 'memory-title', node.text || 'Untitled memory');
+    append(button, 'span', 'memory-meta', [titleCase(node.type), node.source_agent].filter(Boolean).join(' · '));
+    listRows.set(node.id, { row, button });
+}
+memoryList.addEventListener('click', event => {
+    const row = event.target.closest('.memory-item');
+    if (row) openMemory(byId.get(row.dataset.id));
+});
+
+function syncSidebarLayout() { setSidebar(!compact.matches && desktopSidebarOpen); }
+syncSidebarLayout();
+compact.addEventListener('change', syncSidebarLayout);
+const graph = createMemoryGraph(canvas, graphData, {
+    onOpen: openMemory,
+    onCameraChange: zoom => { zoomValue.textContent = Math.round(zoom * 100) + '%'; },
+    reducedMotion,
+    physicsSource: JSON.parse(document.getElementById('graphPhysics').textContent),
+});
+
+function localNeighborhood(root, nodes, relationship) {
+    const eligible = new Set(nodes.map(node => node.id));
+    const links = graphData.links.filter(link => eligible.has(link.source) && eligible.has(link.target) && (relationship === 'all' || link.kind === relationship));
+    const visited = new Set([root]);
+    let frontier = [root];
+    for (let depth = 0; frontier.length && depth < localDepth.valueAsNumber; depth++) {
+        const current = new Set(frontier);
+        frontier = [];
+        for (const link of links) {
+            const neighbor = current.has(link.source) ? link.target : current.has(link.target) ? link.source : null;
+            if (neighbor && !visited.has(neighbor)) {
+                frontier.push(neighbor);
+                visited.add(neighbor);
+            }
+        }
+    }
+    return visited;
+}
+
+function updateView(cameraAction = 'keep') {
+    const query = searchInput.value.trim().toLowerCase();
+    const type = typeFilter.value;
+    const relationship = relationshipFilter.value;
+    let nodes = graphData.nodes.filter(node => (
+        (dateRange === 'all' || node.recent) && (!type || node.type === type) && (
+            !query || [node.text, node.source_agent, node.session_id].some(value => String(value || '').toLowerCase().includes(query))
+        )
+    ));
+    if (focusedId && !nodes.some(node => node.id === focusedId)) focusedId = null;
+    if (focusedId) {
+        const neighborhood = localNeighborhood(focusedId, nodes, relationship);
+        nodes = nodes.filter(node => neighborhood.has(node.id));
+    }
+    visibleIds = new Set(nodes.map(node => node.id));
+    for (const [id, item] of listRows) item.row.hidden = !visibleIds.has(id);
+    const links = graphData.links.filter(link => visibleIds.has(link.source) && visibleIds.has(link.target));
+    const similarities = links.filter(link => link.kind === 'similarity').length;
+    const corrections = links.length - similarities;
+    for (const entry of legendEntries) entry.hidden = relationship !== 'all' && entry.dataset.linkKind !== relationship;
+    const counts = [numberLabel(nodes.length, 'memory', 'memories')];
+    if (relationship !== 'supersedes') counts.push(numberLabel(similarities, 'similarity link'));
+    if (relationship !== 'similarity') counts.push(numberLabel(corrections, 'correction'));
+    graphStats.textContent = counts.join(' · ');
+    document.getElementById('sidebarCount').textContent = String(nodes.length);
+    document.getElementById('sidebarEmpty').hidden = Boolean(nodes.length);
+    graphEmpty.hidden = Boolean(nodes.length);
+    document.getElementById('emptyDetail').textContent = graphData.nodes.length ? 'Clear search or change the memory filters.' : 'Saved memories will appear here.';
+    focusContext.hidden = !focusedId;
+    localDepthField.hidden = !focusedId;
+    focusAnchor.textContent = focusedId ? 'Focused on ' + (byId.get(focusedId).text || 'Untitled memory') : '';
+    for (const button of memoryViewSwitch.querySelectorAll('button')) {
+        button.setAttribute('aria-pressed', String(button.dataset.view === dateRange));
+    }
+    graph.setView(visibleIds, relationship);
+    graph.setSelected(selected?.id || focusedId);
+    if (cameraAction === 'fit') graph.fit();
+    if (cameraAction === 'focus') graph.fit(!reducedMotion.matches);
+    if (cameraAction === 'reveal') graph.reveal();
+}
+
+function previewField(parent, label, value) {
+    if (value === null || value === undefined || value === '') return;
+    append(parent, 'dt', '', label);
+    append(parent, 'dd', '', String(value));
+}
+
+function renderSimilarity(node) {
+    similarMemories.replaceChildren();
+    const neighbors = [];
+    const revisions = new Set();
     for (const link of graphData.links) {
-        const sid = link.source.id || link.source;
-        const tid = link.target.id || link.target;
-        let neighborId = null;
-        if (sid === nodeId) neighborId = tid;
-        else if (tid === nodeId) neighborId = sid;
-        if (neighborId && nodeMap[neighborId] && nodeMap[neighborId].kind === 'memory') {
-            connected.push({ node: nodeMap[neighborId], weight: link.weight, kind: link.kind });
-        }
+        if (link.kind !== 'supersedes') continue;
+        if (link.source === node.id) revisions.add(link.target);
+        if (link.target === node.id) revisions.add(link.source);
     }
-    connected.sort((a, b) => b.weight - a.weight);
-    return connected;
-}
-
-function showHoverCard(node, event) {
-    if (!nodeHoverCard || !node || !event) return;
-    const label = node.kind === 'memory' ? (node.type || 'memory') : 'source';
-    const text = node.kind === 'memory'
-        ? (node.text || node.label || 'memory')
-        : (node.title || node.label || 'source');
-    nodeHoverKicker.textContent = label;
-    nodeHoverText.textContent = text;
-    const padding = 14;
-    const cardWidth = Math.min(320, nodeHoverCard.offsetWidth || 220);
-    const x = Math.min(window.innerWidth - cardWidth - padding, event.clientX + 16);
-    const y = Math.min(window.innerHeight - 72, event.clientY + 16);
-    nodeHoverCard.style.left = x + 'px';
-    nodeHoverCard.style.top = y + 'px';
-    nodeHoverCard.classList.add('visible');
-    nodeHoverCard.setAttribute('aria-hidden', 'false');
-}
-
-function hideHoverCard() {
-    if (!nodeHoverCard) return;
-    nodeHoverCard.classList.remove('visible');
-    nodeHoverCard.setAttribute('aria-hidden', 'true');
-}
-
-function maybeOpenNode(node, shouldFly = false) {
-    if (!node) return null;
-    const now = Date.now();
-    if (lastOpenNodeId === node.id && now - lastOpenAt < 180) {
-        return node;
+    for (const link of graphData.links) {
+        if (link.kind !== 'similarity') continue;
+        const neighborId = link.source === node.id ? link.target : link.target === node.id ? link.source : null;
+        if (neighborId && !revisions.has(neighborId)) neighbors.push({ node: byId.get(neighborId), weight: link.weight });
     }
-    lastOpenNodeId = node.id;
-    lastOpenAt = now;
-    return openMemoryCard(node, shouldFly);
-}
-
-function ensurePreviewVisible(node, connectionCount) {
-    if (!memoryPreview || !memoryPreviewBody || !memoryPreviewMeta) return;
-    try {
-        renderPreview(node, connectionCount);
-    } catch (err) {
-        console.warn('memory preview render failed', err);
-        memoryPreviewKicker.textContent = node.kind === 'memory' ? 'memory preview' : 'graph scope';
-        memoryPreviewTitle.textContent = node.kind === 'memory' ? (node.type || 'memory') : (node.title || node.label || 'source overview');
-        memoryPreviewBody.textContent = node.text || node.label || node.title || 'No text';
-        memoryPreviewMeta.innerHTML = '<span>fallback preview</span>';
-        memoryPreviewConnections.innerHTML = '';
-        memoryPreviewConnections.style.display = 'none';
-        memoryPreview.classList.add('visible');
-        memoryPreviewDim.classList.add('visible');
-        memoryPreview.setAttribute('aria-hidden', 'false');
+    for (const item of neighbors.sort((a, b) => b.weight - a.weight).slice(0, 8)) {
+        const button = append(similarMemories, 'button', 'preview-link', item.node.text || 'Untitled memory');
+        button.type = 'button';
+        append(button, 'span', 'memory-meta', ' · ' + Math.round(item.weight * 100) + '% similar');
+        button.addEventListener('click', () => openMemory(item.node));
     }
+    if (neighbors.length > 8) append(similarMemories, 'p', 'preview-note', numberLabel(neighbors.length - 8, 'more similarity link'));
+    previewConnections.hidden = !neighbors.length;
 }
 
-function renderPreview(node, connectionCount) {
-    const meta = [];
-    if (node.kind === 'memory') {
-        memoryPreviewKicker.textContent = 'memory preview';
-        memoryPreviewTitle.textContent = node.type || 'memory';
-        memoryPreviewBody.textContent = node.text || node.label || 'No text';
-        if (node.ts) meta.push('<span>' + escapeHtml(node.ts) + '</span>');
-        if (node.session_id) meta.push('<span>session ' + escapeHtml(node.session_id) + '</span>');
-        if (node.turn !== null && node.turn !== undefined) meta.push('<span>turn ' + escapeHtml(node.turn) + '</span>');
-        meta.push('<span>' + connectionCount + ' connection' + (connectionCount !== 1 ? 's' : '') + '</span>');
-    } else {
-        memoryPreviewKicker.textContent = 'graph scope';
-        memoryPreviewTitle.textContent = 'source overview';
-        memoryPreviewBody.textContent = node.title || node.label || 'Source';
-        if (node.session_id) meta.push('<span>session ' + escapeHtml(node.session_id) + '</span>');
-        meta.push('<span>' + escapeHtml(node.deg) + ' memories</span>');
-    }
-    memoryPreviewMeta.innerHTML = meta.join('');
-
-    const connected = getConnectedNodes(node.id);
-    if (connected.length > 0) {
-        let connHtml = '<div class="memory-preview-connections-title">connected memories</div><div class="memory-preview-conn-list">';
-        const shown = connected.slice(0, 12);
-        for (const c of shown) {
-            const text = escapeHtml((c.node.text || c.node.label || '').substring(0, 120));
-            const sim = Math.round(c.weight * 100);
-            connHtml += '<div class="memory-preview-conn-item" data-node-id="' + escapeHtml(c.node.id) + '">'
-                + '<div class="memory-preview-conn-item-text">' + text + '</div>'
-                + '<div class="memory-preview-conn-item-meta">' + (c.node.type || 'memory') + ' \u00b7 ' + sim + '% similar</div>'
-                + '</div>';
-        }
-        if (connected.length > 12) {
-            connHtml += '<div style="font-size:10px;color:#605058;padding:4px 0;">+ ' + (connected.length - 12) + ' more</div>';
-        }
-        connHtml += '</div>';
-        memoryPreviewConnections.innerHTML = connHtml;
-        memoryPreviewConnections.style.display = 'block';
-    } else {
-        memoryPreviewConnections.innerHTML = '';
-        memoryPreviewConnections.style.display = 'none';
-    }
-
-    memoryPreview.classList.add('visible');
-    memoryPreviewDim.classList.add('visible');
-    memoryPreview.setAttribute('aria-hidden', 'false');
-    memoryPreview.scrollTop = 0;
+function evidenceSection(title) {
+    const section = append(previewEvidence, 'section', 'preview-section');
+    append(section, 'h3', '', title);
+    return section;
 }
 
-function hidePreview() {
-    memoryPreview.classList.remove('visible');
-    memoryPreviewDim.classList.remove('visible');
-    memoryPreview.setAttribute('aria-hidden', 'true');
+function sourceDisclosure(parent, label, source) {
+    const details = append(parent, 'details');
+    append(details, 'summary', '', label);
+    if (source.id) append(details, 'p', 'preview-source-id', source.id);
+    if (source.userText) append(details, 'blockquote', '', source.userText);
+    if (source.assistantText) append(details, 'blockquote', '', source.assistantText);
+    if (source.eventIds.length) append(details, 'p', 'preview-source-id', 'Events: ' + source.eventIds.join(', '));
 }
 
-function flyToNode(node) {
-    const dist = 80;
-    Graph.cameraPosition(
-        { x: node.x + dist, y: node.y + dist * 0.4, z: node.z + dist },
-        { x: node.x, y: node.y, z: node.z },
-        1200
-    );
-}
-
-function highlightSidebarItem(nodeId) {
-    memoryItems.forEach(item => {
-        item.style.borderColor = '';
-        item.style.background = '';
+function openRevision(memory) {
+    const key = qualified(memory.sourceAgent, memory.memoryId);
+    openMemory(byMemory.get(key) || {
+        id: key, raw_id: memory.memoryId, source_agent: memory.sourceAgent,
+        type: memory.type || 'memory', stream: memory.stream, text: memory.text,
+        ts: memory.timestamp, session_id: memory.sessionId,
     });
-    if (!nodeId) return;
-    const matchItem = memoryItems.find(item => item.dataset.id === nodeId);
-    if (matchItem) {
-        matchItem.style.borderColor = 'rgba(200, 120, 140, 0.35)';
-        matchItem.style.background = 'rgba(28, 14, 20, 0.60)';
-        const listRect = memoryList.getBoundingClientRect();
-        const itemRect = matchItem.getBoundingClientRect();
-        if (itemRect.top < listRect.top || itemRect.bottom > listRect.bottom) {
-            const offset = matchItem.offsetTop - memoryList.clientHeight / 2 + matchItem.clientHeight / 2;
-            memoryList.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
+}
+
+function renderEvidence(payload) {
+    if (payload.truncated) append(previewEvidence, 'p', 'preview-note', 'Memory text shortened for display');
+    if (payload.corrections.length || payload.correctionsPartial) {
+        const history = evidenceSection('Correction history');
+        const revisions = append(history, 'div', 'preview-links');
+        for (const entry of payload.corrections) {
+            const label = entry.direction === 'replaces' ? 'Replaces earlier memory' : 'Replaced by newer memory';
+            const revision = append(revisions, 'div');
+            if (entry.memory) {
+                const button = append(revision, 'button', 'preview-link');
+                button.type = 'button';
+                append(button, 'span', 'revision-label', label);
+                append(button, 'span', '', entry.memory.text || 'Untitled memory');
+                button.addEventListener('click', () => openRevision(entry.memory));
+            } else append(revision, 'p', 'preview-note', label + ' (unavailable): ' + entry.memoryId);
+            if (entry.evidence) append(revision, 'blockquote', '', entry.evidence);
+            if (entry.timestamp) append(revision, 'p', 'memory-meta', 'Recorded ' + formatRecorded(entry.timestamp));
+        }
+        if (payload.correctionsPartial) append(history, 'p', 'preview-note', 'Correction history is partial');
+    }
+    if (payload.scene || payload.memoryEvidence) {
+        const sources = evidenceSection('Source');
+        if (payload.scene) sourceDisclosure(sources, 'Source scene · ' + payload.scene.status, payload.scene);
+        if (payload.memoryEvidence) sourceDisclosure(sources, 'Evidence saved with this memory', payload.memoryEvidence);
+    }
+    if (payload.patterns.length) {
+        const patterns = evidenceSection('Pattern evidence');
+        for (const pattern of payload.patterns) {
+            append(patterns, 'p', 'preview-note', pattern.title + ' · ' + pattern.status + ' · ' + pattern.role);
         }
     }
-}
-
-function deselectNode() {
-    selectedNode = null;
-    nodeInfoEl.innerHTML = '';
-    closeBtn.style.display = 'none';
-    inspectorPanel.querySelector('.hint').style.display = 'flex';
-    hidePreview();
-    hideHoverCard();
-    highlightSidebarItem(null);
-    Graph.nodeColor(n => n.color);
-    Graph.linkColor(l => l.color);
-}
-
-function openMemoryCard(node, shouldFly = false) {
-    if (!node) return null;
-    selectedNode = node;
-    console.info('selected memory node', node.id);
-    closeBtn.style.display = 'flex';
-    inspectorPanel.querySelector('.hint').style.display = 'none';
-
-    let details = '';
-    let previewConnectionCount = 0;
-    if (node.kind === 'memory') {
-        const conn = graphData.links.filter(l =>
-            (l.source.id || l.source) === node.id || (l.target.id || l.target) === node.id
-        ).length;
-        previewConnectionCount = conn;
-        details = '<div class="detail-field"><span class="detail-label">memory</span><span class="detail-value">' + (node.label || 'No text') + '</span></div>';
-        details += '<div class="detail-field"><span class="detail-label">group</span><span class="detail-value">' + node.group + '</span></div>';
-        details += '<div class="conn-count">\u2B21 ' + conn + ' connection' + (conn !== 1 ? 's' : '') + '</div>';
-    } else {
-        previewConnectionCount = node.deg || 0;
-        details = '<div class="detail-field"><span class="detail-label">source</span><span class="detail-value">' + (node.title || node.label) + '</span></div>';
-        details += '<div class="conn-count">\u2B21 ' + node.deg + ' memories</div>';
+    for (const [key, label] of [['event_date', 'Event date'], ['event_start', 'Event start'], ['event_end', 'Event end']]) {
+        previewField(previewMeta, label, payload.metadata[key]);
     }
-    nodeInfoEl.innerHTML = details;
+    for (const warning of payload.warnings) append(previewEvidence, 'p', 'preview-note', warning);
+    previewEvidence.hidden = !previewEvidence.childElementCount;
+}
 
-    ensurePreviewVisible(node, previewConnectionCount);
+async function fetchEvidence(node, signal) {
+    const params = new URLSearchParams({ source_agent: node.source_agent, memory_id: node.raw_id });
+    const response = await fetch('/api/graph/memory?' + params, { signal });
+    if (!response.ok) throw new Error('Memory detail unavailable');
+    return response.json();
+}
 
-    highlightSidebarItem(node.id);
-    hideHoverCard();
+function renderMemory(node, text) {
+    if (selected) listRows.get(selected.id)?.button.setAttribute('aria-pressed', 'false');
+    selected = node;
+    graph.setSelected(node.id);
+    listRows.get(node.id)?.button.setAttribute('aria-pressed', 'true');
+    previewTitle.textContent = titleCase(node.type || 'Memory');
+    previewText.textContent = text || node.text || 'Untitled memory';
+    previewMeta.replaceChildren();
+    previewField(previewMeta, 'Agent', node.source_agent);
+    previewField(previewMeta, 'Recorded', formatRecorded(node.ts));
+    previewField(previewMeta, 'Stream', node.stream);
+    previewIdentifiers.parentElement.open = false;
+    previewIdentifiers.replaceChildren();
+    append(previewIdentifiers, 'p', 'preview-source-id', node.raw_id);
+    if (node.session_id) append(previewIdentifiers, 'p', 'preview-source-id', 'Session: ' + node.session_id);
+    if (node.turn != null) append(previewIdentifiers, 'p', 'preview-source-id', 'Turn: ' + node.turn);
+    previewActions.hidden = !visibleIds.has(node.id);
+    previewScope.hidden = visibleIds.has(node.id);
+    previewEvidence.replaceChildren();
+    previewEvidence.hidden = true;
+    previewConnections.hidden = true;
+}
 
-    Graph.nodeColor(n => {
-        if (n.id === selectedNode.id) return '${selected_node_color}';
-        return n.color;
-    });
-    Graph.linkColor(l => {
-        if (selectedNode) {
-            const sid = l.source.id || l.source;
-            const tid = l.target.id || l.target;
-            if (sid === selectedNode.id || tid === selectedNode.id) return '${selected_link_color}';
+async function openMemory(node) {
+    if (!node) return;
+    const navigating = dialog.open;
+    evidenceRequest?.abort();
+    const controller = new AbortController();
+    evidenceRequest = controller;
+    if (!navigating) {
+        previewMotion?.cancel();
+        renderMemory(node);
+        dialog.showModal();
+        previewScroll.scrollTop = 0;
+    }
+
+    let payload;
+    let unavailable = false;
+    if (node.source_agent && node.raw_id) {
+        focusMemory.disabled = navigating;
+        previewLoadStatus.textContent = 'Loading details…';
+        try {
+            payload = await fetchEvidence(node, controller.signal);
+        } catch {
+            unavailable = true;
         }
-        return l.color;
-    });
-
-    if (shouldFly) {
-        flyToNode(node);
     }
-    ${pause_rotation}
-    return node;
+    if (controller.signal.aborted || !dialog.open) return;
+    evidenceRequest = null;
+    focusMemory.disabled = false;
+    previewLoadStatus.textContent = '';
+    if (navigating) renderMemory(node, payload?.text);
+    if (payload) {
+        if (!navigating && payload.text) previewText.textContent = payload.text;
+        renderEvidence(payload);
+    } else if (unavailable) {
+        append(previewEvidence, 'p', 'preview-note', 'Source and correction details unavailable');
+        previewEvidence.hidden = false;
+    }
+    renderSimilarity(node);
+    if (!navigating) return;
+    previewScroll.scrollTop = 0;
+    previewText.focus({ preventScroll: true });
+    previewMotion?.cancel();
+    if (!reducedMotion.matches) {
+        previewMotion = previewContent.animate?.([
+            { opacity: .55, transform: 'translateY(4px)' },
+            { opacity: 1, transform: 'translateY(0)' },
+        ], { duration: 160, easing: 'cubic-bezier(.2, .7, .2, 1)' });
+    }
 }
 
-/* ── Sidebar memory item click → select node ── */
-memoryList.addEventListener('click', e => {
-    const item = e.target.closest('.memory-item');
-    if (!item) return;
-    const memId = item.dataset.id;
-    const node = nodeMap[memId];
-    if (node) openMemoryCard(node, true);
+sidebarToggle.addEventListener('click', () => {
+    const open = sidebar.hidden;
+    if (!compact.matches) desktopSidebarOpen = open;
+    setSidebar(open);
 });
-
-closeBtn.addEventListener('click', deselectNode);
-memoryPreviewClose.addEventListener('click', deselectNode);
-memoryPreviewDim.addEventListener('click', deselectNode);
-memoryPreview.addEventListener('click', e => {
-    const connItem = e.target.closest('.memory-preview-conn-item');
-    if (!connItem) return;
-    const nodeId = connItem.dataset.nodeId;
-    const node = nodeMap[nodeId];
-    if (node) maybeOpenNode(node, true);
-});
-
-graphContainer.addEventListener('pointerdown', event => {
-    pointerDown = { x: event.clientX, y: event.clientY };
-});
-graphContainer.addEventListener('pointermove', event => {
-    lastPointerEvent = event;
-    if (hoveredNode && !selectedNode) {
-        showHoverCard(hoveredNode, event);
+function dismissSidebar() {
+    setSidebar(false);
+    sidebarToggle.focus({ preventScroll: true });
+}
+sidebarScrim.addEventListener('click', dismissSidebar);
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && graphLayout.open && graphLayout.contains(document.activeElement)) {
+        graphLayout.open = false;
+        graphLayout.querySelector('summary').focus({ preventScroll: true });
+        return;
     }
+    if (event.key !== 'Escape' || !compact.matches || sidebar.hidden || dialog.open || event.defaultPrevented) return;
+    event.preventDefault();
+    dismissSidebar();
 });
-graphContainer.addEventListener('pointerup', event => {
-    lastPointerEvent = event;
-    if (!pointerDown) return;
-    const moved = Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y);
-    pointerDown = null;
-    if (hoveredNode && moved <= 8) {
-        maybeOpenNode(hoveredNode, true);
-    }
+for (const button of memoryViewSwitch.querySelectorAll('button')) {
+    button.addEventListener('click', () => { dateRange = button.dataset.view; updateView('reveal'); });
+}
+searchInput.addEventListener('input', () => updateView('reveal'));
+typeFilter.addEventListener('change', () => updateView('reveal'));
+relationshipFilter.addEventListener('change', () => updateView(focusedId ? 'fit' : 'reveal'));
+function layoutValues(section) {
+    return Object.fromEntries(Array.from(section.querySelectorAll('input'), input => [input.name, input.valueAsNumber]));
+}
+const graphForces = document.getElementById('graphForces');
+const graphDisplay = document.getElementById('graphDisplay');
+graphForces.addEventListener('input', () => graph.setForces(layoutValues(graphForces)));
+graphDisplay.addEventListener('input', () => graph.setDisplay(layoutValues(graphDisplay)));
+localDepth.addEventListener('input', () => updateView('focus'));
+graphLayoutForm.addEventListener('reset', () => {
+    queueMicrotask(() => {
+        graph.setForces(layoutValues(graphForces));
+        graph.setDisplay(layoutValues(graphDisplay));
+        if (focusedId) updateView('focus');
+    });
 });
-graphContainer.addEventListener('click', () => {
-    if (hoveredNode) {
-        maybeOpenNode(hoveredNode, true);
-    }
+document.getElementById('reheatGraph').addEventListener('click', () => graph.reheat());
+window.addEventListener('pagehide', event => { if (!event.persisted) graph.destroy(); });
+clearFocus.addEventListener('click', () => {
+    focusedId = null;
+    updateView('focus');
+    canvas.focus({ preventScroll: true });
 });
-graphContainer.addEventListener('pointerleave', () => {
-    pointerDown = null;
+document.getElementById('zoomIn').addEventListener('click', () => graph.zoomBy(1.25));
+document.getElementById('zoomOut').addEventListener('click', () => graph.zoomBy(1 / 1.25));
+document.getElementById('fitGraph').addEventListener('click', () => graph.fit(!reducedMotion.matches));
+document.getElementById('memoryPreviewClose').addEventListener('click', () => dialog.close());
+focusMemory.addEventListener('click', () => {
+    if (focusMemory.disabled || !selected || !visibleIds.has(selected.id)) return;
+    focusedId = selected.id;
+    dialog.close();
+    if (compact.matches) setSidebar(false);
+    updateView('focus');
+    canvas.focus({ preventScroll: true });
 });
-
-Graph.onNodeClick(node => {
-    maybeOpenNode(node, true);
+dialog.addEventListener('click', event => {
+    if (event.target !== dialog) return;
+    const box = dialog.getBoundingClientRect();
+    if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) dialog.close();
 });
-
-Graph.onNodeDragEnd(node => {
-    maybeOpenNode(node, false);
+dialog.addEventListener('close', () => {
+    if (dialog.open) return;
+    evidenceRequest?.abort();
+    evidenceRequest = null;
+    focusMemory.disabled = false;
+    previewLoadStatus.textContent = '';
+    if (selected) listRows.get(selected.id)?.button.setAttribute('aria-pressed', 'false');
+    selected = null;
+    graph.setSelected(focusedId);
 });
-
-Graph.onBackgroundClick(deselectNode);
-
-Graph.onNodeHover(node => {
-    hoveredNode = node || null;
-    document.body.style.cursor = node ? 'pointer' : 'default';
-    if (node && !selectedNode) {
-        showHoverCard(node, lastPointerEvent);
-        Graph.nodeColor(n => n.id === node.id ? '${hover_node_color}' : n.color);
-        Graph.linkColor(l => {
-            const sid = l.source.id || l.source;
-            const tid = l.target.id || l.target;
-            return (sid === node.id || tid === node.id) ? '${hover_link_color}' : l.color;
-        });
-    } else if (!selectedNode) {
-        hideHoverCard();
-        Graph.nodeColor(n => n.color);
-        Graph.linkColor(l => l.color);
-    }
-});
-
-window.addEventListener('resize', () => {
-    Graph.width(window.innerWidth).height(window.innerHeight);
-});
-
-/* ── Keyboard shortcuts ── */
-document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') deselectNode();
-});
+updateView('fit');

@@ -19,6 +19,8 @@ from app.save_pipeline.pipeline import (
 from app.save_pipeline.extraction.extractor import is_hidden_metadata_memory
 from app.retrieval_pipeline.federated import _source_list, _validate_agent_name
 from app.graph.adapter import build_graph, inspect_memory_clusters, analyze_memory_clusters
+from app.graph.explorer import ExplorerError, detail as read_graph_memory
+from app.runtime.context import get_runtime_context
 from app.storage.memories import get_memory_count, get_recent_memories
 from app.storage.models import TraceEvent, TracePacketRequest
 from app.storage.sessions import ensure_dirs
@@ -111,9 +113,19 @@ def runtime() -> dict:
 
 
 @router.get("/graph")
-def graph(session_id: Optional[str] = None) -> HTMLResponse:
-    html_content = build_graph(session_id=session_id)
+def graph(session_id: Optional[str] = None, agent: Optional[str] = None) -> HTMLResponse:
+    html_content = build_graph(session_id=session_id, agent=agent) if agent else build_graph(session_id=session_id)
     return HTMLResponse(content=html_content)
+
+
+@router.get("/api/graph/memory")
+def graph_memory(source_agent: str, memory_id: str) -> JSONResponse:
+    try:
+        payload = read_graph_memory(get_runtime_context().shared_home, source_agent, memory_id)
+    except ExplorerError as exc:
+        status = {"invalid_input": 400, "not_found": 404}.get(exc.code, 503)
+        raise HTTPException(status_code=status, detail=exc.message) from exc
+    return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/pattern-graph")

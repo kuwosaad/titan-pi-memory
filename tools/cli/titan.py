@@ -584,11 +584,10 @@ def generate_agent_connection_guide(example_agent: str = DEFAULT_AGENT_NAME) -> 
     )
 
 
-def generate_graph_url(*, host: str = "127.0.0.1", port: int = DEFAULT_GRAPH_PORT, session_id: Optional[str] = None) -> str:
+def generate_graph_url(*, host: str = "127.0.0.1", port: int = DEFAULT_GRAPH_PORT, session_id: Optional[str] = None, agent: Optional[str] = None) -> str:
     base = f"http://{host}:{port}/graph"
-    if not session_id:
-        return base
-    return f"{base}?{urlencode({'session_id': session_id})}"
+    params = {key: value for key, value in (("session_id", session_id), ("agent", agent)) if value}
+    return f"{base}?{urlencode(params)}" if params else base
 
 
 def generate_pattern_graph_url(*, host: str = "127.0.0.1", port: int = DEFAULT_GRAPH_PORT, limit: Optional[int] = None) -> str:
@@ -628,7 +627,7 @@ def run_graph(
     normalized_agent = _normalize_agent_name(agent)
     agent_home = configure_runtime_for_agent(normalized_agent)
     selected_port, used_fallback_port = _select_graph_port(host, port)
-    url = generate_graph_url(host=host, port=selected_port, session_id=session_id)
+    url = generate_graph_url(host=host, port=selected_port, session_id=session_id, agent=normalized_agent)
 
     from app.storage.memories import get_memory_count, list_memory_session_ids
 

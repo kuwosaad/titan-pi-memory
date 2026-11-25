@@ -3,9 +3,11 @@
 from typing import Optional
 
 
-def build_graph(session_id: Optional[str] = None) -> str:
+def build_graph(session_id: Optional[str] = None, *, agent: Optional[str] = None) -> str:
     from .builder import build_graph as build_graph_impl
 
+    if agent:
+        return build_graph_impl(session_id=session_id, agent=agent)
     return build_graph_impl(session_id=session_id)
 
 

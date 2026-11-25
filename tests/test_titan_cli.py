@@ -427,10 +427,10 @@ class TitanCliTests(unittest.TestCase):
         ):
             exit_code = run_graph(agent="opencode", session_id="ses_123", open_browser=True, port=8010)
         self.assertEqual(exit_code, 0)
-        open_mock.assert_called_once_with("http://127.0.0.1:8010/graph?session_id=ses_123")
+        open_mock.assert_called_once_with("http://127.0.0.1:8010/graph?session_id=ses_123&agent=opencode")
         uvicorn_mock.assert_called_once_with("entrypoints.main:app", host="127.0.0.1", port=8010, reload=False)
         output = stdout.getvalue()
-        self.assertIn("Graph URL: http://127.0.0.1:8010/graph?session_id=ses_123", output)
+        self.assertIn("Graph URL: http://127.0.0.1:8010/graph?session_id=ses_123&agent=opencode", output)
         self.assertIn("Memory count: 1", output)
 
     def test_run_graph_reports_port_fallback(self):

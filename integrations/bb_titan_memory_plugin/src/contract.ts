@@ -4,10 +4,14 @@ import { z } from "zod";
 
 /**
  * The explorer intentionally speaks a small, versioned subset of Titan's
- * memory model. Do not add raw provenance, embeddings, or LNN state here.
+ * memory model, including bounded excerpts in selected-memory details.
  */
+// The Python helper counts Unicode code points, while JavaScript length counts UTF-16 units.
+const boundedText = (max: number) =>
+  z.string().refine((value) => value.length <= max || Array.from(value).length <= max, `must be at most ${max} characters`);
+
 const identifier = (max: number) =>
-  z.string().min(1).max(max).refine((value) => !/[\r\n]/.test(value), "must not contain newlines");
+  boundedText(max).refine((value) => value.length > 0 && !/[\r\n\0]/.test(value), "must be a nonempty identifier");
 
 const agentName = z
   .string()
@@ -97,11 +101,11 @@ export const memorySummarySchema = z
     nodeId: identifier(512),
     sourceAgent: identifier(128),
     memoryId: identifier(256),
-    text: z.string().max(240),
-    type: z.string().max(128).nullable(),
-    stream: z.string().max(64).nullable(),
-    timestamp: z.string().max(128).nullable(),
-    sessionId: z.string().max(256).nullable(),
+    text: boundedText(240),
+    type: boundedText(128).nullable(),
+    stream: boundedText(64).nullable(),
+    timestamp: boundedText(128).nullable(),
+    sessionId: boundedText(256).nullable(),
     hasEmbedding: z.boolean(),
   })
   .strict();
@@ -110,7 +114,7 @@ export const graphEdgeSchema = z
   .object({
     source: identifier(512),
     target: identifier(512),
-    kind: z.literal("similarity"),
+    kind: z.enum(["similarity", "supersedes"]),
     weight: z.number().finite().min(0).max(1),
   })
   .strict();
@@ -145,7 +149,33 @@ export const catalogOutputSchema = z
   })
   .strict();
 
-const metadataValue = z.union([z.string().max(1024), z.number().finite(), z.boolean(), z.null()]);
+const metadataValue = z.union([boundedText(1024), z.number().finite(), z.boolean(), z.null()]);
+
+const correctionSchema = z.object({
+  direction: z.enum(["replaces", "replacedBy"]),
+  memory: memorySummarySchema.nullable(),
+  memoryId: identifier(256),
+  evidence: boundedText(1024),
+  timestamp: boundedText(128).nullable(),
+}).strict();
+
+const memoryEvidenceSchema = z.object({
+  userText: boundedText(2048),
+  assistantText: boundedText(2048),
+  eventIds: z.array(identifier(256)).max(12),
+}).strict();
+
+const sceneEvidenceSchema = memoryEvidenceSchema.extend({
+  id: identifier(256),
+  status: z.enum(["complete", "partial", "missing", "unavailable"]),
+});
+
+const patternEvidenceSchema = z.object({
+  id: identifier(256),
+  title: boundedText(240),
+  status: boundedText(64),
+  role: boundedText(64),
+}).strict();
 
 export const detailOutputSchema = z
   .object({
@@ -153,6 +183,12 @@ export const detailOutputSchema = z
     text: z.string().max(16 * 1024),
     metadata: z.record(z.string().max(128), metadataValue),
     truncated: z.boolean(),
+    corrections: z.array(correctionSchema).max(12).optional(),
+    correctionsPartial: z.boolean().optional(),
+    scene: sceneEvidenceSchema.nullable().optional(),
+    memoryEvidence: memoryEvidenceSchema.nullable().optional(),
+    patterns: z.array(patternEvidenceSchema).max(12).optional(),
+    warnings: z.array(warningSchema).max(32).optional(),
   })
   .strict();
 

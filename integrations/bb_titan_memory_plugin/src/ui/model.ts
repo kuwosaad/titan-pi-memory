@@ -115,6 +115,7 @@ export function connectedMemories(
   const byId = new Map(memories.map((memory) => [memory.nodeId, memory]));
   const result: Array<{ memory: MemorySummary; weight: number }> = [];
   for (const edge of snapshot.edges) {
+    if (edge.kind !== "similarity") continue;
     const neighborId = edge.source === nodeId ? edge.target : edge.target === nodeId ? edge.source : null;
     if (!neighborId) continue;
     const memory = byId.get(neighborId);
