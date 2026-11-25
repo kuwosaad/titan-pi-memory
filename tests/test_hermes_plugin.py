@@ -9,14 +9,52 @@ class HermesPluginTests(unittest.TestCase):
         self.ctx = Mock()
         self.ctx.call_mcp.return_value = {"ok": True}
         plugin.register(self.ctx)
-        hook, self.capture = self.ctx.register_hook.call_args.args
-        self.assertEqual(hook, "post_llm_call")
+        hooks = dict(call.args for call in self.ctx.register_hook.call_args_list)
+        self.stage = hooks["post_llm_call"]
+        self.finish = hooks["on_session_end"]
         self.turn = {
             "session_id": "session-1",
             "turn_id": "turn-1",
             "user_message": "Remember that release day is Tuesday.",
             "assistant_response": "Got it. We release on Tuesday.",
         }
+
+    def end_turn(self, turn, **overrides):
+        outcome = {
+            "session_id": turn["session_id"],
+            "turn_id": turn["turn_id"],
+            "completed": True,
+            "failed": False,
+            "interrupted": False,
+            "turn_exit_reason": "text_response(stop)",
+        }
+        self.finish(**(outcome | overrides))
+
+    def capture(self, **turn):
+        self.stage(**turn)
+        self.end_turn(turn)
+
+    def test_discards_blocked_failed_and_interrupted_turns(self):
+        for outcome in (
+            {"turn_exit_reason": "blocked_by_plugin_pre_llm_call"},
+            {"completed": False, "failed": True},
+            {"completed": False, "interrupted": True},
+            {"turn_exit_reason": None},
+        ):
+            with self.subTest(outcome=outcome):
+                self.stage(**self.turn)
+                self.end_turn(self.turn, **outcome)
+                self.end_turn(self.turn)
+        self.ctx.call_mcp.assert_not_called()
+
+    def test_waits_for_the_matching_turn_and_consumes_it_once(self):
+        self.stage(**self.turn)
+        self.end_turn(self.turn, session_id="unrelated-session")
+        self.end_turn(self.turn, turn_id="unrelated-turn")
+        self.ctx.call_mcp.assert_not_called()
+        self.end_turn(self.turn)
+        self.end_turn(self.turn)
+        self.ctx.call_mcp.assert_called_once()
 
     def test_captures_only_the_current_text_pair_with_stable_turn_identity(self):
         self.capture(**self.turn, conversation_history=[{"content": "private history"}])

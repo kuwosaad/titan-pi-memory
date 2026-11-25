@@ -4,3 +4,4 @@ description: Capture completed Hermes Agent turns in Titan Memory.
 requires_hermes: ">=0.23.4"
 provides_hooks:
   - post_llm_call
+  - on_session_end
