@@ -11,6 +11,15 @@ from entrypoints import mcp_server
 
 
 class MCPServerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_trace_text_limit_applies_after_credential_redaction(self):
+        prefix = "a" * 11_950
+        fixture = prefix + "\n-----BEGIN PRIVATE KEY-----\n" + "b" * 100 + "\n-----END PRIVATE KEY-----"
+        with patch.object(mcp_server, "handle_trace_packet", return_value={}) as store:
+            await mcp_server.store_trace_packet(goal=fixture, outcome="x" * 12_001, max_text_chars=12_000)
+        packet = store.call_args.args[0]
+        self.assertEqual(packet.goal, prefix + "\n[redacted]")
+        self.assertEqual(packet.outcome, "x" * 12_000)
+
     async def test_query_memories_returns_scene_pointers_without_expanding_scenes(self):
         expected = {
             "count": 1,

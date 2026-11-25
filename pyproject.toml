@@ -56,6 +56,7 @@ exclude = [
 ]
 
 [tool.setuptools.package-data]
+"app.graph" = ["ui/*.html", "ui/*.css", "ui/*.js"]
 "tools.cli" = ["onboarding_ui/*"]
 config = [
   ".env.example",
@@ -91,3 +92,4 @@ config = [
   "package.json",
   "package-lock.json",
 ]
+"integrations.hermes_titan_plugin" = ["README.md", "plugin.yaml"]
