@@ -26,6 +26,7 @@ from typing import Mapping, Sequence
 # The first CLI invocation is different: titan.js lazily creates a venv and
 # installs the bundled requirements before it can answer list-tools.
 WARM_STARTUP_TIMEOUT_SEC = 30
+NPM_INSTALL_TIMEOUT_SEC = 90
 COLD_BOOTSTRAP_TIMEOUT_SEC = 5 * 60
 SUBPROCESS_TIMEOUT_SEC = WARM_STARTUP_TIMEOUT_SEC
 DIAGNOSTIC_LIMIT = 8 * 1024
@@ -365,6 +366,7 @@ def verify(root: Path, requested_archive: Path | None) -> tuple[str, int, int, i
             ],
             cwd=temporary,
             env=env,
+            timeout=NPM_INSTALL_TIMEOUT_SEC,
         )
         installed_cli = install_prefix / "node_modules" / "titan-memory-cli" / "bin" / "titan.js"
         if not installed_cli.is_file():
