@@ -405,11 +405,13 @@ def test_readme_points_new_users_at_current_install_path():
     assert "git+https://github.com/kuwosaad/titan-karu.git" not in readme
 
 
-def test_codex_install_docs_use_npm_or_pypi_without_root_installer():
+def test_codex_install_docs_use_npm_or_source_without_root_installer():
     npm_readme = (ROOT / "packages/titan-memory-cli/README.md").read_text(encoding="utf-8")
     pypi_readme = (ROOT / "docs/pypi_titan_memory_cli.md").read_text(encoding="utf-8")
 
     assert "npx -y titan-memory-cli@latest setup codex" in npm_readme
-    assert "pip install titan-memory-cli" in pypi_readme
+    # No PyPI release exists yet, so the guide must not advertise one.
+    assert "npm install -g titan-memory-cli" in pypi_readme
+    assert "pip install titan-memory-cli" not in pypi_readme
     assert "install.sh" not in npm_readme
     assert "install.sh" not in pypi_readme
