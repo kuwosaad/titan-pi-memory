@@ -92,8 +92,13 @@ standalone checkout is not authorized to publish either distribution.
 
 ## Install
 
+The Python distribution is not yet published on PyPI. Use the npm wrapper, or
+install from the root of a source checkout:
+
 ```bash
-pip install titan-memory-cli
+npm install -g titan-memory-cli
+# or, from a source checkout:
+pipx install .
 ```
 
 Verify:

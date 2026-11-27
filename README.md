@@ -5,6 +5,7 @@
 <h1 align="center">Titan Memory</h1>
 <p align="center"><strong>Local-first multi-agent memory for coding agents.</strong></p>
 <p align="center">
+  <a href="#benchmarks">Benchmarks</a> ·
   <a href="#get-started">Get started</a> ·
   <a href="#use-titan">Usage</a> ·
   <a href="#explore-your-memory-in-bb">BB explorer</a> ·
@@ -21,6 +22,23 @@ agent.
 Adapters connect **Pi, Codex, Claude Code, OpenCode, Grok, and Hermes Agent**. Each agent writes
 to its own local memory store; recall can search across them. A separate **BB
 plugin** lets you explore those memories visually beside your chat.
+
+## Benchmarks
+
+On LongMemEval-S (500 questions), with Titan's R5 memory pipeline feeding eight
+reader models, the top four readers score:
+
+| Reader | Rubric accuracy |
+| --- | --- |
+| Claude Opus 5.5 | 97.2% |
+| Gemini 4 Neon | 96.0% |
+| Claude Sonnet 5.5 | 93.6% |
+| GPT-6.2 Sol | 93.4% |
+
+Scored with the official rubric and one judge. **R5 was tuned on these same 500
+cases, so these are development-set results, not a held-out score.** See the
+[full LongMemEval-S report](docs/benchmarks/longmemeval-s.md) for all readers,
+speed, and method.
 
 ## What Titan does
 
@@ -52,7 +70,7 @@ packages; installing the Pi extension does not install the `titan` command.
 | Claude Code | Plugin from a source checkout | [Claude Code](integrations/claude_titan_plugin/README.md) |
 | OpenCode | Source installer for classic OpenCode 1.x | [OpenCode](integrations/opencode_titan_plugin/README.md) |
 | Grok | Local plugin installer from source | [Grok](integrations/grok_titan_plugin/README.md) |
-| Hermes Agent | Native plugin and local MCP configuration | [Hermes Agent](integrations/hermes_titan_plugin/README.md) |
+| Hermes Agent | Hermes plugin catalog, plus Titan CLI and MCP configuration | [Hermes Agent](integrations/hermes_titan_plugin/README.md) |
 | BB | Separate visual explorer plugin | [BB](integrations/bb_titan_memory_plugin/README.md) |
 
 ### Pi
@@ -102,6 +120,27 @@ MCP defaults to the core profile: `query_memories`, `store_trace_packet`,
 `TITAN_MCP_TOOL_PROFILE=full` in the MCP server environment and restart the
 server. Set `TITAN_MCP_TOOL_PROFILE=core` to explicitly select the smaller
 profile; an existing integration configuration may override the default.
+
+### Hermes Agent
+
+You need Hermes Agent 0.23.4+ and the Titan CLI on the Hermes process's `PATH`,
+installed from the same Titan revision as the plugin (the catalog entry lists
+the commit; check it out and run `pipx install .` from the repository root).
+Then install the plugin from the catalog:
+
+```bash
+hermes plugins install titan-memory --enable
+```
+
+In your Hermes profile's `config.yaml`, add a `titan-memory` MCP server that
+runs `titan mcp --agent hermes`, and add `titan-memory` to the plugin's
+`mcp_allowlist`. Configure Titan's extraction and embedding providers before
+the first capture; for the bundled defaults, run
+`titan key set OPENCODE_GO_API_KEY --agent hermes` and
+`ollama pull nomic-embed-text:v1.5`. The plugin captures successful text turns
+and works alongside Hermes' built-in memory. See the
+[Hermes guide](integrations/hermes_titan_plugin/README.md) for the exact YAML,
+per-profile stores, and verification.
 
 ### Claude Code, OpenCode, and Grok
 
@@ -178,14 +217,17 @@ See the [Grok guide](integrations/grok_titan_plugin/README.md).
 
 ### Standalone CLI
 
-Choose one installation method:
+Install the npm wrapper (Node.js 18+ and Python 3.10+):
 
 ```bash
-# npm wrapper: Node.js 18+ and Python 3.10+
 npm install -g titan-memory-cli
+```
 
-# Or Python package: use your Python environment
-pip install titan-memory-cli
+Titan is not published on PyPI. To install the Python package instead, run
+this from the root of a source checkout:
+
+```bash
+pipx install .   # or: pip install .
 ```
 
 Then:
@@ -195,9 +237,9 @@ titan --help
 titan doctor --agent codex
 ```
 
-The npm wrapper manages the Python runtime dependencies. The Python package
-installs the `titan` entrypoint directly. See the
-[CLI guide](docs/pypi_titan_memory_cli.md) for setup and maintenance.
+The npm wrapper manages the Python runtime dependencies. The source install
+puts the `titan` entrypoint on your `PATH` directly. See the
+[CLI guide](docs/pypi_titan_memory_cli.md) for distribution and maintenance.
 
 ## Use Titan
 
@@ -329,7 +371,8 @@ of the same engine.
 | `config/` | Default model and runtime settings |
 | `tests/` | Python regression tests |
 
-Read [AGENTS.md](AGENTS.md) for repository guidance and the relevant integration's
+Start with the [documentation index](docs/README.md). Read
+[AGENTS.md](AGENTS.md) for repository guidance and the relevant integration's
 README for its checks. The BB explorer's focused checks are:
 
 ```bash
@@ -350,5 +393,6 @@ paths. See [repository ownership](docs/repository-ownership.md) and the
 
 [Pi package](https://www.npmjs.com/package/titan-pi-memory) ·
 [CLI package](https://www.npmjs.com/package/titan-memory-cli) ·
+[Documentation](docs/README.md) ·
 [Issues](https://github.com/kuwosaad/titan-pi-memory/issues) ·
 [Apache 2.0 license](LICENSE)
