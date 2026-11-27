@@ -48,10 +48,11 @@ review that setting before adding a grant.
 The plugin sends the current prompt and final reply to the configured local
 Titan MCP server after Hermes confirms the turn succeeded. Attachments,
 tool data, and conversation history stay in Hermes. Failed, interrupted,
-and policy-vetoed turns are discarded. The plugin caps the prompt and the
-reply at 12,000 characters each before the MCP call. A word cut by that limit
-is dropped whole, so a trailing partial word after whitespace stays in Hermes. Titan then redacts
-recognized credentials before storing anything.
+and policy-vetoed turns are discarded. Before the MCP call, the plugin replaces
+credentials it recognizes with `[redacted]`, using the same patterns as Titan.
+It then caps the prompt and the reply at 12,000 characters each. Redaction
+runs before the cut, so the cut cannot leave part of a recognized credential
+for Titan to miss. Credentials in unrecognized formats are not redacted.
 
 Hermes starts the installed plugin's managed MCP subprocess. Titan saves traces,
 source scenes, and extracted memories under the selected agent's Titan

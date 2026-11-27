@@ -17,6 +17,30 @@ CAPTURE_TIMEOUT_SECONDS = 10
 MAX_PENDING_TURNS = 64
 POLICY_VETO = "blocked_by_plugin_pre_llm_call"
 _PARTIAL_TRAILING_TOKEN = re.compile(r"\s\S*\Z")
+_REDACTED = "[redacted]"
+# Copy of Titan's credential patterns (app/storage/traces.py). The plugin is
+# installed on its own and cannot import Titan, so they are duplicated here and
+# kept in sync by tests/test_hermes_plugin.py.
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r"\bsk[-_][A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bntn_[A-Za-z0-9]{12,}\b"),
+    re.compile(r"\bsecret_[A-Za-z0-9]{12,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bnpm_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._-]{8,}\b", re.IGNORECASE),
+    re.compile(
+        r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+        re.DOTALL,
+    ),
+    re.compile(
+        r"\b[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|ACCESS_KEY)[A-Z0-9_]*\s*=\s*(?:[^\s'\"]+|'[^']*'|\"[^\"]*\")",
+        re.IGNORECASE,
+    ),
+)
 
 
 def _message_text(message):
@@ -35,14 +59,22 @@ def _message_text(message):
     return "\n".join(parts)
 
 
-def _bounded(text):
-    """Cap text before it leaves Hermes.
+def _redact(text):
+    for pattern in _SECRET_VALUE_PATTERNS:
+        text = pattern.sub(_REDACTED, text)
+    return text
 
-    Credentials are whitespace-free tokens. A cut inside one would leave a
-    fragment Titan's redaction no longer recognizes, so a token split by the
-    limit is dropped whole rather than sent in part. Text with no whitespace
-    at all keeps the hard cut; its prefix still matches Titan's patterns.
+
+def _bounded(text):
+    """Redact recognized credentials, then cap text before it leaves Hermes.
+
+    Redaction runs on the full text. A cut can leave a fragment Titan's
+    patterns no longer match (a key block without its END line, a quoted
+    value without its closing quote, a token shorter than its minimum), so
+    cutting first would send such fragments. A word split by the limit is
+    dropped whole; text with no whitespace keeps the hard cut.
     """
+    text = _redact(text)
     if len(text) <= MAX_TEXT_CHARS:
         return text
     clipped = text[:MAX_TEXT_CHARS]

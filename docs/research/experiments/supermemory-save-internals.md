@@ -252,10 +252,10 @@ Current Titan already durably saves the scene before normal event extraction,
 retries from that scene, validates extraction JSON, uses scene-derived memory IDs,
 and has an exact-evidence retry key excluding fresh IDs/turns/embeddings while
 preserving scene/event/provenance distinctions. See
-[pipeline retry](../../app/save_pipeline/pipeline.py:799),
-[save and scene IDs](../../app/save_pipeline/pipeline.py:131),
-[normal event path](../../app/save_pipeline/pipeline.py:1929), and
-[exact evidence identity](../../app/storage/memories.py:213).
+[pipeline retry](../../../app/save_pipeline/pipeline.py:799),
+[save and scene IDs](../../../app/save_pipeline/pipeline.py:131),
+[normal event path](../../../app/save_pipeline/pipeline.py:1929), and
+[exact evidence identity](../../../app/storage/memories.py:213).
 These guarantees should be preserved; copying the local agent's fresh-ID writes
 would not improve duplicate-save safety.
 

@@ -116,7 +116,7 @@ abstention, source lineage, and actual rendered budget separately.
 Several advertised concepts already exist in Titan: retained source scenes/event
 IDs, atomic extraction instructions, explicit subject/scope anchors, causality,
 state distinctions, and exact-evidence retry identity. The current
-[compiler prompt](../../app/save_pipeline/extraction/prompts.py) already asks for
+[compiler prompt](../../../app/save_pipeline/extraction/prompts.py) already asks for
 concrete subjects, scope, useful causal detail, direct wording instead of
 pronouns, and explicit superseding updates. Adding the same instruction again
 would not establish an improvement.

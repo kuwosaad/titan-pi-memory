@@ -154,8 +154,53 @@ class HermesPluginTests(unittest.TestCase):
         lead = "a" * (plugin.MAX_TEXT_CHARS - 20) + " "
         self.capture(**{**self.turn, "user_message": lead + secret + " tail"})
         goal = self.ctx.call_mcp.call_args.args[2]["goal"]
-        self.assertEqual(goal, lead.rstrip())
+        self.assertEqual(goal, lead + "[redacted] tail")
         self.assertNotIn("sk-", goal)
+
+    def test_unrecognized_word_split_by_the_limit_is_dropped_whole(self):
+        lead = "a" * (plugin.MAX_TEXT_CHARS - 5) + " "
+        self.capture(**{**self.turn, "user_message": lead + "Q" * 40 + " tail"})
+        self.assertEqual(self.ctx.call_mcp.call_args.args[2]["goal"], lead.rstrip())
+
+    def captured_goal(self, message):
+        self.capture(**{**self.turn, "user_message": message})
+        goal = self.ctx.call_mcp.call_args.args[2]["goal"]
+        self.assertLessEqual(len(goal), plugin.MAX_TEXT_CHARS)
+        return goal
+
+    def test_private_key_straddling_the_limit_is_redacted_before_the_cut(self):
+        body = "\n".join("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC%04dABCDEFGH" % i for i in range(40))
+        pem = "-----BEGIN PRIVATE KEY-----\n" + body + "\n-----END PRIVATE KEY-----"
+        goal = self.captured_goal("x" * (plugin.MAX_TEXT_CHARS - 400) + "\n" + pem + "\nthanks")
+        self.assertNotIn("MIIEvQ", goal)
+        self.assertNotIn("BEGIN PRIVATE KEY", goal)
+        self.assertTrue(goal.endswith("[redacted]\nthanks"))
+
+    def test_quoted_secret_straddling_the_limit_is_redacted_before_the_cut(self):
+        goal = self.captured_goal(
+            "y" * (plugin.MAX_TEXT_CHARS - 30)
+            + ' DB_PASSWORD="correct horse battery staple zebra quantum" end'
+        )
+        self.assertNotIn("DB_PASSWORD", goal)
+        self.assertNotIn("correct horse", goal)
+        self.assertTrue(goal.endswith(" [redacted] end"))
+
+    def test_token_cut_in_text_without_whitespace_is_redacted_before_the_cut(self):
+        token = "ghp_" + "Zq9" * 12
+        goal = self.captured_goal(
+            '{"pad":"' + "p" * (plugin.MAX_TEXT_CHARS - 30) + '","token":"' + token + '"}'
+        )
+        self.assertNotIn("ghp_", goal)
+        self.assertNotIn("Zq9", goal)
+
+    def test_redaction_patterns_match_titan(self):
+        from app.storage import traces
+
+        def spec(patterns):
+            return [(pattern.pattern, pattern.flags) for pattern in patterns]
+
+        self.assertEqual(spec(plugin._SECRET_VALUE_PATTERNS), spec(traces._SECRET_VALUE_PATTERNS))
+        self.assertEqual(plugin._REDACTED, traces._redact_sensitive_string("sk-abcdefghijkl"))
 
     def test_text_within_the_limit_is_sent_unchanged(self):
         exact = "b" * plugin.MAX_TEXT_CHARS
