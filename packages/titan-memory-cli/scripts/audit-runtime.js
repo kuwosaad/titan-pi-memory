@@ -17,6 +17,9 @@ const requiredRuntimeFiles = [
   'integrations/codex_titan_plugin/hooks/hooks.json',
   'integrations/claude_titan_plugin/.claude-plugin/plugin.json',
   'integrations/claude_titan_plugin/.mcp.json',
+  'integrations/hermes_titan_plugin/__init__.py',
+  'integrations/hermes_titan_plugin/plugin.yaml',
+  'integrations/hermes_titan_plugin/README.md',
   'tools/cli/titan.py',
 ];
 const allowedSuffixes = new Set([

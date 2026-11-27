@@ -18,7 +18,7 @@ outcomes—so your agents can find it again later. Ask what you changed last wee
 recover the reasoning behind a decision, or pick up a project with a different
 agent.
 
-Adapters connect **Pi, Codex, Claude Code, OpenCode, and Grok**. Each agent writes
+Adapters connect **Pi, Codex, Claude Code, OpenCode, Grok, and Hermes Agent**. Each agent writes
 to its own local memory store; recall can search across them. A separate **BB
 plugin** lets you explore those memories visually beside your chat.
 
@@ -52,6 +52,7 @@ packages; installing the Pi extension does not install the `titan` command.
 | Claude Code | Plugin from a source checkout | [Claude Code](integrations/claude_titan_plugin/README.md) |
 | OpenCode | Source installer for classic OpenCode 1.x | [OpenCode](integrations/opencode_titan_plugin/README.md) |
 | Grok | Local plugin installer from source | [Grok](integrations/grok_titan_plugin/README.md) |
+| Hermes Agent | Native plugin and local MCP configuration | [Hermes Agent](integrations/hermes_titan_plugin/README.md) |
 | BB | Separate visual explorer plugin | [BB](integrations/bb_titan_memory_plugin/README.md) |
 
 ### Pi

@@ -8,11 +8,11 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 import yaml
 from mcp.server import FastMCP
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 _default_home = ROOT_DIR if (ROOT_DIR / ".git").exists() else (Path.home() / ".titan-memory")
@@ -40,6 +40,7 @@ from app.save_pipeline.pipeline import (
 )
 from app.storage.memories import get_memory_count, get_recent_memories as load_recent_memories, get_memory_repository
 from app.storage.models import TraceEvent, TracePacketRequest, TraceToolCall
+from app.storage.traces import sanitize_trace_value
 from app.save_pipeline.auto_ingest import _auto_ingest_loop
 from integrations.codex_titan_plugin.pending_recovery import (
     inspect_codex_stop_hook,
@@ -121,7 +122,12 @@ async def store_trace_packet(
     save_intent: Optional[bool] = None,
     intent_phrase: Optional[str] = None,
     context: Optional[dict] = None,
+    max_text_chars: Annotated[Optional[int], Field(ge=1, le=12_000)] = None,
 ) -> dict:
+    """Save a trace. When provided, cap goal and outcome after redacting secrets."""
+    if max_text_chars is not None:
+        goal = sanitize_trace_value(goal).strip()[:max_text_chars].rstrip()
+        outcome = sanitize_trace_value(outcome).strip()[:max_text_chars].rstrip()
     req = TracePacketRequest(
         goal=goal,
         thoughts=thoughts,

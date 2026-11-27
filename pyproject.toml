@@ -92,3 +92,4 @@ config = [
   "package.json",
   "package-lock.json",
 ]
+"integrations.hermes_titan_plugin" = ["README.md", "plugin.yaml"]
