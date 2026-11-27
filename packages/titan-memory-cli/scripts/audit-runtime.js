@@ -30,6 +30,10 @@ const allowedOnboardingAssets = new Set([
   'tools/cli/onboarding_ui/source-serif-regular.ttf',
   'tools/cli/onboarding_ui/titan-logo.svg',
 ]);
+// Licenses that must ship beside the vendored D3 modules in the memory graph.
+const allowedVendorLicenses = new Set(
+  ['d3-dispatch', 'd3-force', 'd3-quadtree', 'd3-timer'].map((name) => `app/graph/ui/vendor/${name}.LICENSE`),
+);
 const forbiddenPathPrefixes = [
   'entrypoints/overnight/',
   'tools/benchmarks/',
@@ -118,6 +122,7 @@ for (const file of runtimeFiles) {
   const suffix = path.extname(file.relative).toLowerCase();
   if (!allowedExtensionlessFiles.has(file.relative)
     && !allowedOnboardingAssets.has(file.relative)
+    && !allowedVendorLicenses.has(file.relative)
     && file.relative !== 'config/.env.example'
     && suffix !== '' && !allowedSuffixes.has(suffix)) {
     violations.push(`${file.relative}: unexpected artifact file type`);
