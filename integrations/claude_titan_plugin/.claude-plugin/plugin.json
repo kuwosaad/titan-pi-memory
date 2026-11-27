@@ -87,7 +87,7 @@
     "opencode_go_api_key": {
       "type": "string",
       "title": "OpenCode Go API key",
-      "description": "Optional credential for the default extraction model. Leave blank to keep your existing Titan provider settings.",
+      "description": "Optional credential for the default extraction model. When set, it takes precedence over a key saved in /titan-memory:setup. Leave blank to keep your existing Titan provider settings.",
       "sensitive": true,
       "default": ""
     }

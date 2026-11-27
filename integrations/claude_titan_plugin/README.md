@@ -12,18 +12,22 @@ The plugin is deliberately fail-open. If Titan is unavailable or recall exceeds 
 
 Install Python 3.10 or later with `python3` on PATH. The plugin starts its own Titan runtime. Its first launch needs internet access to install Python dependencies.
 
-For a checkout containing this release, open a terminal at the repository root:
+For a checkout containing this release, open a terminal at the repository root (the directory that contains `.claude-plugin/marketplace.json`):
 
 ```bash
-claude plugin marketplace add .
+claude plugin marketplace add ./
 claude plugin install titan-memory@titan-pi-memory --config agent_name=claude-code
 ```
+
+Claude Code accepts a local marketplace only as a path starting with `./`, `../`, `/` or `~`; a bare `.` is rejected.
 
 Once this version is published to the GitHub marketplace, replace the first command with `claude plugin marketplace add kuwosaad/titan-pi-memory`. Start a new Claude Code session or run `/reload-plugins` in an open session.
 
 1. Run `/plugin configure titan-memory@titan-pi-memory` in Claude Code. For the default extraction provider, enter your OpenCode Go API key in the masked **OpenCode Go API key** field. Existing Titan provider settings and environment credentials work when the field is blank. Keep API keys out of chat and shell arguments.
 2. For the default embeddings, start Ollama and run `ollama pull nomic-embed-text:v1.5`. Titan uses the local Ollama service at `http://localhost:11434`. Existing namespaces keep their configured extraction and embedding models.
 3. To choose a different extraction or embedding provider, run `/titan-memory:setup` and save your choices in the local browser form.
+
+   **Which OpenCode Go key is used:** a key in the `/plugin configure` field takes precedence over one saved by `/titan-memory:setup`. While that field is set, the setup form shows the key as set in `/plugin configure` and does not accept a replacement, so rotate it with `/plugin configure`. To manage the key in the setup form instead, clear the field, reload the plugin, then run `/titan-memory:setup`.
 4. Reload the plugin, then open `/mcp` and look for the connected Titan server. The first connection can take longer while dependencies install. If Claude reports a timeout during installation, reconnect from `/mcp`. Use `/hooks` to inspect capture. To check the configured extraction and embedding endpoints, use the connection checks in `/titan-memory:setup`.
 
 The hooks can queue messages before MCP finishes starting. After the runtime connects, it drains that queue. For local development without marketplace registration, use `claude --plugin-dir ./integrations/claude_titan_plugin`.

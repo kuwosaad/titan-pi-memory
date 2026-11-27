@@ -19,6 +19,7 @@ from tools.cli.onboarding_checks import check_configuration
 
 UI_DIR = Path(__file__).parent / 'onboarding_ui'
 MAX_BODY = 32768
+MANAGED_KEYS_FILE = 'plugin_managed_keys.json'
 AGENTS = [{'id': 'opencode', 'label': 'OpenCode'}, {'id': 'codex', 'label': 'Codex'},
           {'id': 'claude-code', 'label': 'Claude Code'}, {'id': 'pi', 'label': 'Pi'}]
 MODELS = {
@@ -59,7 +60,26 @@ def _state(agent):
         if selected[kind]['model'] not in entry['models']:
             entry['models'].insert(0, selected[kind]['model'])
     keys = {item['key_env'] for catalog in catalogs.values() for item in catalog if item['key_env']}
-    return {'agents': AGENTS, **catalogs, 'selected': selected, 'saved_keys': sorted(key for key in keys if env.get(key))}
+    managed = {key: source for key, source in _managed_keys(home).items() if key in keys}
+    return {'agents': AGENTS, **catalogs, 'selected': selected,
+            'saved_keys': sorted(key for key in keys if env.get(key) and key not in managed),
+            'managed_keys': managed}
+
+
+def _managed_keys(home):
+    """Credentials an agent host supplies itself, which take precedence over the .env.
+
+    The Claude Code launcher records the names (never the values) of keys set in
+    /plugin configure. A key saved here would be overridden by that value, so the
+    form shows where to change it instead of accepting a replacement.
+    """
+    try:
+        data = json.loads((home / MANAGED_KEYS_FILE).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str) and v}
 
 
 def _validate(data, *, agents=AGENTS):
@@ -78,6 +98,11 @@ def _validate(data, *, agents=AGENTS):
     allowed_keys = {x['key_env'] for kind in ('extraction', 'embedding') for x in _catalog(kind) if x['key_env']}
     if any(k not in allowed_keys or not isinstance(v, str) or len(v) > 4096 or '\n' in v or '\r' in v for k, v in keys.items()):
         return ['Invalid credential entry.']
+    managed = _managed_keys(home)
+    overridden = sorted(k for k, v in keys.items() if v.strip() and k in managed)
+    if overridden:
+        return [f'{k} is set in {managed[k]}, which takes precedence over a key saved here. '
+                f'Change it there, or clear that field and reload the plugin first.' for k in overridden]
     for kind in ('extraction', 'embedding'):
         value = data.get(kind)
         if not isinstance(value, dict):
@@ -90,7 +115,7 @@ def _validate(data, *, agents=AGENTS):
             errors.append(f'Choose a valid {kind} provider and model.')
             continue
         key = entry['key_env']
-        if key and not (keys.get(key, '').strip() or env.get(key)):
+        if key and not (keys.get(key, '').strip() or env.get(key) or key in managed):
             errors.append(f'{key} is required.')
     if errors:
         return errors
@@ -318,7 +343,8 @@ class Handler(BaseHTTPRequestHandler):
                     effective_env = titan._read_agent_effective_env(home, {})
                     config_path = Path(effective_env.get('TITAN_' + kind.upper() + '_CONFIG_PATH') or home / 'config' / (kind + '_models.yaml')).expanduser()
                     configs[kind] = titan._load_yaml(config_path if config_path.exists() else titan.ROOT_DIR / 'config' / (kind + '_models.yaml'))
-                result = check_configuration(data, configs=configs, env=titan._read_agent_effective_env(home, {}))
+                result = check_configuration(data, configs=configs, env=titan._read_agent_effective_env(home, {}),
+                                             managed_keys=_managed_keys(home))
                 self.server.validated = hmac.new(self.server.token.encode(), json.dumps(data, sort_keys=True).encode(), hashlib.sha256).digest() if result['ok'] else None
                 return self._send(200 if result['ok'] else 400, result)
             signature = hmac.new(self.server.token.encode(), json.dumps(data, sort_keys=True).encode(), hashlib.sha256).digest()

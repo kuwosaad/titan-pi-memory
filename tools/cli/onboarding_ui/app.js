@@ -54,17 +54,20 @@
       if (!provider) { content.innerHTML = heading('setup', 'No options available', 'The setup server did not provide any options for this step.'); buttons(() => {page--;render();}, null); return; }
       chosen.backend = provider.id;
       if (!provider.models.includes(chosen.model)) chosen.model = provider.models[0] || '';
-      const saved = provider.key_env && catalog.saved_keys.includes(provider.key_env);
+      const managedBy = provider.key_env && (catalog.managed_keys || {})[provider.key_env];
+      const saved = provider.key_env && (managedBy || catalog.saved_keys.includes(provider.key_env));
       content.innerHTML = heading(page === 1 ? '02 / extraction' : '03 / embeddings', page === 1 ? 'Choose your brain.' : 'Find the connections.', page === 1 ? 'Choose the provider and model Titan will use to extract memories from sessions.' : 'Choose the provider and model Titan will use to make memories searchable.') +
         `<label class="field"><span>Provider</span><select id="provider">${choices.map(p => `<option value="${esc(p.id)}" ${p.id === provider.id ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></label><label class="field"><span>Model</span><select id="model">${provider.models.map(m => `<option value="${esc(m)}" ${m === chosen.model ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></label>` +
-        (provider.key_env ? `<label class="field"><span>API key</span><input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="${saved ? 'Key already configured' : 'Enter your API key'}"><small>${saved ? 'A key is already configured. Leave blank to keep it, or enter a replacement.' : `Required for ${esc(provider.label)} (${esc(provider.key_env)}).`} ${keyLinks[provider.id] ? `<a href="${keyLinks[provider.id]}" target="_blank" rel="noreferrer">Get an API key ↗</a>` : ''}</small></label>` : '') +
+        (managedBy ? `<label class="field"><span>API key</span><input id="key" type="password" disabled placeholder="Set in ${esc(managedBy)}"><small>This key is set in <code>${esc(managedBy)}</code>, which takes precedence over a key saved here. Change or clear it there.</small></label>` : '') +
+        (provider.key_env && !managedBy ? `<label class="field"><span>API key</span><input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="${saved ? 'Key already configured' : 'Enter your API key'}"><small>${saved ? 'A key is already configured. Leave blank to keep it, or enter a replacement.' : `Required for ${esc(provider.label)} (${esc(provider.key_env)}).`} ${keyLinks[provider.id] ? `<a href="${keyLinks[provider.id]}" target="_blank" rel="noreferrer">Get an API key ↗</a>` : ''}</small></label>` : '') +
         (provider.id === 'ollama' ? `<p class="prerequisite">Install and start <a href="https://ollama.com/download" target="_blank" rel="noreferrer">Ollama ↗</a>, then make sure the selected model is available locally before using Titan. You can download the selected model here, or use <code>ollama pull ${esc(chosen.model)}</code>.</p><button class="button pull" id="pull" type="button">Download model</button><p id="pull-status" class="pull-status" role="status" aria-live="polite"></p>` : '');
       document.querySelector('#provider').onchange = event => { chosen.backend = event.target.value; chosen.model = ''; render(); document.querySelector('#provider').focus(); };
       document.querySelector('#model').onchange = event => { chosen.model = event.target.value; if (provider.id === 'ollama') { render(); document.querySelector('#model').focus(); } };
       const pull = document.querySelector('#pull');
       if (pull) pull.onclick = () => pullModel(chosen.model);
       const key = document.querySelector('#key');
-      if (key) { key.value = keys[provider.key_env] || ''; key.oninput = () => { keys[provider.key_env] = key.value; }; }
+      if (managedBy) delete keys[provider.key_env];
+      else if (key) { key.value = keys[provider.key_env] || ''; key.oninput = () => { keys[provider.key_env] = key.value; }; }
       buttons(() => {page--;render();}, () => { if (!chosen.model) return error('Choose a model to continue.'); if (provider.key_env && !saved && !keys[provider.key_env]?.trim()) return error('Enter an API key to continue.'); page++; render(); });
     } else {
       const agent = catalog.agents.find(a => a.id === selection.agent);

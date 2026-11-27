@@ -52,8 +52,12 @@ def _local_url(value):
         return None
 
 
-def check_configuration(data, configs=None, env=None):
+def check_configuration(data, configs=None, env=None, managed_keys=None):
     """Check selected provider access. Return only safe, actionable diagnostics.
+
+    managed_keys maps credential names the agent host supplies itself (such as a
+    Claude Code /plugin configure field) to where they are set. Those take
+    precedence over the .env and are not visible here, so they are not probed.
 
     Cloud probes make a small billable request. Ollama checks its installed model list.
     Caller should validate the shape of the selection before calling this function.
@@ -95,6 +99,10 @@ def check_configuration(data, configs=None, env=None):
                 errors.append(f'{kind.capitalize()}: custom provider endpoints cannot be checked safely in onboarding.')
                 continue
             key_name = block.get('api_key_env', default_key)
+            if key_name in (managed_keys or {}):
+                warnings.append(f'{kind.capitalize()}: {key_name} is set in {managed_keys[key_name]}, which takes '
+                                f'precedence. Titan uses that key and cannot check it here.')
+                continue
             key = (keys.get(key_name) or env.get(key_name) or '').strip()
             if not key:
                 errors.append(f'{kind.capitalize()}: {default_key} is required.')

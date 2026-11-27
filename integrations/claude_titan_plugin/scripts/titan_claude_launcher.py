@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -11,9 +12,55 @@ import sys
 from pathlib import Path
 
 
-def config_revision(key: str, env: dict[str, str]) -> str:
+KEY_NAME = "OPENCODE_GO_API_KEY"
+# Non-secret record of credentials supplied outside Titan's own .env. Provider
+# setup reads it to show that /plugin configure takes precedence.
+MANAGED_KEYS_FILE = "plugin_managed_keys.json"
+
+
+def agent_home(env: dict[str, str]) -> Path:
     name = re.sub(r"[^a-z0-9]+", "-", env.get("TITAN_AGENT_NAME", "claude-code").lower()).strip("-")
-    home = Path(env.get("TITAN_HOME") or Path.home() / ".titan" / "agents" / name).expanduser()
+    return Path(env.get("TITAN_HOME") or Path.home() / ".titan" / "agents" / name).expanduser()
+
+
+def record_managed_key(home: Path, present: bool) -> None:
+    path = home / MANAGED_KEYS_FILE
+    try:
+        if not present:
+            path.unlink(missing_ok=True)
+            return
+        home.mkdir(mode=0o700, parents=True, exist_ok=True)
+        staged = path.with_name(path.name + f".{os.getpid()}.tmp")
+        staged.write_text(json.dumps({KEY_NAME: "/plugin configure"}) + "\n", encoding="utf-8")
+        os.replace(staged, path)
+    except OSError as exc:
+        print(f"Titan could not record the /plugin configure key source: {exc}", file=sys.stderr)
+
+
+def hold_runtime(python: Path) -> None:
+    """Keep a shared lock on the private runtime for the server's lifetime (POSIX).
+
+    titan_runtime.py does not delete a runtime while any process holds this lock.
+    The descriptor is inheritable, so the lock survives exec.
+    """
+    import fcntl
+    runtime = python.parent.parent
+    if not (runtime / "pyvenv.cfg").is_file():
+        return  # not a private runtime
+    try:
+        handle = open(runtime / "titan-in-use.lock", "a+b")
+        fcntl.flock(handle, fcntl.LOCK_SH)
+        os.set_inheritable(handle.fileno(), True)
+    except OSError:
+        return
+    _HELD.append(handle)
+
+
+_HELD: list = []
+
+
+def config_revision(key: str, env: dict[str, str]) -> str:
+    home = agent_home(env)
     digest = hashlib.sha256(key.encode())
     for path in (home / ".env", home / "config/extraction_models.yaml", home / "config/embedding_models.yaml"):
         try:
@@ -46,13 +93,17 @@ def main() -> int:
         key = ""
     # Reconnect to a new daemon after a native key or saved provider setting changes.
     env["TITAN_CLAUDE_CONFIG_REVISION"] = config_revision(key, env)
+    # A key set in /plugin configure takes precedence over one saved by provider
+    # setup in Titan's .env; setup reads this record and says so.
+    record_managed_key(agent_home(env), bool(key))
     if key:
-        env["OPENCODE_GO_API_KEY"] = key
+        env[KEY_NAME] = key
     argv = [str(python), str(scripts / "titan_claude_mcp.py")]
     # Windows has no real exec: os.exec* there neither quotes arguments containing
     # spaces nor keeps the caller's stdio attached, which breaks MCP servers.
     if os.name == "nt":
         return subprocess.call(argv, env=env)
+    hold_runtime(python)
     os.execve(python, argv, env)
     return 0  # unreachable: execve does not return
 
