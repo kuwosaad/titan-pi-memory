@@ -86,6 +86,15 @@ def managed_python():
         return python
 
 
+def _hand_off(argv: list[str]) -> int:
+    """Replace this process with argv, or run it as a child on Windows."""
+    # Windows has no real exec: os.exec* there neither quotes arguments containing
+    # spaces nor keeps the caller's stdio attached, which breaks MCP servers.
+    if os.name == "nt":
+        return subprocess.call(argv)
+    os.execv(argv[0], argv)
+    return 0  # unreachable: execv does not return
+
 def main(argv):
     if sys.version_info < (3, 10):
         print("Titan requires Python 3.10 or later with venv and pip.", file=sys.stderr)
@@ -101,7 +110,7 @@ def main(argv):
             args = argv[1:]
         else:
             args = ["tools.cli.titan", *argv]
-        os.execv(python, [python, "-I", "-m", *args])
+        return _hand_off([python, "-I", "-m", *args])
     except (OSError, RuntimeError, subprocess.SubprocessError, zipfile.BadZipFile) as exc:
         print(f"Titan could not start its private runtime: {exc}", file=sys.stderr)
         return 1

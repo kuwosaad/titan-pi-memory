@@ -48,7 +48,13 @@ def main() -> int:
     env["TITAN_CLAUDE_CONFIG_REVISION"] = config_revision(key, env)
     if key:
         env["OPENCODE_GO_API_KEY"] = key
-    os.execve(python, [str(python), str(scripts / "titan_claude_mcp.py")], env)
+    argv = [str(python), str(scripts / "titan_claude_mcp.py")]
+    # Windows has no real exec: os.exec* there neither quotes arguments containing
+    # spaces nor keeps the caller's stdio attached, which breaks MCP servers.
+    if os.name == "nt":
+        return subprocess.call(argv, env=env)
+    os.execve(python, argv, env)
+    return 0  # unreachable: execve does not return
 
 
 if __name__ == "__main__":
