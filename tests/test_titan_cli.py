@@ -54,6 +54,14 @@ from tools.cli.titan import (
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
+def _isolated_env(home, **values):
+    """A cleared environment that still lets Path.home() and subprocesses work on Windows."""
+    env = {key: os.environ[key] for key in ("SYSTEMROOT", "TEMP", "TMP") if key in os.environ}
+    env.update(HOME=str(home), USERPROFILE=str(home))
+    env.update(values)
+    return env
+
+
 class TitanCliTests(unittest.TestCase):
     def setUp(self):
         # The CLI captures TITAN_HOME when it is imported.  Give every test a
@@ -818,7 +826,7 @@ class TitanCliTests(unittest.TestCase):
     def test_noninteractive_codex_setup_stops_at_missing_credentials_and_resumes(self):
         with tempfile.TemporaryDirectory() as tmp_dir, patch(
             "tools.cli.titan.TITAN_HOME", Path(tmp_dir) / "titan-home"
-        ), patch.dict(os.environ, {}, clear=True), patch(
+        ), patch.dict(os.environ, _isolated_env(tmp_dir), clear=True), patch(
             "tools.cli.titan.CODEX_MARKETPLACE_DIR", Path(tmp_dir) / "codex-marketplace"
         ), patch("sys.stderr", new_callable=io.StringIO) as errors:
             config_path = Path(tmp_dir) / "codex.toml"
@@ -846,7 +854,7 @@ class TitanCliTests(unittest.TestCase):
             config_path.write_text(generate_codex_mcp_enable_block(), encoding="utf-8")
             traces = tmp_path / "traces"
             traces.mkdir()
-            with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "unused-test-key"}, clear=True), patch(
+            with patch.dict(os.environ, _isolated_env(tmp_path, OPENCODE_GO_API_KEY="unused-test-key"), clear=True), patch(
                 "sys.stdout", stdout
             ), patch("tools.cli.titan.TITAN_HOME", tmp_path), patch(
                 "tools.cli.titan.CODEX_MARKETPLACE_DIR", marketplace_root
@@ -856,7 +864,7 @@ class TitanCliTests(unittest.TestCase):
                 "tools.cli.titan.codex_mcp_stdio_handshake",
                 return_value=(True, ["query_memories", "store_trace_packet", "get_scene_context", "doctor"], "ok"),
             ):
-                self.assertEqual(run_codex_verify(config_path=config_path), 0)
+                self.assertEqual(run_codex_verify(config_path=config_path), 0, stdout.getvalue())
         self.assertIn("run /hooks", stdout.getvalue())
         self.assertIn("4 tools exported", stdout.getvalue())
         self.assertNotIn("[missing]", stdout.getvalue())
