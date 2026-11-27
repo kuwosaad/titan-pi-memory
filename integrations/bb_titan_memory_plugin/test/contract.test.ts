@@ -6,6 +6,7 @@ import {
   detailInputSchema,
   detailOutputSchema,
   explorerContract,
+  graphEdgeSchema,
   hostContract,
   searchInputSchema,
   snapshotInputSchema,
@@ -68,6 +69,27 @@ test("response schemas enforce the lightweight graph bounds", () => {
     }).success,
     true,
   );
+});
+
+test("the graph contract distinguishes a stored correction from vector similarity", () => {
+  const link = { source: "pi::new", target: "pi::old", weight: 1 };
+  assert.equal(graphEdgeSchema.safeParse({ ...link, kind: "supersedes" }).success, true);
+  assert.equal(graphEdgeSchema.safeParse({ ...link, kind: "similarity" }).success, true);
+  assert.equal(graphEdgeSchema.safeParse({ ...link, kind: "contradicts" }).success, false);
+
+  const detail = {
+    memory: summary,
+    text: summary.text,
+    metadata: {},
+    truncated: false,
+    corrections: [{ direction: "replaces", memory: null, memoryId: "old", evidence: "Use Tuesday", timestamp: null }],
+    correctionsPartial: false,
+    scene: { id: "scene-1", status: "partial", userText: "Use Tuesday", assistantText: "", eventIds: ["event-1"] },
+    patterns: [{ id: "pattern-1", title: "Record schedule changes", status: "accepted", role: "supporting" }],
+    warnings: [],
+  };
+  assert.equal(detailOutputSchema.safeParse(detail).success, true);
+  assert.equal(detailOutputSchema.safeParse({ ...detail, scene: { ...detail.scene, eventIds: Array(13).fill("event") } }).success, false);
 });
 
 test("host contract keeps helper operations and request payloads discriminated", () => {

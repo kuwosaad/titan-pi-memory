@@ -56,6 +56,7 @@ exclude = [
 ]
 
 [tool.setuptools.package-data]
+"app.graph" = ["ui/*.html", "ui/*.css", "ui/*.js", "ui/vendor/*.js", "ui/vendor/*.LICENSE"]
 "tools.cli" = ["onboarding_ui/*"]
 config = [
   ".env.example",

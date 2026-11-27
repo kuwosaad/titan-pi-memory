@@ -15,7 +15,7 @@ import {
   type StandardSchemaV1InferOutput,
 } from "@get-bb/plugin-sdk/app";
 import { explorerContract } from "../contract.js";
-import { MemoryGraph } from "./graph.js";
+import { MemoryGraph, type RelationshipFilter } from "./graph.js";
 import {
   boundSnapshot,
   cleanFilters,
@@ -69,15 +69,10 @@ function errorMessage(error: unknown): string {
 }
 
 function metadataEntries(metadata: DetailResponse["metadata"]): Array<[string, string]> {
-  return Object.entries(metadata || {}).map(([key, value]) => [key, value == null ? "—" : String(value)]);
-}
-
-function mergeMemories(...groups: Array<readonly MemorySummary[] | undefined>): MemorySummary[] {
-  const byId = new Map<string, MemorySummary>();
-  for (const group of groups) {
-    for (const memory of group || []) byId.set(memory.nodeId, memory);
-  }
-  return Array.from(byId.values());
+  const shown = new Set(["type", "stream", "timestamp", "session_id", "scene_id", "event_date", "event_start", "event_end"]);
+  return Object.entries(metadata).flatMap(([key, value]) => (
+    shown.has(key) || value == null ? [] : [[key.replaceAll("_", " "), String(value)]]
+  ));
 }
 
 class GraphErrorBoundary extends Component<{ children: ReactNode }, { error: boolean }> {
@@ -130,13 +125,16 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
   const [totalPages, setTotalPages] = useState(1);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [pageInput, setPageInput] = useState("1");
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedMemory, setSelectedMemory] = useState<MemorySummary | null>(null);
+  const selectedNodeId = selectedMemory?.nodeId ?? null;
   const [detail, setDetail] = useState<DetailState>({ response: null, loading: false, error: null });
   const [loading, setLoading] = useState(true);
   const [pageLoading, setPageLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [graphError, setGraphError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [listVisible, setListVisible] = useState(true);
+  const [relationshipFilter, setRelationshipFilter] = useState<RelationshipFilter>("all");
 
   const cancelRequest = useCallback((request: string) => {
     if (!request || !activeRequests.delete(request)) return;
@@ -179,7 +177,7 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
 
   const loadDetail = useCallback(async (memory: MemorySummary) => {
     const id = beginRequest(detailGate, "detail");
-    setSelectedNodeId(memory.nodeId);
+    setSelectedMemory(memory);
     setDetail({ response: null, loading: true, error: null });
     try {
       const response = await rpc.call("detail", {
@@ -201,11 +199,11 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
   const loadQuery = useCallback(async (nextFilters: ExplorerFilters) => {
     const id = beginRequest(queryGate, "query");
     cancelGate(pageGate);
-    cancelGate(detailGate);
     const requestFilters = cleanFilters(nextFilters);
     setLoading(true);
     setPageLoading(false);
-    setError(null);
+    setGraphError(null);
+    setListError(null);
     setWarnings([]);
     setSnapshot(null);
     setItems([]);
@@ -214,8 +212,6 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
     setTotalItems(null);
     setTotalPages(1);
     setNextCursor(null);
-    setSelectedNodeId(null);
-    setDetail({ response: null, loading: false, error: null });
     try {
       const snapshotResponse = await rpc.call("snapshot", {
         threadId,
@@ -226,7 +222,12 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
       const bounded = boundSnapshot(snapshotResponse as SnapshotResponse);
       setSnapshot(bounded);
       setWarnings(bounded.warnings || []);
+    } catch (requestError) {
+      if (!isCurrent(queryGate, id)) return;
+      setGraphError(errorMessage(requestError));
+    }
 
+    try {
       const searchResponse = await rpc.call("search", {
         threadId,
         requestId: id,
@@ -248,8 +249,7 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
       setWarnings((current) => mergeWarnings(current, result.warnings));
     } catch (requestError) {
       if (!isCurrent(queryGate, id)) return;
-      setError(errorMessage(requestError));
-      setSnapshot(null);
+      setListError(errorMessage(requestError));
       setItems([]);
       setNextCursor(null);
     } finally {
@@ -262,7 +262,7 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
     if (pageLoading || loading || page < 1 || page > totalPages) return;
     const id = beginRequest(pageGate, "page");
     setPageLoading(true);
-    setError(null);
+    setListError(null);
     try {
       const response = await rpc.call("search", {
         threadId,
@@ -284,7 +284,7 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
       setNextCursor(result.nextCursor || null);
       setWarnings((current) => mergeWarnings(current, result.warnings));
     } catch (requestError) {
-      if (isCurrent(pageGate, id)) setError(errorMessage(requestError));
+      if (isCurrent(pageGate, id)) setListError(errorMessage(requestError));
     } finally {
       if (isCurrent(pageGate, id)) setPageLoading(false);
       activeRequests.delete(id);
@@ -294,7 +294,8 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
   const refreshAll = useCallback(() => {
     void loadCatalog();
     void loadQuery(filters);
-  }, [filters, loadCatalog, loadQuery]);
+    if (selectedMemory) void loadDetail(selectedMemory);
+  }, [filters, loadCatalog, loadDetail, loadQuery, selectedMemory]);
 
   useEffect(() => {
     void loadCatalog();
@@ -327,12 +328,7 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
   }, [activeRequests, cancelRequest, catalogGate, detailGate, pageGate, queryGate]);
 
   const graphMemories = snapshot?.nodes || [];
-  const allMemories = useMemo(() => mergeMemories(graphMemories, items), [graphMemories, items]);
-  const selectedMemory = selectedNodeId
-    ? allMemories.find((memory) => memory.nodeId === selectedNodeId) || (
-      detail.response?.memory.nodeId === selectedNodeId ? detail.response.memory : null
-    )
-    : null;
+  const visibleIds = useMemo(() => new Set([...graphMemories, ...items].map((memory) => memory.nodeId)), [graphMemories, items]);
   const neighbors = selectedMemory ? connectedMemories(selectedMemory.nodeId, snapshot, graphMemories) : [];
   const pageList = useMemo(() => pageTokens(searchPage, totalPages), [searchPage, totalPages]);
   const catalogAgents = (catalog?.agents || []) as CatalogAgent[];
@@ -343,7 +339,9 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
   const hasActiveFilters = Boolean(
     queryInput.trim() || filters.agent || filters.type || filters.dateFrom || filters.dateTo,
   );
-  const showingLatestGraphCap = Boolean(snapshot && snapshot.nodes.length >= MAX_GRAPH_NODES);
+  const showingLatestGraphCap = snapshot?.warnings.includes(`Graph limited to ${MAX_GRAPH_NODES} memories`);
+  const selectedMetadata = detail.response?.metadata || {};
+  const gridClassName = ["titan-explorer-grid", !listVisible && "titan-explorer-grid--list-hidden", selectedMemory && "titan-explorer-grid--inspecting"].filter(Boolean).join(" ");
 
   function updateFilter<K extends keyof ExplorerFilters>(key: K, value: string) {
     setFilters((current) => {
@@ -453,29 +451,30 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
           <button type="button" className="titan-button" onClick={() => void loadCatalog()}>Retry catalog</button>
         </div>
       ) : null}
-      {error ? (
-        <div className="titan-alert titan-alert--error" role="alert">
-          <span>{error}</span>
-          <button type="button" className="titan-button" onClick={() => void loadQuery(filters)}>Retry</button>
-        </div>
-      ) : null}
       {allWarnings.length ? (
         <div className="titan-alert titan-alert--warning" role="status">
           {Array.from(new Set(allWarnings)).map((warning) => <span key={warning}>{warning}</span>)}
         </div>
       ) : null}
 
-      <div className={listVisible ? "titan-explorer-grid" : "titan-explorer-grid titan-explorer-grid--list-hidden"}>
+      <div className={gridClassName}>
         <section className="titan-panel titan-panel--graph" aria-labelledby="titan-graph-title">
           <div className="titan-panel-heading">
             <h2 id="titan-graph-title">Memory graph</h2>
             {showingLatestGraphCap ? <span className="titan-inline-note">Showing latest 150</span> : snapshot?.partial ? <span className="titan-badge titan-badge--warning">Partial</span> : null}
           </div>
           {loading ? <div className="titan-loading" role="status">Loading…</div> : null}
-          {!loading && !error && snapshot && snapshot.nodes.length === 0 ? <div className="titan-empty" role="status">No memories found</div> : null}
+          {graphError ? <div className="titan-inline-error" role="alert">Graph unavailable: {graphError} <button type="button" className="titan-button" onClick={() => void loadQuery(filters)}>Retry</button></div> : null}
+          {!loading && !graphError && snapshot && snapshot.nodes.length === 0 ? <div className="titan-empty" role="status">No memories found</div> : null}
           {!loading && snapshot && snapshot.nodes.length ? (
             <GraphErrorBoundary key={`${snapshot.nodes.length}:${snapshot.edges.length}:${snapshot.nodes[0]?.nodeId || "empty"}`}>
-              <MemoryGraph snapshot={snapshot} selectedNodeId={selectedNodeId} onSelect={(memory) => void loadDetail(memory)} />
+              <MemoryGraph
+                snapshot={snapshot}
+                selectedNodeId={graphMemories.some((memory) => memory.nodeId === selectedNodeId) ? selectedNodeId : null}
+                onSelect={(memory) => void loadDetail(memory)}
+                relationshipFilter={relationshipFilter}
+                onRelationshipFilterChange={setRelationshipFilter}
+              />
             </GraphErrorBoundary>
           ) : null}
         </section>
@@ -486,7 +485,8 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
               <h2 id="titan-list-title">Memories</h2>
               <span className="titan-count" aria-live="polite">{totalItems ?? items.length}</span>
             </div>
-            {items.length === 0 && !loading ? <div className="titan-empty" role="status">No matching memories</div> : (
+            {listError ? <div className="titan-inline-error" role="alert">Memories unavailable: {listError} <button type="button" className="titan-button" onClick={() => void loadQuery(filters)}>Retry</button></div> : null}
+            {items.length === 0 && !loading && !listError ? <div className="titan-empty" role="status">No matching memories</div> : (
               <ul className="titan-memory-list">
                 {items.map((memory) => (
                   <li key={memory.nodeId}>
@@ -535,7 +535,7 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
                 aria-label="Close memory details"
                 onClick={() => {
                   cancelGate(detailGate);
-                  setSelectedNodeId(null);
+                  setSelectedMemory(null);
                   setDetail({ response: null, loading: false, error: null });
                 }}
               >×</button>
@@ -543,25 +543,75 @@ export function ExplorerPanel({ threadId }: ExplorerProps) {
             <div className="titan-detail-body">
               {detail.loading ? <p className="titan-detail-status" role="status">Loading…</p> : null}
               {detail.error ? <div className="titan-inline-error" role="alert">{detail.error}</div> : null}
+              <p className="titan-inspector-meta">{selectedMemory.sourceAgent}{selectedMemory.type ? ` · ${selectedMemory.type}` : ""} · Recorded {formatTimestamp(selectedMemory.timestamp)}</p>
+              {!visibleIds.has(selectedMemory.nodeId) ? <p className="titan-scope-note">Outside the current graph and list</p> : null}
               <p className="titan-detail-text">{detail.response?.text || selectedMemory.text}</p>
               {detail.response?.truncated ? <p className="titan-detail-status">Text truncated</p> : null}
-              <dl className="titan-metadata">
-                <div><dt>Agent</dt><dd>{selectedMemory.sourceAgent}</dd></div>
-                <div><dt>Memory ID</dt><dd>{selectedMemory.memoryId}</dd></div>
-                <div><dt>Type</dt><dd>{selectedMemory.type || "—"}</dd></div>
-                <div><dt>Stream</dt><dd>{selectedMemory.stream || "—"}</dd></div>
-                <div><dt>Session</dt><dd>{selectedMemory.sessionId || "—"}</dd></div>
-                <div><dt>Timestamp</dt><dd>{formatTimestamp(selectedMemory.timestamp)}</dd></div>
-                {metadataEntries(detail.response?.metadata || {}).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
-              </dl>
+              {detail.response?.warnings?.map((warning) => <p className="titan-detail-status" role="status" key={warning}>{warning}</p>)}
+              {detail.response?.corrections !== undefined ? (
+                <section className="titan-connections" aria-label="Correction history">
+                  <h3>Correction history</h3>
+                  {detail.response.corrections.map((correction) => (
+                    <div className="titan-correction" key={`${correction.direction}:${correction.memoryId}`}>
+                      {correction.memory ? <button type="button" className="titan-connection" onClick={() => { if (correction.memory) void loadDetail(correction.memory); }}>
+                        <small>{correction.direction === "replaces" ? "Replaces earlier memory" : "Replaced by newer memory"}</small>
+                        <span>{shortText(correction.memory.text, 150)}</span>
+                        {!visibleIds.has(correction.memory.nodeId) ? <small>Outside current graph and list</small> : null}
+                      </button> : <p className="titan-detail-status">{correction.direction === "replaces" ? "Earlier memory" : "Newer memory"} unavailable: {correction.memoryId}</p>}
+                      {correction.evidence ? <p className="titan-detail-status">{correction.evidence}</p> : null}
+                      {correction.timestamp ? <p className="titan-detail-status">Recorded {formatTimestamp(correction.timestamp)}</p> : null}
+                    </div>
+                  ))}
+                  {!detail.response.corrections.length && !detail.response.correctionsPartial ? <p className="titan-detail-status">No stored corrections found.</p> : null}
+                  {detail.response.correctionsPartial ? <p className="titan-detail-status">Correction history is partial.</p> : null}
+                </section>
+              ) : null}
+              {detail.response?.scene !== undefined || detail.response?.memoryEvidence ? (
+                <section className="titan-connections" aria-label="Source scene">
+                  <h3>Source scene</h3>
+                  {detail.response.scene ? <>
+                    <p className="titan-detail-status">{detail.response.scene.status} · {detail.response.scene.id}</p>
+                    {detail.response.scene.eventIds.length || detail.response.scene.userText || detail.response.scene.assistantText ? <details className="titan-evidence"><summary>Event IDs and excerpts</summary>
+                      {detail.response.scene.eventIds.length ? <p>Events: {detail.response.scene.eventIds.join(", ")}</p> : null}
+                      {detail.response.scene.userText ? <p><strong>User and system context</strong><br />{detail.response.scene.userText}</p> : null}
+                      {detail.response.scene.assistantText ? <p><strong>Assistant and tool context</strong><br />{detail.response.scene.assistantText}</p> : null}
+                    </details> : null}
+                  </> : <p className="titan-detail-status">No source scene linked.</p>}
+                  {detail.response.memoryEvidence ? <details className="titan-evidence"><summary>Evidence saved with this memory</summary>
+                    {detail.response.memoryEvidence.eventIds.length ? <p>Cited events: {detail.response.memoryEvidence.eventIds.join(", ")}</p> : null}
+                    {detail.response.memoryEvidence.userText ? <p><strong>User-side excerpt</strong><br />{detail.response.memoryEvidence.userText}</p> : null}
+                    {detail.response.memoryEvidence.assistantText ? <p><strong>Assistant-side excerpt</strong><br />{detail.response.memoryEvidence.assistantText}</p> : null}
+                  </details> : null}
+                </section>
+              ) : null}
+              {detail.response?.patterns?.length ? <section className="titan-connections" aria-label="Pattern evidence">
+                <h3>Pattern evidence</h3>
+                {detail.response.patterns.map((pattern) => <p className="titan-detail-status" key={`${pattern.id}:${pattern.role}`}>{pattern.title} · {pattern.status} · {pattern.role} · {pattern.id}</p>)}
+              </section> : null}
+              {selectedMetadata.event_date || selectedMetadata.event_start || selectedMetadata.event_end ? (
+                <dl className="titan-metadata titan-event-time">
+                  {selectedMetadata.event_date ? <div><dt>Event date</dt><dd>{selectedMetadata.event_date}</dd></div> : null}
+                  {selectedMetadata.event_start ? <div><dt>Event start</dt><dd>{selectedMetadata.event_start}</dd></div> : null}
+                  {selectedMetadata.event_end ? <div><dt>Event end</dt><dd>{selectedMetadata.event_end}</dd></div> : null}
+                </dl>
+              ) : null}
               <div className="titan-connections">
-                <h3>Similar memories</h3>
+                <h3>Similar memories in graph</h3>
                 {neighbors.length ? neighbors.map(({ memory, weight }) => (
                   <button type="button" className="titan-connection" key={memory.nodeId} onClick={() => void loadDetail(memory)}>
                     <span>{shortText(memory.text, 120)}</span><small>{percent(weight)} similarity</small>
                   </button>
-                )) : <p className="titan-detail-status">No drawn similarity edges</p>}
+                )) : <p className="titan-detail-status">No similarity links in this view</p>}
               </div>
+              <details className="titan-evidence titan-technical-details">
+                <summary>Memory metadata</summary>
+                <dl className="titan-metadata">
+                  <div><dt>Memory ID</dt><dd>{selectedMemory.memoryId}</dd></div>
+                  {selectedMemory.stream ? <div><dt>Stream</dt><dd>{selectedMemory.stream}</dd></div> : null}
+                  {selectedMemory.sessionId ? <div><dt>Session</dt><dd>{selectedMemory.sessionId}</dd></div> : null}
+                  {metadataEntries(selectedMetadata).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
+                </dl>
+              </details>
             </div>
           </aside>
         ) : null}

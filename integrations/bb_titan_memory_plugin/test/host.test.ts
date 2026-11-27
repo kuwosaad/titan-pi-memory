@@ -3,8 +3,10 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import type { ExperimentalHostRpcContext } from "@get-bb/plugin-sdk/host";
 import { __testing, explorerHostEntry } from "../src/host.js";
+import { detailOutputSchema, snapshotOutputSchema } from "../src/contract.js";
 import type { HostExecuteInput } from "../src/contract.js";
 
 function context(signal: AbortSignal): ExperimentalHostRpcContext {
@@ -104,6 +106,46 @@ print(json.dumps({"payload": payload, "args": sys.argv[1:]}))
     });
   } finally {
     await rm(root, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("the real Python bridge returns renderable correction and scene data", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const home = await mkdtemp(join(tmpdir(), "titan-explorer-evidence-"));
+  const store = join(home, "agents", "pi", "out", "memories");
+  const previousText = "🗓️".repeat(121);
+  const evidence = "The release is now Tuesday.";
+  try {
+    await mkdir(store, { recursive: true });
+    await Promise.all([
+      writeFile(join(store, "memories.json"), JSON.stringify([
+        { id: "old", text: previousText, ts: "2026-11-22T00:00:00Z" },
+        { id: "new", text: "Release Tuesday", ts: "2026-11-23T00:00:00Z", scene_id: "scene" },
+      ])),
+      writeFile(join(store, "memories.json.relations.json"), JSON.stringify([
+        { source: "pi", old_id: "old", new_id: "new", evidence, created_at: "2026-11-23T00:00:00Z" },
+      ])),
+      writeFile(join(store, "scenes.json"), JSON.stringify([
+        { scene_id: "scene", evidence_status: "complete", evidence_version: 1, extraction_user_text: evidence, source_event_ids: ["event"] },
+      ])),
+    ]);
+    await withHostEnvironment(root, home, async () => {
+      const host = context(new AbortController().signal);
+      const snapshot = await execute({ command: "snapshot", request: { filters: { agent: "pi" } } }, host);
+      assert.equal(snapshot.exitCode, 0, snapshot.stderr);
+      const graph = snapshotOutputSchema.parse(JSON.parse(snapshot.stdout));
+      assert.deepEqual(graph.edges, [{ source: "pi::new", target: "pi::old", kind: "supersedes", weight: 1 }]);
+
+      const response = await execute({ command: "detail", request: { sourceAgent: "pi", memoryId: "new" } }, host);
+      assert.equal(response.exitCode, 0, response.stderr);
+      const detail = detailOutputSchema.parse(JSON.parse(response.stdout));
+      assert.equal(detail.corrections?.[0]?.memory?.nodeId, "pi::old");
+      assert.equal(detail.corrections?.[0]?.evidence, evidence);
+      assert.equal(detail.scene?.userText, evidence);
+      assert.deepEqual(detail.scene?.eventIds, ["event"]);
+    });
+  } finally {
     await rm(home, { recursive: true, force: true });
   }
 });

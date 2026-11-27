@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ConfigOptions, ForceGraph3DInstance } from "3d-force-graph";
+import type { Mesh, MeshBasicMaterial, SphereGeometry } from "three";
 import type { ExplorerSnapshot, MemorySummary } from "../contract.js";
 import { shortText } from "./model.js";
 import {
@@ -11,10 +12,14 @@ import {
 } from "./graph-layout.js";
 import "./graph.css";
 
+export type RelationshipFilter = "all" | ExplorerSnapshot["edges"][number]["kind"];
+
 interface GraphProps {
   snapshot: ExplorerSnapshot;
   selectedNodeId: string | null;
   onSelect: (memory: MemorySummary) => void;
+  relationshipFilter: RelationshipFilter;
+  onRelationshipFilterChange: (value: RelationshipFilter) => void;
 }
 
 type GraphNode = GraphPoint & {
@@ -30,16 +35,15 @@ type GraphLink = {
   source: string | GraphNode;
   target: string | GraphNode;
   weight: number;
-  kind: "similarity";
-  color: string;
+  kind: "similarity" | "supersedes";
 };
 
 type ForceGraph = ForceGraph3DInstance<GraphNode, GraphLink>;
 type ForceGraphFactory = new (element: HTMLElement, options?: ConfigOptions) => ForceGraph;
 
-const NODE_COLORS = ["#ff9cb5", "#c9b0ff", "#98ddcf", "#f5cc98", "#a6cbff"];
-const DIM_NODE = "#3b323d";
-const EDGE_COLOR = "#d08c9c";
+const NODE_COLORS = ["#c7a5a4", "#acaecb", "#aec7bf", "#d1bc9f", "#a9bdcf"];
+const DIM_NODE = "#505761";
+const CORRECTION_COLOR = "#83d6e8";
 const IDLE_WINDOW_MS = 900;
 
 function colorForSource(sourceAgent: string | null): string {
@@ -61,8 +65,8 @@ function isConnected(link: GraphLink, nodeId: string | null): boolean {
 }
 
 export function connectionColor(source: string, target: string, focus: string | null): string {
-  if (!focus) return "#bb8baf";
-  return source === focus || target === focus ? "#ffd1dc" : "#302735";
+  if (!focus) return "#818b99";
+  return source === focus || target === focus ? "#c3ccd6" : "#303640";
 }
 
 function graphData(snapshot: ExplorerSnapshot, points: readonly GraphPoint[]): { nodes: GraphNode[]; links: GraphLink[] } {
@@ -70,7 +74,6 @@ function graphData(snapshot: ExplorerSnapshot, points: readonly GraphPoint[]): {
   const nodes = points.map((point) => ({
     ...point,
     id: point.nodeId,
-    // The original visual used small spheres, not score-encoded bubbles.
     val: 1.2 + Math.min(1.7, Math.sqrt(point.degree + 1) * 0.28),
     color: colorForSource(point.sourceAgent),
     x: (point.x / GRAPH_WIDTH - 0.5) * 260,
@@ -84,14 +87,14 @@ function graphData(snapshot: ExplorerSnapshot, points: readonly GraphPoint[]): {
       source: edge.source,
       target: edge.target,
       weight: Number(edge.weight),
-      kind: "similarity" as const,
-      color: EDGE_COLOR,
+      kind: edge.kind,
     }];
   });
   return { nodes, links };
 }
 
-export function MemoryGraph({ snapshot, selectedNodeId, onSelect }: GraphProps) {
+export function MemoryGraph({ snapshot, selectedNodeId, onSelect, relationshipFilter, onRelationshipFilterChange }: GraphProps) {
+  const visibleEdges = useMemo(() => snapshot.edges.filter((edge) => relationshipFilter === "all" || edge.kind === relationshipFilter), [snapshot.edges, relationshipFilter]);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<ForceGraph | null>(null);
   const updateAppearanceRef = useRef<(() => void) | null>(null);
@@ -100,16 +103,20 @@ export function MemoryGraph({ snapshot, selectedNodeId, onSelect }: GraphProps) 
   const disposedRef = useRef(false);
   const hoveredRef = useRef<string | null>(null);
   const selectedRef = useRef(selectedNodeId);
+  const relationshipFilterRef = useRef(relationshipFilter);
   const onSelectRef = useRef(onSelect);
   const neighborsRef = useRef<Map<string, Set<string>>>(new Map());
-  const data = useMemo(() => graphData(snapshot, layoutGraph(snapshot.nodes, snapshot.edges)), [snapshot.edges, snapshot.nodes]);
-  const neighbors = useMemo(() => neighborMap(snapshot.edges), [snapshot.edges]);
+  const data = useMemo(() => graphData(snapshot, layoutGraph(snapshot.nodes, snapshot.edges)), [snapshot]);
+  const neighbors = useMemo(() => neighborMap(visibleEdges), [visibleEdges]);
+  const correctionCount = visibleEdges.filter((edge) => edge.kind === "supersedes").length;
+  const similarityCount = visibleEdges.length - correctionCount;
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   hoveredRef.current = hoveredNodeId;
   selectedRef.current = selectedNodeId;
+  relationshipFilterRef.current = relationshipFilter;
   onSelectRef.current = onSelect;
   neighborsRef.current = neighbors;
 
@@ -182,20 +189,17 @@ export function MemoryGraph({ snapshot, selectedNodeId, onSelect }: GraphProps) 
           .nodeResolution(7)
           .linkColor((link) => {
             const focus = hoveredRef.current || selectedRef.current;
-            return connectionColor(endpointId(link.source), endpointId(link.target), focus);
+            return link.kind === "supersedes" ? (!focus || isConnected(link, focus) ? CORRECTION_COLOR : "#36454a") : connectionColor(endpointId(link.source), endpointId(link.target), focus);
           })
           .linkWidth((link) => {
             const focus = hoveredRef.current || selectedRef.current;
-            return !focus ? 0.45 + link.weight * 0.35 : isConnected(link, focus) ? 1.1 : 0.12;
+            return !focus ? (link.kind === "supersedes" ? 1.8 : 0.45 + link.weight * 0.35) : isConnected(link, focus) ? (link.kind === "supersedes" ? 2.3 : 1.1) : 0.12;
           })
           .linkOpacity(0.55)
-          .linkDirectionalParticles((link) => {
-            const focus = hoveredRef.current || selectedRef.current;
-            return focus && isConnected(link, focus) ? 1 : 0;
-          })
-          .linkDirectionalParticleWidth(0.65)
-          .linkDirectionalParticleSpeed(0.006)
-          .linkDirectionalParticleColor(() => "#f0b0bf")
+          .linkVisibility((link) => relationshipFilterRef.current === "all" || link.kind === relationshipFilterRef.current)
+          .linkDirectionalArrowLength((link) => link.kind === "supersedes" ? 8 : 0)
+          .linkDirectionalArrowRelPos(0.82)
+          .linkDirectionalParticles(0)
           .d3AlphaDecay(0.11)
           .d3VelocityDecay(0.55)
           .warmupTicks(18)
@@ -224,64 +228,36 @@ export function MemoryGraph({ snapshot, selectedNodeId, onSelect }: GraphProps) 
           });
 
         if (cancelled || !graph || !hostRef.current) return;
-        // Shared small glow texture: depth and luminosity without a bloom pass.
-        const glowCanvas = document.createElement("canvas");
-        glowCanvas.width = glowCanvas.height = 64;
-        const glowContext = glowCanvas.getContext("2d");
-        if (!glowContext) throw new Error("Canvas textures are unavailable");
-        const gradient = glowContext.createRadialGradient(32, 32, 0, 32, 32, 32);
-        gradient.addColorStop(0, "rgba(255,255,255,0.85)");
-        gradient.addColorStop(0.18, "rgba(255,255,255,0.4)");
-        gradient.addColorStop(0.48, "rgba(255,255,255,0.09)");
-        gradient.addColorStop(1, "rgba(255,255,255,0)");
-        glowContext.fillStyle = gradient;
-        glowContext.fillRect(0, 0, 64, 64);
-        const glowTexture = new THREE.CanvasTexture(glowCanvas);
         const sphere = new THREE.SphereGeometry(1, 12, 8);
-        visualDisposables.push(glowTexture, sphere);
+        visualDisposables.push(sphere);
         const objects = new Map<string, {
-          group: InstanceType<typeof THREE.Group>;
-          core: InstanceType<typeof THREE.MeshBasicMaterial>;
-          halo: InstanceType<typeof THREE.SpriteMaterial>;
+          mesh: Mesh<SphereGeometry, MeshBasicMaterial>;
           radius: number;
         }>();
         graph.nodeThreeObject(node => {
           const existing = objects.get(node.id);
-          if (existing) return existing.group;
-          const group = new THREE.Group();
-          const radius = 1.7 + Math.min(2.5, Math.sqrt(node.degree) * 0.65);
+          if (existing) return existing.mesh;
+          const radius = 2.4 + Math.min(2.5, Math.sqrt(node.degree) * 0.65);
           const core = new THREE.MeshBasicMaterial({ color: node.color, transparent: true });
           const mesh = new THREE.Mesh(sphere, core);
           mesh.scale.setScalar(radius);
-          group.add(mesh);
-          const halo = new THREE.SpriteMaterial({ map: glowTexture, color: node.color,
-            transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending });
-          const glow = new THREE.Sprite(halo);
-          glow.scale.setScalar(radius * 7);
-          group.add(glow);
-          visualDisposables.push(core, halo);
-          objects.set(node.id, { group, core, halo, radius });
-          return group;
+          visualDisposables.push(core);
+          objects.set(node.id, { mesh, radius });
+          return mesh;
         });
         updateAppearanceRef.current = () => {
+          graph?.linkVisibility((link) => relationshipFilterRef.current === "all" || link.kind === relationshipFilterRef.current);
           graph?.linkColor(link => {
             const focus = hoveredRef.current || selectedRef.current;
-            return connectionColor(endpointId(link.source), endpointId(link.target), focus);
+            return link.kind === "supersedes" ? (!focus || isConnected(link, focus) ? CORRECTION_COLOR : "#36454a") : connectionColor(endpointId(link.source), endpointId(link.target), focus);
           });
           const focus = hoveredRef.current || selectedRef.current;
           for (const [id, object] of objects) {
             const visible = !focus || id === focus || neighborsRef.current.get(focus)?.has(id);
-            object.core.opacity = visible ? 1 : 0.16;
-            object.halo.opacity = visible ? (id === focus ? 1 : 0.65) : 0.03;
-            object.group.scale.setScalar(id === focus ? 1.4 : 1);
+            object.mesh.material.opacity = visible ? 1 : 0.24;
+            object.mesh.scale.setScalar(object.radius * (id === focus ? 1.3 : 1));
           }
         };
-        const ambient = new THREE.AmbientLight("#e6d5da", 2.2);
-        const key = new THREE.DirectionalLight("#ffdce4", 2.4);
-        key.position.set(1, 1, 2);
-        const fill = new THREE.DirectionalLight("#9eafc8", 1.2);
-        fill.position.set(-2, -1, -1);
-        graph.lights([ambient, key, fill]);
         const charge = graph.d3Force("charge") as { strength?: (value: number) => void } | null;
         charge?.strength?.(-72);
         const linkForce = graph.d3Force("link") as { distance?: (value: number) => void; strength?: (value: number) => void } | null;
@@ -376,7 +352,7 @@ export function MemoryGraph({ snapshot, selectedNodeId, onSelect }: GraphProps) 
     idleTimerRef.current = setTimeout(() => {
       if (!pointerActiveRef.current) graph.pauseAnimation();
     }, 700);
-  }, [hoveredNodeId, selectedNodeId]);
+  }, [hoveredNodeId, selectedNodeId, relationshipFilter]);
 
   const fit = () => {
     const graph = graphRef.current;
@@ -391,12 +367,16 @@ export function MemoryGraph({ snapshot, selectedNodeId, onSelect }: GraphProps) 
     <div className="titan-graph-shell">
       <div className="titan-graph-toolbar">
         <div className="titan-graph-controls" aria-label="Graph controls">
+          <label className="titan-graph-filter">Relationships <select aria-label="Relationship visibility" value={relationshipFilter} onChange={(event) => {
+            const value = event.target.value;
+            if (value === "all" || value === "supersedes" || value === "similarity") onRelationshipFilterChange(value);
+          }}><option value="all">All</option><option value="supersedes">Stored corrections</option><option value="similarity">Similarity</option></select></label>
           <button type="button" className="titan-graph-fit" onClick={fit}>Fit</button>
         </div>
       </div>
       <div className="titan-graph-stage titan-graph3d-stage">
-        <div ref={hostRef} className="titan-graph3d-host" role="img" aria-label={`3D memory relationship graph with ${data.nodes.length} memories and ${data.links.length} connections`} />
-        {loading ? <div className="titan-graph-loading">Settling the memory field…</div> : null}
+        <div ref={hostRef} className="titan-graph3d-host" role="img" aria-label={`3D memory relationship graph with ${data.nodes.length} memories and ${visibleEdges.length} connections`} />
+        {loading ? <div className="titan-graph-loading">Loading graph…</div> : null}
         {loadError ? <div className="titan-graph-load-error" role="alert">3D graph unavailable: {loadError}</div> : null}
         {hoveredNodeId ? (() => {
           const point = data.nodes.find((node) => node.id === hoveredNodeId);
@@ -411,8 +391,10 @@ export function MemoryGraph({ snapshot, selectedNodeId, onSelect }: GraphProps) 
         <p className="titan-graph-accessible-note">Use the memories list for keyboard navigation and full text.</p>
       </div>
       <div className="titan-graph-footer">
-        <span>{data.nodes.length} memories · {data.links.length} connections</span>
-        <span>orbit · pan · scroll to zoom</span>
+        <span>{data.nodes.length} {data.nodes.length === 1 ? "memory" : "memories"}</span>
+        <span><i className="titan-graph-line titan-graph-line--correction" aria-hidden="true" /> {correctionCount} {correctionCount === 1 ? "correction" : "corrections"} (newer → earlier)</span>
+        <span><i className="titan-graph-line titan-graph-line--similarity" aria-hidden="true" /> {similarityCount} similarity {similarityCount === 1 ? "link" : "links"}</span>
+        <span>Drag to orbit · scroll to zoom</span>
       </div>
     </div>
   );

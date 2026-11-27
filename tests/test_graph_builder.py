@@ -1,4 +1,5 @@
 import unittest
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -23,6 +24,50 @@ class BuildGraphTests(unittest.TestCase):
         memory.update(overrides)
         return memory
 
+    def _payload(self, html):
+        start = html.index("    nodes: ", html.index("const graphData = {")) + len("    nodes: ")
+        nodes, end = json.JSONDecoder().raw_decode(html[start:])
+        links_start = html.index("    links: ", start + end) + len("    links: ")
+        links, _ = json.JSONDecoder().raw_decode(html[links_start:])
+        return nodes, links
+
+    @patch("app.graph.builder.load_visual_config", return_value={})
+    @patch("app.graph.builder.load_memories")
+    def test_preserves_owner_identity_and_handles_invalid_vectors(self, load, _config):
+        load.return_value = [
+            self._memory("same", "alpha", "", source_agent="codex", embedding=[1, 0]),
+            self._memory("same", "beta", "", source_agent="pi", embedding=[1, 0]),
+            self._memory("missing", "missing", "", embedding=None),
+            self._memory("bad", "bad", "", embedding=["bad", 0]),
+            self._memory("nan", "nan", "", embedding=[float("nan"), 0]),
+            self._memory("different", "different", "", embedding=[1, 0, 0]),
+        ]
+        html = build_graph()
+        nodes, links = self._payload(html)
+        memories = [node for node in nodes if node["kind"] == "memory"]
+        self.assertEqual(len(memories), 6)
+        same = [node for node in memories if node["raw_id"] == "same"]
+        self.assertEqual({node["source_agent"] for node in same}, {"pi", "codex"})
+        self.assertEqual(len({node["id"] for node in same}), 2)
+        similarities = [link for link in links if link["kind"] == "similarity"]
+        self.assertEqual(len(similarities), 1)
+        self.assertEqual({similarities[0]["source"], similarities[0]["target"]}, {node["id"] for node in same})
+
+    @patch("app.graph.builder.load_visual_config", return_value={})
+    @patch("app.graph.builder.load_memories")
+    def test_text_is_safe_in_script_and_inspector(self, load, _config):
+        text = '</script><script>alert(1)</script>'
+        load.return_value = [self._memory("x", text, "")]
+        html = build_graph()
+        nodes, _ = self._payload(html)
+        self.assertEqual(nodes[0]["text"], text)
+        self.assertNotIn(text, html)
+
+    @patch("app.graph.builder.get_recent_memories", return_value=[])
+    def test_load_memories_scopes_only_when_agent_requested(self, recent):
+        load_memories(agent="pi")
+        recent.assert_called_once_with(limit=DEFAULT_GRAPH_MEMORY_LIMIT, session_id=None, sources=["pi"])
+
     @patch("app.graph.builder.load_visual_config", return_value={})
     @patch("app.graph.builder.load_memories")
     def test_build_graph_renders_html_with_graph_payload(self, mock_load_memories, _mock_load_config):
@@ -34,38 +79,25 @@ class BuildGraphTests(unittest.TestCase):
 
         html = build_graph(session_id="s1")
 
-        self.assertIn("3d-force-graph", html)
-        self.assertIn('id="graph"', html)
-        self.assertIn("const graphData", html)
-        self.assertIn("background-image:", html)
-        self.assertIn("linear-gradient(90deg", html)
-        self.assertIn('class="hud"', html)
-        self.assertIn("click a node to inspect memory details", html)
-        self.assertIn("s1:1:0", html)
-        self.assertIn("s1:1:1", html)
-        # New dashboard elements
-        self.assertIn("fonts.googleapis.com", html)
-        self.assertIn("dashboard-header", html)
-        self.assertIn("dashboard-brand", html)
-        self.assertIn("stat-chip", html)
-        self.assertIn("sidebarSearch", html)
-        self.assertIn('"type": "fact"', html)
-        self.assertIn('"stream": "rough"', html)
-        self.assertIn('"session_id": "s1"', html)
-        self.assertIn('"turn": 1', html)
-        self.assertIn("memoryPreview", html)
-        self.assertIn("recent 24h", html)
-        self.assertIn("show all memories", html)
-        self.assertIn("activeView = 'recent'", html)
-        self.assertIn(".enableNodeDrag(true)", html)
-        self.assertNotIn("graph2ScreenCoords", html)
-        self.assertIn("Graph.onNodeDragEnd", html)
-        self.assertIn("graphContainer.addEventListener('pointerup'", html)
+        self.assertIn('<canvas id="graph"', html)
+        self.assertIn('<dialog class="memory-preview"', html)
+        self.assertIn('aria-label="Search memories"', html)
+        self.assertIn('aria-label="Show links"', html)
+        self.assertNotIn("cdn.jsdelivr.net", html)
+        nodes, links = self._payload(html)
+        self.assertEqual([node["raw_id"] for node in nodes], ["s1:1:0", "s1:1:1"])
+        self.assertEqual(nodes[0]["type"], "fact")
+        self.assertEqual(nodes[0]["stream"], "rough")
+        self.assertEqual(nodes[0]["session_id"], "s1")
+        self.assertEqual(nodes[0]["turn"], 1)
+        self.assertEqual([link["kind"] for link in links], ["similarity"])
 
     @patch("app.graph.builder.load_memories", return_value=[])
-    def test_build_graph_empty_memories_returns_fallback_html(self, _mock_load_memories):
+    def test_build_graph_empty_memories_keeps_explorer_view_available(self, _mock_load_memories):
         html = build_graph(session_id="missing")
-        self.assertEqual(html, "<html><body><h1>No memories found</h1></body></html>")
+        self.assertIn("No memories found", html)
+        self.assertIn('aria-label="Search memories"', html)
+        self.assertEqual(self._payload(html), ([], []))
 
     @patch("app.graph.builder.load_memories", side_effect=sqlite3.OperationalError("database is locked"))
     def test_build_graph_reports_locked_database(self, _mock_load_memories):
@@ -92,12 +124,8 @@ class BuildGraphTests(unittest.TestCase):
 
         html = build_graph(session_id="s1")
 
-        self.assertIn('data-id="s1:recent"', html)
-        self.assertIn('data-id="s1:old"', html)
-        self.assertIn('data-recent="true"', html)
-        self.assertIn('data-recent="false"', html)
-        self.assertIn("2 total", html)
-        self.assertIn("1 recent", html)
+        nodes, _ = self._payload(html)
+        self.assertEqual({node["raw_id"]: node["recent"] for node in nodes}, {"s1:recent": True, "s1:old": False})
 
     @patch("app.graph.builder.load_visual_config", return_value={})
     @patch("app.graph.builder.load_memories")
@@ -109,10 +137,9 @@ class BuildGraphTests(unittest.TestCase):
 
         html = build_graph(session_id="s1")
 
-        self.assertIn('data-id="s1:bad-ts"', html)
-        self.assertIn('data-id="s1:no-ts"', html)
-        self.assertIn('data-recent="false"', html)
-        self.assertIn("show all memories", html)
+        nodes, _ = self._payload(html)
+        self.assertEqual({node["raw_id"]: node["recent"] for node in nodes}, {"s1:bad-ts": False, "s1:no-ts": False})
+        self.assertIn('data-view="all"', html)
         self.assertIn("memoryPreviewBody", html)
 
     @patch("app.graph.clusters.load_visual_config", return_value={})

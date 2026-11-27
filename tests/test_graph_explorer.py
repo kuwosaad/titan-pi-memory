@@ -1,4 +1,5 @@
 import base64
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -514,6 +515,92 @@ class GraphExplorerTests(ExplorerStoreMixin, unittest.TestCase):
         # claims. CI and backend profiling establish the real targets later.
         self.assertLess(elapsed, 5.0, f"bounded search took {elapsed:.3f}s")
         self.assertLess(page_elapsed, 5.0, f"direct page search took {page_elapsed:.3f}s")
+
+    def test_corrections_scene_patterns_and_namespace_isolation(self):
+        rows = [self.row("old", 1), self.row("new", 2, scene_id="scene-1"), self.row("third", 3)]
+        db = self.make_store(self.home, "pi", rows)
+        self.make_store(self.home, "other", [self.row("old", 1), self.row("new", 2)])
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.executescript("""
+                ALTER TABLE memories ADD COLUMN event_date TEXT;
+                ALTER TABLE memories ADD COLUMN event_start TEXT;
+                ALTER TABLE memories ADD COLUMN event_end TEXT;
+                CREATE TABLE memory_supersessions (source TEXT, old_id TEXT, new_id TEXT, evidence TEXT, created_at TEXT, PRIMARY KEY(source,old_id));
+                CREATE TABLE scenes (scene_id TEXT PRIMARY KEY, evidence_version INTEGER, evidence_status TEXT, extraction_user_text TEXT, extraction_assistant_text TEXT, source_event_ids_json TEXT);
+                CREATE TABLE patterns (id TEXT PRIMARY KEY, title TEXT, status TEXT);
+                CREATE TABLE pattern_evidence (pattern_id TEXT, memory_id TEXT, role TEXT);
+                CREATE INDEX evidence_memory ON pattern_evidence(memory_id);
+            """)
+            conn.execute("UPDATE memories SET event_date=?, event_start=?, event_end=? WHERE id='new'", ("2026-01", "2026-01-01", "2026-02-01"))
+            conn.executemany("INSERT INTO memory_supersessions VALUES (?,?,?,?,?)", [
+                ("pi", "old", "new", "x" * 1500, "2026-01-03"),
+                ("pi", "gone", "new", "removed old", "2026-01-04"),
+                ("other", "third", "new", "wrong source", "2026-01-05"),
+            ])
+            conn.execute("INSERT INTO scenes VALUES (?,?,?,?,?,?)", ("scene-1", 1, "complete", "u" * 3000, "assistant", json.dumps(["e" * 220] * 20)))
+            conn.execute("INSERT INTO patterns VALUES ('p1','Pattern','accepted')")
+            conn.execute("INSERT INTO pattern_evidence VALUES ('p1','new','support')")
+        snapshot = self.call("snapshot")
+        corrections = [edge for edge in snapshot["edges"] if edge["kind"] == "supersedes"]
+        self.assertEqual(corrections, [{"source": "pi::new", "target": "pi::old", "kind": "supersedes", "weight": 1}])
+        filtered = self.call("snapshot", filters={"agent": "other"})
+        self.assertFalse(any(edge["kind"] == "supersedes" for edge in filtered["edges"]))
+        response = self.call("detail", sourceAgent="pi", memoryId="new")
+        self.assertEqual(response["metadata"]["event_date"], "2026-01")
+        self.assertEqual(response["metadata"]["event_end"], "2026-02-01")
+        self.assertEqual({entry["memoryId"] for entry in response["corrections"]}, {"old", "gone"})
+        missing = next(entry for entry in response["corrections"] if entry["memoryId"] == "gone")
+        self.assertIsNone(missing["memory"])
+        self.assertEqual(response["scene"]["status"], "complete")
+        self.assertLessEqual(len(response["scene"]["userText"]), 2048)
+        self.assertEqual(len(response["scene"]["eventIds"]), 12)
+        self.assertLessEqual(len(response["scene"]["eventIds"][0]), 256)
+        self.assertEqual(response["patterns"], [{"id": "p1", "title": "Pattern", "status": "accepted", "role": "support"}])
+        old = self.call("detail", sourceAgent="pi", memoryId="old")
+        self.assertEqual(old["corrections"][0]["direction"], "replacedBy")
+        self.assertLessEqual(len(old["corrections"][0]["evidence"]), 1024)
+        self.assertEqual(self.call("detail", sourceAgent="other", memoryId="old")["corrections"], [])
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.execute("UPDATE scenes SET source_event_ids_json=?", (json.dumps(["e" * 220] * 40),))
+        response = self.call("detail", sourceAgent="pi", memoryId="new")
+        self.assertEqual(response["scene"]["status"], "complete")
+        self.assertTrue(any("preview limit" in warning for warning in response["warnings"]))
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.execute("UPDATE scenes SET evidence_version=0")
+        response = self.call("detail", sourceAgent="pi", memoryId="new")
+        self.assertEqual(response["scene"]["status"], "partial")
+
+    def test_legacy_corrections_scene_and_missing_old_schema(self):
+        path = self.make_store(self.home, "json", [
+            self.row("old", 1, source_event_ids=["old-event"], provenance={"user": "Original date"}),
+            self.row("new", 2, scene_id="s"),
+        ], json_only=True)
+        path.with_name("memories.json.relations.json").write_text(json.dumps([
+            {"source": "json", "old_id": "old", "new_id": "new", "evidence": "change", "created_at": "now"},
+            {"source": "other", "old_id": "old", "new_id": "new", "evidence": "bad", "created_at": "now"},
+        ]))
+        path.with_name("scenes.json").write_text(json.dumps([{"scene_id": "s", "evidence_status": "partial", "extraction_user_text": "source", "source_event_ids": ["event"]}]))
+        result = self.call("detail", sourceAgent="json", memoryId="new")
+        self.assertEqual(result["scene"]["userText"], "source")
+        self.assertEqual(result["scene"]["status"], "partial")
+        self.assertEqual(result["corrections"][0]["memory"]["memoryId"], "old")
+        self.assertEqual(len(result["corrections"]), 1)
+        self.assertEqual(len([e for e in self.call("snapshot")["edges"] if e["kind"] == "supersedes"]), 1)
+        original = self.call("detail", sourceAgent="json", memoryId="old")
+        self.assertIsNone(original["scene"])
+        self.assertEqual(original["memoryEvidence"], {"eventIds": ["old-event"], "userText": "Original date", "assistantText": ""})
+        db = self.make_store(self.home, "oldschema", [self.row("one", 1, scene_id="absent")])
+        old = self.call("detail", sourceAgent="oldschema", memoryId="one")
+        self.assertEqual(old["scene"]["status"], "missing")
+        self.assertEqual(old["corrections"], [])
+        self.assertEqual(old["patterns"], [])
+        self.assertIsNone(old["metadata"]["event_date"])
+
+    def test_snapshot_marks_exactly_one_over_limit_partial(self):
+        self.make_store(self.home, "pi", [self.row(f"m-{i}", i % 60) for i in range(151)])
+        result = self.call("snapshot")
+        self.assertEqual(len(result["nodes"]), 150)
+        self.assertTrue(result["partial"])
 
     def test_module_cli_emits_one_json_response_and_nonzero_errors(self):
         self.make_store(self.home, "pi", [self.row("one", 1)])

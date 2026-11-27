@@ -52,6 +52,8 @@ function mount() {
     snapshot,
     selectedNodeId: null,
     onSelect: () => undefined,
+    relationshipFilter: "all",
+    onRelationshipFilterChange: () => undefined,
   }));
 }
 

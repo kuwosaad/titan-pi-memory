@@ -39,7 +39,7 @@ MAX_SOURCES = 64
 MAX_CATALOG_TYPES = 256
 MAX_SNAPSHOT_NODES = 150
 MAX_SNAPSHOT_EDGES = 450
-MAX_SNAPSHOT_BYTES = 512 * 1024
+MAX_SNAPSHOT_BYTES = 480 * 1024
 MAX_NODE_TEXT = 240
 MAX_DETAIL_TEXT = 16 * 1024
 MAX_SEARCH_PAGE = 50
@@ -53,6 +53,8 @@ MAX_STREAM = 64
 MAX_TIMESTAMP = 128
 MAX_NODE_ID = 512
 MAX_VECTOR_DIM = 4096
+MAX_LINKED_EVIDENCE = 12
+MAX_ANCILLARY_BYTES = 32 * 1024 * 1024
 SQLITE_TIMEOUT_SECONDS = 2.0
 MAX_STDIN_BYTES = 1024 * 1024
 TOP_K = 2
@@ -118,6 +120,9 @@ class MemoryRecord:
     speaker_focus: Optional[str]
     memory_kind: Optional[str]
     embedding: Optional[tuple[float, ...]]
+    event_date: Optional[str] = None
+    event_start: Optional[str] = None
+    event_end: Optional[str] = None
 
     @property
     def has_embedding(self) -> bool:
@@ -173,6 +178,18 @@ def _optional_string(value: Any) -> Optional[str]:
 def _bounded_metadata(value: Any, limit: int) -> Optional[str]:
     text = _optional_string(value)
     return _bounded_text(text, limit) if text is not None else None
+
+
+def _identifier(value: Any, limit: int = MAX_MEMORY_ID) -> Optional[str]:
+    if isinstance(value, str) and 0 < len(value) <= limit and not any(char in value for char in "\r\n\x00"):
+        return value
+    return None
+
+
+def _evidence_event_ids(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value[:MAX_LINKED_EVIDENCE] if _identifier(item)]
 
 
 def _timestamp_value(value: Any) -> Optional[int]:
@@ -288,14 +305,10 @@ def _record_from_row(
     text_limit: int = MAX_DETAIL_TEXT,
     warnings: Optional[WarningCollector] = None,
 ) -> Optional[MemoryRecord]:
-    memory_id = _optional_string(_row_value(row, "id"))
+    memory_id = _identifier(_row_value(row, "id"))
     if not memory_id:
         if warnings:
-            warnings.add(f"Skipped a {source_agent} memory with an empty id")
-        return None
-    if len(memory_id) > MAX_MEMORY_ID:
-        if warnings:
-            warnings.add(f"Skipped a {source_agent} memory with an oversized id")
+            warnings.add(f"Skipped a {source_agent} memory with an invalid id")
         return None
     timestamp = _optional_string(_row_value(row, "ts"))
     if timestamp is not None and len(timestamp) > MAX_TIMESTAMP:
@@ -317,7 +330,7 @@ def _record_from_row(
         timestamp=timestamp,
         session_id=_bounded_metadata(_row_value(row, "session_id"), MAX_SESSION_ID),
         turn=_optional_int(_row_value(row, "turn")),
-        scene_id=_bounded_metadata(_row_value(row, "scene_id"), MAX_FILTER_VALUE),
+        scene_id=_identifier(_row_value(row, "scene_id"), MAX_FILTER_VALUE),
         source_type=_bounded_metadata(_row_value(row, "source_type"), MAX_FILTER_VALUE),
         source_reliability=_optional_float(_row_value(row, "source_reliability")),
         verification_status=_bounded_metadata(_row_value(row, "verification_status"), MAX_FILTER_VALUE),
@@ -325,6 +338,7 @@ def _record_from_row(
         speaker_focus=_bounded_metadata(_row_value(row, "speaker_focus"), MAX_FILTER_VALUE),
         memory_kind=_bounded_metadata(_row_value(row, "memory_kind"), MAX_FILTER_VALUE),
         embedding=embedding,
+        **{key: _bounded_metadata(_row_value(row, key), MAX_TIMESTAMP) for key in ("event_date", "event_start", "event_end")},
     )
 
 
@@ -337,14 +351,10 @@ def _record_from_json(
 ) -> Optional[MemoryRecord]:
     if not isinstance(raw, dict):
         return None
-    memory_id = _optional_string(raw.get("id"))
+    memory_id = _identifier(_optional_string(raw.get("id")))
     if not memory_id:
         if warnings:
-            warnings.add(f"Skipped a {source_agent} memory with an empty id")
-        return None
-    if len(memory_id) > MAX_MEMORY_ID:
-        if warnings:
-            warnings.add(f"Skipped a {source_agent} memory with an oversized id")
+            warnings.add(f"Skipped a {source_agent} memory with an invalid id")
         return None
     timestamp = _optional_string(raw.get("ts"))
     if timestamp is not None and len(timestamp) > MAX_TIMESTAMP:
@@ -360,7 +370,7 @@ def _record_from_json(
         timestamp=timestamp,
         session_id=_bounded_metadata(raw.get("session_id"), MAX_SESSION_ID),
         turn=_optional_int(raw.get("turn")),
-        scene_id=_bounded_metadata(raw.get("scene_id"), MAX_FILTER_VALUE),
+        scene_id=_identifier(raw.get("scene_id"), MAX_FILTER_VALUE),
         source_type=_bounded_metadata(raw.get("source_type"), MAX_FILTER_VALUE),
         source_reliability=_optional_float(raw.get("source_reliability")),
         verification_status=_bounded_metadata(raw.get("verification_status"), MAX_FILTER_VALUE),
@@ -368,6 +378,7 @@ def _record_from_json(
         speaker_focus=_bounded_metadata(raw.get("speaker_focus"), MAX_FILTER_VALUE),
         memory_kind=_bounded_metadata(raw.get("memory_kind"), MAX_FILTER_VALUE),
         embedding=_valid_vector(raw.get("embedding")),
+        **{key: _bounded_metadata(raw.get(key), MAX_TIMESTAMP) for key in ("event_date", "event_start", "event_end")},
     )
 
 
@@ -413,6 +424,9 @@ def _detail_metadata(record: MemoryRecord) -> dict[str, str | int | float | bool
         "verification_status": record.verification_status,
         "fallback_generated": record.fallback_generated,
         "speaker_focus": record.speaker_focus,
+        "event_date": record.event_date,
+        "event_start": record.event_start,
+        "event_end": record.event_end,
     }
 
 
@@ -602,6 +616,9 @@ def _sqlite_projection(columns: set[str], *, text_limit: int = MAX_DETAIL_TEXT) 
         "verification_status": MAX_FILTER_VALUE + 1,
         "speaker_focus": MAX_FILTER_VALUE + 1,
         "memory_kind": MAX_FILTER_VALUE + 1,
+        "event_date": MAX_TIMESTAMP + 1,
+        "event_start": MAX_TIMESTAMP + 1,
+        "event_end": MAX_TIMESTAMP + 1,
     }
     for name, limit in bounded_fields.items():
         if name in columns:
@@ -866,11 +883,16 @@ def _fetch_sqlite_records(
         connection.close()
 
 
-def _load_json(path: Path) -> list[dict[str, Any]]:
+def _load_json(path: Path, *, max_bytes: int | None = None) -> list[dict[str, Any]]:
     try:
-        if path.stat().st_size > 32 * 1024 * 1024:
-            raise ExplorerError("store_too_large", "legacy JSON memory store exceeds the read limit")
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        if max_bytes is None:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            with path.open("rb") as stream:
+                data = stream.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise ExplorerError("store_too_large", "legacy JSON evidence exceeds the read limit")
+            payload = json.loads(data)
     except ExplorerError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -1238,13 +1260,207 @@ def _fit_snapshot_payload(payload: dict[str, Any], warnings: WarningCollector) -
     return payload
 
 
+def _ancillary_path(source: Source, filename: str) -> Path:
+    directory = source.json_path.parent if source.json_path.is_file() else source.db_path.parent
+    path = (directory / filename).resolve()
+    if path.parent != directory.resolve():
+        raise ExplorerError("read_error", "unsafe ancillary store path")
+    return path
+
+
+def _read_relations(source: Source, ids: list[str], warnings: WarningCollector, *, detail: bool) -> tuple[list[dict[str, Any]], bool]:
+    if not ids:
+        return [], False
+    try:
+        if source.db_path.is_file():
+            conn = _open_read_only(source.db_path)
+            try:
+                # Cap virtual-machine work as well as result count, including on old
+                # databases that lack a reverse (new_id) index.
+                steps = 0
+                def progress() -> int:
+                    nonlocal steps
+                    steps += 1
+                    return int(steps > 2000)
+                conn.set_progress_handler(progress, 1000)
+                if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_supersessions'").fetchone():
+                    return [], False
+                marks = ",".join("?" for _ in ids)
+                condition = f"(old_id IN ({marks}) OR new_id IN ({marks}))" if detail else f"old_id IN ({marks})"
+                params = [source.agent, *ids, *ids, ids[0]] if detail else [source.agent, *ids]
+                ordering = "ORDER BY old_id != ?, created_at DESC, old_id" if detail else ""
+                limit = MAX_LINKED_EVIDENCE if detail else MAX_SNAPSHOT_EDGES
+                rows = conn.execute(
+                    f"SELECT substr(old_id,1,257) old_id, substr(new_id,1,257) new_id, "
+                    f"substr(evidence,1,1025) evidence, substr(created_at,1,129) created_at "
+                    f"FROM memory_supersessions WHERE source = ? AND {condition} {ordering} LIMIT ?",
+                    (*params, limit + 1),
+                ).fetchall()
+                return [dict(row) for row in rows[:limit]], len(rows) > limit
+            finally:
+                conn.close()
+        path = _ancillary_path(source, "memories.json.relations.json")
+        if not path.is_file():
+            return [], False
+        rows = _load_json(path, max_bytes=MAX_ANCILLARY_BYTES)
+        matches = [r for r in rows if r.get("source") == source.agent and
+                   (r.get("old_id") in ids or (detail and r.get("new_id") in ids))]
+        if detail:
+            matches.sort(key=lambda link: (link.get("old_id") == ids[0], str(link.get("created_at") or "")), reverse=True)
+        limit = MAX_LINKED_EVIDENCE if detail else MAX_SNAPSHOT_EDGES
+        return matches[:limit], len(matches) > limit
+    except (ExplorerError, OSError, sqlite3.DatabaseError) as exc:
+        warnings.add(f"Correction evidence unavailable for {source.agent}: {exc}")
+        return [], True
+
+
+def correction_edges(
+    home: Path, memory_keys: Iterable[tuple[str, str]], warnings: WarningCollector,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, set[str]] = {}
+    for agent, memory_id in memory_keys:
+        if _AGENT_NAME_RE.fullmatch(agent) and _identifier(memory_id):
+            grouped.setdefault(agent, set()).add(memory_id)
+    edges: list[dict[str, Any]] = []
+    for agent, ids in sorted(grouped.items()):
+        try:
+            source = _source_for_agent(home, agent, warnings)
+        except ExplorerError as exc:
+            warnings.add(f"Skipped namespace {agent}: {exc.message}")
+            continue
+        if source is None:
+            continue
+        links, partial = _read_relations(source, sorted(ids), warnings, detail=False)
+        if partial:
+            warnings.add(f"Correction links limited for {agent}")
+        for link in links:
+            old, new = _identifier(link.get("old_id")), _identifier(link.get("new_id"))
+            if old in ids and new in ids and old != new:
+                edges.append({"source": f"{agent}::{new}", "target": f"{agent}::{old}", "kind": "supersedes", "weight": 1})
+    edges.sort(key=lambda edge: (edge["source"], edge["target"]))
+    return edges
+
+
+def _detail_corrections(
+    source: Source, memory_id: str, warnings: WarningCollector, json_records: list[dict[str, Any]] | None,
+) -> tuple[list[dict[str, Any]], bool]:
+    links, partial = _read_relations(source, [memory_id], warnings, detail=True)
+    result = []
+    for link in links:
+        direction = "replaces" if link.get("new_id") == memory_id else "replacedBy"
+        other = _identifier(link.get("old_id") if direction == "replaces" else link.get("new_id"))
+        if not other or other == memory_id:
+            partial = True
+            continue
+        try:
+            found, _, _ = (_detail_from_sqlite(source, other) if json_records is None else _detail_from_json(source, other, json_records))
+            summary = _summary(found)
+        except ExplorerError as exc:
+            summary = None
+            if exc.code != "not_found":
+                partial = True
+                warnings.add(f"Linked memory unavailable for {source.agent}: {exc.message}")
+        result.append({"direction": direction, "memory": summary, "memoryId": other,
+                       "evidence": _bounded_text(link.get("evidence"), 1024),
+                       "timestamp": _bounded_metadata(link.get("created_at"), MAX_TIMESTAMP)})
+    return result, partial
+
+
+def _scene_detail(source: Source, scene_id: Optional[str], warnings: WarningCollector) -> Optional[dict[str, Any]]:
+    if not scene_id:
+        return None
+    result: dict[str, Any] = {"id": scene_id, "status": "missing", "userText": "", "assistantText": "", "eventIds": []}
+    try:
+        if source.db_path.is_file():
+            conn = _open_read_only(source.db_path)
+            try:
+                if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scenes'").fetchone():
+                    return result
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(scenes)")}
+                names = {"evidence_status": 32, "evidence_version": 16, "extraction_user_text": 2049,
+                         "extraction_assistant_text": 2049, "source_event_ids_json": 8193}
+                projection = ", ".join(f"substr({name},1,{limit}) AS {name}" for name, limit in names.items() if name in columns)
+                row = conn.execute(f"SELECT {projection or 'scene_id'} FROM scenes WHERE scene_id = ? LIMIT 1", (scene_id,)).fetchone()
+                raw = dict(row) if row else None
+                if raw is not None:
+                    event_json = raw.get("source_event_ids_json") or "[]"
+                    try:
+                        if len(event_json) > 8192:
+                            warnings.add("Source scene event IDs exceed the preview limit")
+                        else:
+                            raw["source_event_ids"] = json.loads(event_json)
+                    except (ValueError, TypeError):
+                        raw["evidence_status"] = "partial"
+            finally:
+                conn.close()
+        else:
+            path = _ancillary_path(source, "scenes.json")
+            raw = next((row for row in _load_json(path, max_bytes=MAX_ANCILLARY_BYTES) if row.get("scene_id") == scene_id), None) if path.is_file() else None
+        if raw is None:
+            return result
+        if raw.get("evidence_status") == "complete" and _optional_int(raw.get("evidence_version")) == 1:
+            result["status"] = "complete"
+        else:
+            result["status"] = "partial"
+        result["userText"] = _bounded_text(raw.get("extraction_user_text"), 2048)
+        result["assistantText"] = _bounded_text(raw.get("extraction_assistant_text"), 2048)
+        event_ids = raw.get("source_event_ids")
+        result["eventIds"] = _evidence_event_ids(event_ids)
+        if isinstance(event_ids, list):
+            if len(result["eventIds"]) < len(event_ids):
+                warnings.add("Some source scene event IDs are outside the preview limits")
+        return result
+    except (ExplorerError, OSError, sqlite3.DatabaseError) as exc:
+        warnings.add(f"Scene evidence unavailable for {source.agent}: {exc}")
+        result["status"] = "unavailable"
+        return result
+
+
+def _pattern_detail(source: Source, memory_id: str, warnings: WarningCollector) -> list[dict[str, str]]:
+    if not source.db_path.is_file():
+        return []
+    try:
+        conn = _open_read_only(source.db_path)
+        try:
+            steps = 0
+            def progress() -> int:
+                nonlocal steps
+                steps += 1
+                return int(steps > 2000)
+            conn.set_progress_handler(progress, 1000)
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('patterns','pattern_evidence')")}
+            if len(tables) < 2:
+                return []
+            rows = conn.execute(
+                "SELECT substr(p.id,1,257), substr(p.title,1,241), substr(p.status,1,65), substr(e.role,1,65) "
+                "FROM pattern_evidence e JOIN patterns p ON p.id=e.pattern_id WHERE e.memory_id=? LIMIT ?",
+                (memory_id, MAX_LINKED_EVIDENCE + 1),
+            ).fetchall()
+            if len(rows) > MAX_LINKED_EVIDENCE:
+                warnings.add(f"Pattern evidence limited for {source.agent}")
+            return [
+                {"id": pattern_id, "title": _bounded_text(title, 240), "status": _bounded_text(status, 64), "role": _bounded_text(role, 64)}
+                for raw_id, title, status, role in rows[:MAX_LINKED_EVIDENCE]
+                if (pattern_id := _identifier(raw_id)) is not None
+            ]
+        finally:
+            conn.close()
+    except (ExplorerError, sqlite3.DatabaseError) as exc:
+        warnings.add(f"Pattern evidence unavailable for {source.agent}: {exc}")
+        return []
+
+
 def snapshot(home: Path, filters: ExplorerFilters) -> dict[str, Any]:
     warnings = WarningCollector()
-    records, more = _read_page(home, filters, None, MAX_SNAPSHOT_NODES + 1, warnings)
+    records, more = _read_page(home, filters, None, MAX_SNAPSHOT_NODES, warnings)
     records = records[:MAX_SNAPSHOT_NODES]
     if more:
         warnings.add(f"Graph limited to {MAX_SNAPSHOT_NODES} memories")
-    edges = _similarity_edges(records, warnings)
+    stored_edges = correction_edges(home, ((record.source_agent, record.memory_id) for record in records), warnings)
+    edges = stored_edges + _similarity_edges(records, warnings)
+    if len(edges) > MAX_SNAPSHOT_EDGES:
+        warnings.add(f"Graph edges limited to {MAX_SNAPSHOT_EDGES}")
+        edges = edges[:MAX_SNAPSHOT_EDGES]
     payload: dict[str, Any] = {
         "nodes": [_summary(record) for record in records],
         "edges": edges,
@@ -1272,11 +1488,23 @@ def search(home: Path, filters: ExplorerFilters, cursor_value: Any, page_value: 
     }
 
 
-def _detail_from_sqlite(source: Source, memory_id: str) -> tuple[MemoryRecord, str]:
+def _memory_evidence(event_ids: Any, user_text: Any, assistant_text: Any) -> dict[str, Any] | None:
+    evidence = {
+        "eventIds": _evidence_event_ids(event_ids),
+        "userText": _bounded_text(user_text, 2048),
+        "assistantText": _bounded_text(assistant_text, 2048),
+    }
+    return evidence if any(evidence.values()) else None
+
+
+def _detail_from_sqlite(source: Source, memory_id: str) -> tuple[MemoryRecord, str, dict[str, Any] | None]:
     connection = _open_read_only(source.db_path)
     try:
         columns = _sqlite_columns(connection)
         projection = _sqlite_projection(columns, text_limit=MAX_DETAIL_TEXT + 1)
+        for name, limit in (("source_event_ids_json", 8192), ("provenance_user", 2049), ("provenance_assistant", 2049)):
+            if name in columns:
+                projection += f", substr({name}, 1, {limit}) AS {name}"
         row = connection.execute(
             f"SELECT {projection} FROM memories WHERE id = ? LIMIT 1",
             (memory_id,),
@@ -1287,7 +1515,12 @@ def _detail_from_sqlite(source: Source, memory_id: str) -> tuple[MemoryRecord, s
         if record is None:
             raise ExplorerError("read_error", "memory record is invalid")
         raw_text = _row_value(row, "text", "")
-        return record, str(raw_text or "")
+        try:
+            event_ids = json.loads(_row_value(row, "source_event_ids_json") or "[]")
+        except (TypeError, ValueError):
+            event_ids = []
+        evidence = _memory_evidence(event_ids, _row_value(row, "provenance_user"), _row_value(row, "provenance_assistant"))
+        return record, str(raw_text or ""), evidence
     except ExplorerError:
         raise
     except sqlite3.OperationalError as exc:
@@ -1301,14 +1534,17 @@ def _detail_from_sqlite(source: Source, memory_id: str) -> tuple[MemoryRecord, s
         connection.close()
 
 
-def _detail_from_json(source: Source, memory_id: str) -> tuple[MemoryRecord, str]:
-    for raw in _load_json(source.json_path):
+def _detail_from_json(source: Source, memory_id: str, records: list[dict[str, Any]]) -> tuple[MemoryRecord, str, dict[str, Any] | None]:
+    for raw in records:
         if str(raw.get("id") or "") != memory_id:
             continue
         record = _record_from_json(source.agent, raw)
         if record is None:
             raise ExplorerError("read_error", "memory record is invalid")
-        return record, str(raw.get("text") or "")
+        provenance = raw.get("provenance")
+        provenance = provenance if isinstance(provenance, dict) else {}
+        evidence = _memory_evidence(raw.get("source_event_ids"), provenance.get("user"), provenance.get("assistant"))
+        return record, str(raw.get("text") or ""), evidence
     raise ExplorerError("not_found", "memory not found")
 
 
@@ -1316,21 +1552,32 @@ def detail(home: Path, source_agent: Any, memory_id: Any) -> dict[str, Any]:
     agent = _validate_agent(source_agent)
     if agent is None:
         raise ExplorerError("invalid_input", "sourceAgent is required")
-    if not isinstance(memory_id, str) or not memory_id or len(memory_id) > MAX_MEMORY_ID or "\x00" in memory_id:
+    if not _identifier(memory_id):
         raise ExplorerError("invalid_input", "memoryId is invalid")
     warnings = WarningCollector()
     sources = discover_sources(home, agent, warnings)
     if not sources:
         raise ExplorerError("not_found", "memory namespace not found")
     source = sources[0]
+    json_records = None
     if source.db_path.is_file():
-        record, full_text = _detail_from_sqlite(source, memory_id)
+        record, full_text, evidence = _detail_from_sqlite(source, memory_id)
     elif source.json_path.is_file():
-        record, full_text = _detail_from_json(source, memory_id)
+        json_records = _load_json(source.json_path)
+        record, full_text, evidence = _detail_from_json(source, memory_id, json_records)
     else:
         raise ExplorerError("not_found", "memory namespace not found")
     bounded_text, truncated = _truncate_utf8(full_text, MAX_DETAIL_TEXT)
+    corrections, partial = _detail_corrections(source, memory_id, warnings, json_records)
+    scene = _scene_detail(source, record.scene_id, warnings)
+    patterns = _pattern_detail(source, memory_id, warnings)
     return {
+        "corrections": corrections,
+        "correctionsPartial": partial,
+        "scene": scene,
+        "memoryEvidence": evidence,
+        "patterns": patterns,
+        "warnings": warnings.as_list(),
         "memory": _summary(record),
         "text": bounded_text,
         "metadata": _detail_metadata(record),

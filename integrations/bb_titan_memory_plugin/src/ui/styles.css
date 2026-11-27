@@ -23,8 +23,8 @@
 .titan-explorer h3,
 .titan-explorer p { margin: 0; }
 .titan-explorer h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
-.titan-explorer h2 { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
-.titan-explorer h3 { font-size: 11px; font-weight: 600; }
+.titan-explorer h2 { font-size: 14px; font-weight: 600; }
+.titan-explorer h3 { font-size: 12px; font-weight: 600; }
 
 .titan-explorer-header,
 .titan-panel-heading,
@@ -200,14 +200,23 @@
 .titan-panel--list { grid-column: 2; }
 .titan-panel--details { grid-column: 1 / -1; }
 .titan-explorer-grid--list-hidden .titan-panel--graph { grid-column: 1 / -1; }
+@container titan-panel (min-width: 651px) {
+  .titan-explorer-grid--inspecting { grid-template-rows: auto 1fr; }
+  .titan-explorer-grid--inspecting .titan-panel--graph { grid-column: 1; grid-row: 1 / 3; }
+  .titan-explorer-grid--inspecting .titan-panel--list { grid-column: 2; grid-row: 1; }
+  .titan-explorer-grid--inspecting .titan-panel--details { grid-column: 2; grid-row: 2; }
+  .titan-explorer-grid--inspecting .titan-memory-list { max-height: 144px; }
+  .titan-explorer-grid--inspecting.titan-explorer-grid--list-hidden .titan-panel--details { grid-row: 1 / 3; }
+}
 .titan-panel-heading {
-  min-height: 43px;
-  padding: 9px 12px;
+  min-height: 44px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-hairline);
 }
 .titan-count {
   color: var(--muted-foreground);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .titan-badge {
   padding: 3px 7px;
@@ -290,8 +299,10 @@
 .titan-go-page input { width: 42px; }
 .titan-go-page .titan-button { min-height: 25px; padding: 3px 7px; }
 
-.titan-detail-body { padding: 12px; }
-.titan-detail-status { color: var(--muted-foreground); font-size: 12px; }
+.titan-detail-body { display: grid; gap: 12px; padding: 12px; }
+.titan-detail-status,
+.titan-inspector-meta { color: var(--muted-foreground); font-size: 12px; overflow-wrap: anywhere; }
+.titan-inspector-meta { font-variant-numeric: tabular-nums; }
 .titan-detail-text {
   max-height: 260px;
   overflow: auto;
@@ -310,7 +321,7 @@
 .titan-metadata div { min-width: 0; padding-top: 7px; border-top: 1px solid var(--border-hairline); }
 .titan-metadata dt { color: var(--subtle-foreground); font-size: 12px; }
 .titan-metadata dd { margin: 2px 0 0; color: var(--muted-foreground); font-size: 12px; overflow-wrap: anywhere; }
-.titan-connections { display: grid; gap: 7px; margin-top: 14px; }
+.titan-connections { display: grid; gap: 8px; border-top: 1px solid var(--border-hairline); padding-top: 12px; }
 .titan-connection {
   display: grid;
   gap: 3px;
@@ -335,3 +346,13 @@
   .titan-explorer *::before,
   .titan-explorer *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+.titan-scope-note { padding: 4px 8px; border-left: 2px solid var(--border); color: var(--muted-foreground); font-size: 12px; }
+.titan-correction { display: grid; gap: 4px; }
+.titan-correction .titan-connection { border-inline-start: 2px solid #559ca9; }
+.titan-evidence { color: var(--muted-foreground); font-size: 12px; overflow-wrap: anywhere; }
+.titan-evidence summary { cursor: pointer; }
+.titan-evidence p { white-space: pre-wrap; line-height: 1.45; }
+.titan-evidence[open] p { margin-top: 8px; }
+.titan-technical-details { border-top: 1px solid var(--border-hairline); padding-top: 12px; }
+.titan-event-time { margin-top: 0; }
