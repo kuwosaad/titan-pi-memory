@@ -137,14 +137,14 @@ evidence response and be scored independently from retrieval.
 
 ## Existing Titan harnesses
 
-The repository's [LongMemEval oracle runner](../../tools/benchmarks/longmemeval_oracle.py)
+The repository's [LongMemEval oracle runner](../../../tools/benchmarks/longmemeval_oracle.py)
 is unsuitable unchanged: its default corpus is evidence-only. The
-[LoCoMo shadow runner](../../tools/benchmarks/locomo_shadow_eval.py) currently uses
+[LoCoMo shadow runner](../../../tools/benchmarks/locomo_shadow_eval.py) currently uses
 answer substring/token coverage, expands scenes outside the brief budget, and
 its fallback scene messages omit event IDs needed by the new source search.
 Neither result should be relabeled as this experiment's evidence score.
 
-The [scene-context scorer](../../tools/benchmarks/scene_context_eval.py) provides a
+The [scene-context scorer](../../../tools/benchmarks/scene_context_eval.py) provides a
 useful local precedent: credit rendered evidence and valid provenance, not merely
 IDs. Its synthetic fixtures are still separate from this external diagnostic.
 

@@ -100,7 +100,7 @@ place Titan retrieval output into a later scene. Previously that output entered
 the fact extractor as ordinary fresh tool evidence. A replay could therefore
 save an old claim under a new scene ID, bypassing same-evidence duplicate checks.
 
-[`pipeline.py`](../../app/save_pipeline/pipeline.py) now recognizes Titan-owned
+[`pipeline.py`](../../../app/save_pipeline/pipeline.py) now recognizes Titan-owned
 memory-read tools by exact identity and, for the multiplexed `titan` tool, its
 parsed action. Their successful results remain in the durable raw scene but are
 excluded from extraction and citeable fresh-evidence references. Unknown tools,

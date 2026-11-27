@@ -47,7 +47,7 @@ Titan’s potentially distinctive contribution is the **explicit invariant and A
 
 ## What seems distinctive in Titan
 
-Verified against Titan’s local [architecture vocabulary](../CONTEXT.md), [storage models](../app/storage/models.py), and [retrieval pipeline](../app/retrieval_pipeline/brief.py):
+Verified against Titan’s local [architecture vocabulary](../../CONTEXT.md), [storage models](../../app/storage/models.py), and [retrieval pipeline](../../app/retrieval_pipeline/brief.py):
 
 - **Scene is first-class at the trace boundary.** A Scene is the durable interaction boundary for a trace segment and remains durable even if extraction yields zero Memories. Current pipeline writes associate extracted Memories with the Scene; the schema keeps `scene_id` optional for compatibility with legacy/other sources. This is stronger than storing source context only as incidental metadata on a successful extracted fact.
 - **Memory is explicitly a projection/pointer, not the final evidence.** A Memory has a stable ID, extracted text, optional embedding, provenance, source-event IDs, reliability/verification fields, and—when produced through the scene-aware path—a `scene_id`. Retrieval can expand selected memory IDs into scene notes or full scene context.

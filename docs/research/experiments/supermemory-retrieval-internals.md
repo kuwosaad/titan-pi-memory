@@ -343,22 +343,22 @@ Three focused Titan adaptations are justified as experiments, not automatic
 production changes:
 
 1. **Typed historical context after selection.** Titan already has
-   [source-qualified scene expansion](../../app/retrieval_pipeline/federated.py)
-   and [scene lookup](../../app/save_pipeline/pipeline.py). When explicit,
+   [source-qualified scene expansion](../../../app/retrieval_pipeline/federated.py)
+   and [scene lookup](../../../app/save_pipeline/pipeline.py). When explicit,
    source-backed update links exist, attach bounded old/new evidence under a
    history field while leaving current ranking and both sources inspectable.
    Carry the original filters and charge every attached character. Do not infer
    update links from antonyms or copy Supermemory's unfiltered-by-latest history
    into a current-facts list.
 2. **Event-time filters distinct from capture time.** Titan's
-   [date extraction](../../app/retrieval_pipeline/retriever.py) currently feeds
+   [date extraction](../../../app/retrieval_pipeline/retriever.py) currently feeds
    candidate date filters. Test an explicit occurrence-time interval separately
    from storage timestamp, with conservative ambiguity handling and a SQL-only
    path for date-only requests. Backfilled historical incidents should not be
    dated by when the agent happened to import them.
 3. **Budgeted synthesis as a distinct opt-in operation.** If testing a summary
    of several evidence pointers, keep it separate from
-   [ordinary ranking and the memory brief](../../app/retrieval_pipeline/brief.py).
+   [ordinary ranking and the memory brief](../../../app/retrieval_pipeline/brief.py).
    Require source IDs for every summary, expose its derived status, allow an
    honest missing-answer outcome, cap calls/tokens, and count its complete
    rendered context. Compare against unchanged Titan selection on the same
