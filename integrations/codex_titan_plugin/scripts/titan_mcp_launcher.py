@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Sequence, TextIO
@@ -48,7 +49,12 @@ def run(
         if not managed_runtime_requested:
             helper = Path(__file__).with_name("titan_plugin_runtime.py")
             command = [sys.executable, str(helper), "mcp", "--agent", args.agent]
-            exec_fn(command[0], command, runtime.build_environment(args.agent, environment))
+            launch_env = runtime.build_environment(args.agent, environment)
+            # Windows has no real exec: os.exec* there neither quotes arguments containing
+            # spaces nor keeps the caller's stdio attached, which breaks MCP servers.
+            if exec_fn is os.execvpe and os.name == "nt":
+                return subprocess.call(command, env=launch_env)
+            exec_fn(command[0], command, launch_env)
             return 0
         runtime.exec_managed_runtime(
             args.agent,
