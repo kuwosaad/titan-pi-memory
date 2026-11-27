@@ -1,5 +1,5 @@
 name: titan-memory
-version: "0.1.0"
+version: "0.1.1"
 description: Capture completed Hermes Agent turns in Titan Memory.
 requires_hermes: ">=0.23.4"
 provides_hooks:
