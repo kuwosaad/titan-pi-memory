@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+import re
 from collections import OrderedDict
 from threading import Lock
 
@@ -11,6 +12,7 @@ MAX_TEXT_CHARS = 12_000
 CAPTURE_TIMEOUT_SECONDS = 10
 MAX_PENDING_TURNS = 64
 POLICY_VETO = "blocked_by_plugin_pre_llm_call"
+_PARTIAL_TRAILING_TOKEN = re.compile(r"\s\S*\Z")
 
 
 def _message_text(message):
@@ -29,6 +31,24 @@ def _message_text(message):
     return "\n".join(parts)
 
 
+def _bounded(text):
+    """Cap text before it leaves Hermes.
+
+    Credentials are whitespace-free tokens. A cut inside one would leave a
+    fragment Titan's redaction no longer recognizes, so a token split by the
+    limit is dropped whole rather than sent in part. Text with no whitespace
+    at all keeps the hard cut; its prefix still matches Titan's patterns.
+    """
+    if len(text) <= MAX_TEXT_CHARS:
+        return text
+    clipped = text[:MAX_TEXT_CHARS]
+    if not text[MAX_TEXT_CHARS].isspace():
+        partial = _PARTIAL_TRAILING_TOKEN.search(clipped)
+        if partial:
+            clipped = clipped[: partial.start()]
+    return clipped.rstrip()
+
+
 def register(ctx):
     pending = OrderedDict()
     pending_lock = Lock()
@@ -38,8 +58,8 @@ def register(ctx):
             return
         if not isinstance(turn_id, str) or not turn_id.strip():
             return
-        goal = _message_text(user_message)
-        outcome = _message_text(assistant_response)
+        goal = _bounded(_message_text(user_message))
+        outcome = _bounded(_message_text(assistant_response))
         if not goal or not outcome:
             return
 

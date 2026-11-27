@@ -75,14 +75,36 @@ class HermesPluginTests(unittest.TestCase):
         self.capture(**{**self.turn, "turn_id": "turn-2"})
         self.assertNotEqual(self.ctx.call_mcp.call_args.args[2]["event_id"], packet["event_id"])
 
-    def test_passes_multimodal_text_to_titan_for_redaction_before_truncation(self):
+    def test_sends_only_text_blocks_within_the_catalog_limit(self):
         self.capture(**{**self.turn, "user_message": [
             {"type": "text", "text": "A note"},
             {"type": "image_url", "image_url": "private attachment data"},
-            {"type": "text", "text": "x" * (plugin.MAX_TEXT_CHARS + 1)},
+            {"type": "text", "text": "word " * plugin.MAX_TEXT_CHARS},
         ]})
         packet = self.ctx.call_mcp.call_args.args[2]
-        self.assertEqual(packet["goal"], "A note\n" + "x" * (plugin.MAX_TEXT_CHARS + 1))
+        self.assertTrue(packet["goal"].startswith("A note\nword word"))
+        self.assertNotIn("private attachment data", packet["goal"])
+        self.assertLessEqual(len(packet["goal"]), plugin.MAX_TEXT_CHARS)
+
+    def test_limit_applies_to_both_messages_before_the_mcp_call(self):
+        long_reply = "y" * (plugin.MAX_TEXT_CHARS * 3)
+        self.capture(**{**self.turn, "user_message": "z " * plugin.MAX_TEXT_CHARS, "assistant_response": long_reply})
+        packet = self.ctx.call_mcp.call_args.args[2]
+        self.assertLessEqual(len(packet["goal"]), plugin.MAX_TEXT_CHARS)
+        self.assertEqual(packet["outcome"], long_reply[: plugin.MAX_TEXT_CHARS])
+
+    def test_credential_split_by_the_limit_is_not_sent_in_part(self):
+        secret = "sk-" + "A1b2C3d4" * 8
+        lead = "a" * (plugin.MAX_TEXT_CHARS - 20) + " "
+        self.capture(**{**self.turn, "user_message": lead + secret + " tail"})
+        goal = self.ctx.call_mcp.call_args.args[2]["goal"]
+        self.assertEqual(goal, lead.rstrip())
+        self.assertNotIn("sk-", goal)
+
+    def test_text_within_the_limit_is_sent_unchanged(self):
+        exact = "b" * plugin.MAX_TEXT_CHARS
+        self.capture(**{**self.turn, "user_message": exact})
+        self.assertEqual(self.ctx.call_mcp.call_args.args[2]["goal"], exact)
 
     def test_ignores_incomplete_turns(self):
         for field in self.turn:

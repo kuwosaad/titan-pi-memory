@@ -12,9 +12,14 @@ as the plugin. For a catalog install, use the commit listed in the catalog
 entry. Check out that commit in the Titan repository and run `pipx install .`
 from its root. Put `titan` on the Hermes process's `PATH`.
 
-Install and enable the plugin from the Hermes catalog once listed, or copy
-it from a matching Titan checkout. Set `hermes_home` to your active Hermes
-profile's directory.
+Install and enable the plugin from the Hermes catalog:
+
+```bash
+hermes plugins install titan-memory --enable
+```
+
+Or copy it from a matching Titan checkout. Set `hermes_home` to your active
+Hermes profile's directory.
 
 ```bash
 hermes_home="${HERMES_HOME:-$HOME/.hermes}"
@@ -63,8 +68,10 @@ for other providers.
 The plugin sends the current prompt and final reply to the configured local
 Titan MCP server after Hermes confirms the turn succeeded. Attachments,
 tool data, and conversation history stay in Hermes. Failed, interrupted,
-and policy-vetoed turns are discarded. Titan redacts recognized credentials
-before capping each message at 12,000 characters.
+and policy-vetoed turns are discarded. The plugin caps the prompt and the
+reply at 12,000 characters each before the MCP call. A word cut by that limit
+is dropped whole, so a credential is never sent in part. Titan then redacts
+recognized credentials before storing anything.
 
 Hermes starts the configured `titan mcp` subprocess. Titan saves traces,
 source scenes, and extracted memories under the selected agent's Titan
@@ -76,7 +83,8 @@ telemetry.
 
 Hermes waits for capture during turn finalization. The MCP request uses a
 ten-second timeout. A failed call produces a warning and Hermes still
-returns the reply.
+returns the reply. That turn is not retried, so check the Hermes log for
+`Titan capture` warnings if a memory is missing.
 
 ## Check capture and recall
 
