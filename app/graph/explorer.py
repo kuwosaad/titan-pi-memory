@@ -1834,6 +1834,17 @@ def _error_payload(exc: ExplorerError) -> dict[str, Any]:
     return {"error": {"code": exc.code, "message": exc.message}}
 
 
+def _emit(payload: dict, *, allow_nan: bool = True) -> None:
+    """Write one JSON line as UTF-8 bytes.
+
+    Text-mode stdout uses the locale encoding, which on Windows pipes is a
+    legacy code page that cannot encode most memory text.
+    """
+    line = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=allow_nan) + "\n"
+    sys.stdout.buffer.write(line.encode("utf-8"))
+    sys.stdout.flush()
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only Titan BB explorer data bridge")
     parser.add_argument(
@@ -1847,22 +1858,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             raise ExplorerError("invalid_input", "request exceeds the input limit")
         request = json.loads(raw.decode("utf-8"))
         result = handle_request(request, resolve_home(args.home))
-        sys.stdout.write(json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
-        sys.stdout.write("\n")
+        _emit(result, allow_nan=False)
         return 0
     except ExplorerError as exc:
-        sys.stdout.write(json.dumps(_error_payload(exc), ensure_ascii=False, separators=(",", ":")))
-        sys.stdout.write("\n")
+        _emit(_error_payload(exc))
         return 1
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        error = _error_payload(ExplorerError("invalid_input", "stdin is not valid JSON"))
-        sys.stdout.write(json.dumps(error, ensure_ascii=False, separators=(",", ":")))
-        sys.stdout.write("\n")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        _emit(_error_payload(ExplorerError("invalid_input", "stdin is not valid JSON")))
         return 1
     except Exception:
-        error = _error_payload(ExplorerError("internal_error", "unexpected explorer failure"))
-        sys.stdout.write(json.dumps(error, ensure_ascii=False, separators=(",", ":")))
-        sys.stdout.write("\n")
+        _emit(_error_payload(ExplorerError("internal_error", "unexpected explorer failure")))
         return 1
 
 
