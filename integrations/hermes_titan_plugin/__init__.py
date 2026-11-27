@@ -59,13 +59,21 @@ def _connect_options(parser):
                         help="Open Titan's extraction and embedding provider setup.")
 
 
+def _is_titan_cli(command):
+    # Earlier instructions used `titan` or, for services, the absolute path
+    # printed by `command -v titan` (npm installs titan.cmd on Windows).
+    if not isinstance(command, str):
+        return False
+    return re.split(r"[\\/]", command.strip())[-1].lower() in {"titan", "titan.exe", "titan.cmd"}
+
+
 def _existing_store(server, helper):
     if server is None:
         return None
     if isinstance(server, dict) and set(server) == {"command", "args"}:
         arguments = server["args"]
         if isinstance(arguments, list):
-            if server["command"] == "titan":
+            if _is_titan_cli(server["command"]):
                 prefix = ["mcp", "--agent"]
             else:
                 prefix = [str(helper), "mcp", "--agent"]

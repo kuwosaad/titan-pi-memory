@@ -62,10 +62,33 @@ class HermesPluginTests(unittest.TestCase):
             plugin._connect_profile(args)
             host_config.set_config_value.assert_not_called()
 
+    def test_native_connect_upgrades_the_documented_absolute_titan_path(self):
+        helper = Path("/plugin/titan_runtime.py")
+        for command in ("/Users/me/.local/bin/titan", "/usr/local/bin/titan", r"C:\npm\titan.cmd", "titan.exe"):
+            server = {"command": command, "args": ["mcp", "--agent", "hermes-work"]}
+            self.assertEqual(plugin._existing_store(server, helper), "hermes-work", command)
+
+        profile = {"mcp_servers": {"titan-memory": {"command": "/Users/me/.local/bin/titan",
+                                                     "args": ["mcp", "--agent", "hermes-work"]}}}
+        host_config = Mock()
+        host_config.load_config.return_value = profile
+        host_config.get_config_path.return_value = Path("/profiles/work/config.yaml")
+        modules = {"hermes_cli.config": host_config, "hermes_cli.profiles": Mock()}
+        with patch.dict("sys.modules", modules), patch.object(Path, "is_file", return_value=True), \
+                patch.object(plugin.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
+            plugin._connect_profile(SimpleNamespace(agent=None, configure_providers=False))
+        settings = {key: json.loads(value) for (key, value), _ in host_config.set_config_value.call_args_list}
+        server = settings["mcp_servers.titan-memory"]
+        self.assertTrue(server["args"][0].endswith("titan_runtime.py"))
+        self.assertEqual(server["args"][1:], ["mcp", "--agent", "hermes-work"])
+
     def test_native_connect_leaves_custom_mcp_endpoints_alone(self):
-        server = {"url": "https://example.invalid"}
-        with self.assertRaisesRegex(SystemExit, "custom titan-memory MCP server"):
-            plugin._existing_store(server, Path("/plugin/titan_runtime.py"))
+        helper = Path("/plugin/titan_runtime.py")
+        for server in ({"url": "https://example.invalid"},
+                       {"command": "/opt/bin/titan-proxy", "args": ["mcp", "--agent", "hermes"]},
+                       {"command": "/usr/local/bin/titan", "args": ["serve", "--agent", "hermes"]}):
+            with self.assertRaisesRegex(SystemExit, "custom titan-memory MCP server"):
+                plugin._existing_store(server, helper)
 
     def test_discards_blocked_failed_and_interrupted_turns(self):
         for outcome in (

@@ -38,7 +38,8 @@ The default profile uses the `hermes` Titan store. A named profile uses
 `hermes-<profile>`, and custom Hermes homes have separate stores. Supply
 `--agent NAME` to select an existing Titan store. Leave `TITAN_HOME` unset
 for automatic store separation. On upgrade, the command preserves the store
-from the previously documented `titan mcp --agent NAME` configuration.
+from the previously documented `titan mcp --agent NAME` configuration,
+including entries that use the absolute path from `command -v titan`.
 If you already configured a custom MCP endpoint, the command asks you to
 review that setting before adding a grant.
 
