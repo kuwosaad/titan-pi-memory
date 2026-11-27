@@ -2,7 +2,14 @@
     const demo = document.querySelector('#memory-demo');
     if (!demo) return;
     const terminal = document.querySelector('#agent-terminal');
+    const videoStage = document.querySelector('#demo-video-stage');
+    const video = document.querySelector('#titan-demo-video');
+    const playOverlay = document.querySelector('#demo-play-overlay');
     const picker = demo.querySelector('.agent-picker');
+    const playbackActions = document.querySelector('#demo-playback-actions');
+    const evidence = document.querySelector('#demo-evidence');
+    const modeLabel = document.querySelector('#demo-mode-label');
+    const caption = document.querySelector('#demo-caption');
     const bar = demo.querySelector('.playback-bar');
     const play = document.querySelector('#demo-play');
     const stepButton = document.querySelector('#demo-step');
@@ -10,6 +17,10 @@
     const status = demo.querySelector('.demo-status');
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     const buttons = [...demo.querySelectorAll('[data-agent]')];
+
+    const videoCaption = 'Live Codex session on local SQLite memory, first search at 4x';
+    const simCaption = 'A fictional example. Memory is stored locally in SQLite; capture and processing depend on your integration and settings.';
+
     const memory = 'Keep SQLite so the app remains usable offline.';
     const answer = 'The current store is SQLite. I’ll add full-text search here so notes remain searchable offline.';
     const request = 'Add search to the notes screen.';
@@ -49,16 +60,67 @@
             <div class="agent-footer"><span>? for shortcuts</span><span>~/projects/notes</span></div>`
     };
     const labels = ['composing request', 'request submitted', 'finding context', 'memory recalled', 'checking current code', 'context in use'];
-    let agent = 'pi', beat = reduced.matches ? 5 : 0, playing = !reduced.matches;
+
+    let agent = 'video', beat = reduced.matches ? 5 : 0, playing = false;
     let explicitlyPaused = false, typed = 0;
     let visible = !('IntersectionObserver' in window), timer, started, remaining = 75, animations = [];
-    picker.hidden = false; bar.hidden = false;
+    let videoStarted = false;
+
+    picker.hidden = false;
+
+    if (video && playOverlay) {
+        video.controls = false;
+        const syncOverlay = () => {
+            const isPlaying = !video.paused && !video.ended;
+            playOverlay.classList.toggle('is-hidden', isPlaying);
+            playOverlay.setAttribute('aria-hidden', String(isPlaying));
+            playOverlay.tabIndex = isPlaying ? -1 : 0;
+            if (!isPlaying && !videoStarted) video.controls = false;
+        };
+        playOverlay.addEventListener('click', () => {
+            videoStarted = true;
+            video.controls = true;
+            video.play().catch(() => {});
+        });
+        video.addEventListener('play', () => {
+            videoStarted = true;
+            video.controls = true;
+            syncOverlay();
+            if (status) status.textContent = 'Playing live Titan demo video.';
+        });
+        video.addEventListener('ended', () => {
+            videoStarted = false;
+            video.controls = false;
+            syncOverlay();
+            if (status) status.textContent = 'Demo video finished.';
+        });
+        syncOverlay();
+    }
+
     function stopTimer() {
         if (timer !== undefined) { clearTimeout(timer); remaining = Math.max(0, remaining - (performance.now() - started)); timer = undefined; }
     }
     function cancelAnimations() { animations.forEach((animation) => animation.cancel()); animations = []; }
+
     function render(fresh = false, animate = false) {
         cancelAnimations();
+        const isVideo = agent === 'video';
+        buttons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.agent === agent)));
+        if (videoStage) videoStage.hidden = !isVideo;
+        if (terminal) terminal.hidden = isVideo;
+        if (playbackActions) playbackActions.hidden = isVideo;
+        if (evidence) evidence.hidden = isVideo;
+        if (bar) bar.hidden = isVideo;
+        if (modeLabel) modeLabel.textContent = isVideo ? 'live recording' : 'illustrative playback';
+        if (caption) caption.textContent = isVideo ? videoCaption : simCaption;
+
+        if (isVideo) {
+            stopTimer();
+            playing = false;
+            return;
+        }
+        if (video && !video.paused) video.pause();
+
         demo.dataset.beat = beat;
         if (fresh) {
             terminal.className = 'agent-terminal agent-' + agent;
@@ -73,7 +135,6 @@
         const codexCall = terminal.querySelector('.codex-call');
         if (codexCall) codexCall.textContent = '• ' + (beat >= 3 ? 'Called' : 'Calling') + ' titan-memory.query_memories';
         terminal.querySelector('.composer-draft').textContent = beat === 0 ? request.slice(0, typed) : (agent === 'codex' ? 'Ask Codex to do anything' : '');
-        buttons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.agent === agent)));
         state.textContent = labels[beat];
         play.hidden = reduced.matches;
         play.innerHTML = playing ? 'Ⅱ <span>pause</span>' : (beat === 5 ? '↺ <span>replay</span>' : '▶ <span>play</span>');
@@ -84,9 +145,10 @@
             animations = [...terminal.querySelectorAll('[data-beat="' + beat + '"]')].map((row) => row.animate([{opacity:.2, transform:'translateY(4px)'}, {opacity:1, transform:'translateY(0)'}], {duration:300, easing}));
         }
     }
+
     function schedule() {
         stopTimer();
-        if (!playing || !visible || document.hidden || reduced.matches || beat >= 5) return;
+        if (agent === 'video' || !playing || !visible || document.hidden || reduced.matches || beat >= 5) return;
         started = performance.now();
         timer = setTimeout(() => {
             timer = undefined;
@@ -98,24 +160,46 @@
             remaining = 1800; beat++; if (beat === 5) playing = false; render(false, true); schedule();
         }, remaining);
     }
+
     buttons.forEach((button) => button.addEventListener('click', () => {
-        stopTimer(); agent = button.dataset.agent; beat = reduced.matches ? 5 : 0; typed = 0; playing = !reduced.matches && !explicitlyPaused; remaining = 75;
-        render(true); schedule(); status.textContent = button.textContent.trim() + ' example selected.';
+        stopTimer();
+        agent = button.dataset.agent;
+        if (agent === 'video') {
+            playing = false;
+            render(false);
+        } else {
+            beat = reduced.matches ? 5 : 0;
+            typed = 0;
+            playing = !reduced.matches && !explicitlyPaused;
+            remaining = 75;
+            render(true);
+            schedule();
+        }
+        status.textContent = button.textContent.trim() + ' view selected.';
     }));
     stepButton.addEventListener('click', () => {
-        if (beat === 5) return;
+        if (agent === 'video' || beat === 5) return;
         stopTimer(); playing = false; explicitlyPaused = true; beat = Math.min(5, beat + 1); remaining = 1800; render(); status.textContent = labels[beat] + '.';
     });
     play.addEventListener('click', () => {
+        if (agent === 'video') return;
         stopTimer(); if (beat === 5) { beat = 0; typed = 0; remaining = 75; } playing = !playing; explicitlyPaused = !playing; render(); schedule();
     });
-    if ('IntersectionObserver' in window) new IntersectionObserver((entries) => { visible = entries[0].isIntersecting && entries[0].intersectionRatio >= .25; if (!visible) cancelAnimations(); schedule(); }, {threshold:.25}).observe(terminal);
+    if ('IntersectionObserver' in window) {
+        new IntersectionObserver((entries) => {
+            visible = entries[0].isIntersecting && entries[0].intersectionRatio >= .25;
+            if (!visible) cancelAnimations();
+            schedule();
+        }, {threshold:.25}).observe(demo);
+    }
     document.addEventListener('visibilitychange', () => { if (document.hidden) cancelAnimations(); schedule(); });
-    demo.querySelector('.evidence-strip').addEventListener('toggle', (event) => {
-        if (event.currentTarget.open) { stopTimer(); playing = false; explicitlyPaused = true; render(); }
-    });
+    if (evidence) {
+        evidence.addEventListener('toggle', (event) => {
+            if (event.currentTarget.open) { stopTimer(); playing = false; explicitlyPaused = true; render(); }
+        });
+    }
     reduced.addEventListener('change', () => { stopTimer(); if (reduced.matches) { beat = 5; playing = false; } render(); schedule(); });
-    render(true); schedule();
+    render(false);
 
     const navLinks = [...document.querySelectorAll('.nav-links a[href^="#"]')];
     if ('IntersectionObserver' in window) {
@@ -125,7 +209,12 @@
             });
         }), {rootMargin:'-25% 0px -60% 0px'});
         navLinks.forEach((link) => { const target = document.querySelector(link.getAttribute('href')); if (target) navObserver.observe(target); });
-        new IntersectionObserver((entries) => { if (entries[0].isIntersecting) navLinks.forEach((link) => link.removeAttribute('aria-current')); }, {threshold:.5}).observe(document.querySelector('.hero'));
+        const hero = document.querySelector('.hero');
+        if (hero) {
+            new IntersectionObserver((entries) => {
+                if (entries[0].isIntersecting) navLinks.forEach((link) => link.removeAttribute('aria-current'));
+            }, {threshold:.5}).observe(hero);
+        }
     }
     const copy = document.querySelector('#copy-install');
     if (copy && navigator.clipboard && window.isSecureContext) {

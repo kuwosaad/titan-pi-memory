@@ -1,0 +1,1323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>95.4% on LongMemEval-S · Titan Memory Research & System Card</title>
+    <meta name="description" content="Technical report and LongMemEval-S system card for Titan Memory: 95.4% rubric accuracy, strict source-credit audit (81.6%), dual-layer local architecture, and token accounting."/>
+    <link rel="canonical" href="https://www.titanmemz.in/research/"/>
+    <!-- Open Graph -->
+    <meta property="og:type" content="article"/>
+    <meta property="og:url" content="https://www.titanmemz.in/research/"/>
+    <meta property="og:title" content="95.4% on LongMemEval-S · Titan Memory Research & System Card"/>
+    <meta property="og:description" content="Technical report and LongMemEval-S system card for Titan Memory: 95.4% rubric accuracy, strict source-credit audit (81.6%), dual-layer local architecture, and token accounting."/>
+    <meta property="og:image" content="https://www.titanmemz.in/research/assets/social-card.png"/>
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image"/>
+    <meta name="twitter:title" content="95.4% on LongMemEval-S · Titan Memory Research & System Card"/>
+    <meta name="twitter:description" content="Technical report and LongMemEval-S system card for Titan Memory: 95.4% rubric accuracy, strict source-credit audit (81.6%), dual-layer local architecture, and token accounting."/>
+    <meta name="twitter:image" content="https://www.titanmemz.in/research/assets/social-card.png"/>
+
+    <link rel="icon" type="image/svg+xml" href="../titan-logo.svg"/>
+    <link rel="preconnect" href="https://fonts.googleapis.com"/>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous"/>
+    <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;0,8..60,600;0,8..60,700;1,8..60,400&display=swap" rel="stylesheet"/>
+    <style>
+        :root {
+            --bg: #09090D;
+            --bg-elevated: #121218;
+            --bg-card: rgba(18, 18, 25, 0.72);
+            --bg-card-hover: rgba(26, 26, 36, 0.88);
+            --ink: #F5F1F0;
+            --muted: #B8B0B2;
+            --dim: #7E7578;
+            --faint: #4E464A;
+            --ruby: #E02B58;
+            --ruby-soft: #F06A8B;
+            --ruby-pale: #F8B4C4;
+            --ruby-glow: rgba(224, 43, 88, 0.22);
+            --ruby-faint: rgba(224, 43, 88, 0.08);
+            --mint: #7DD3BF;
+            --mint-soft: #A3E3D4;
+            --mint-pale: #D2F5EC;
+            --mint-glow: rgba(125, 211, 191, 0.22);
+            --mint-faint: rgba(125, 211, 191, 0.08);
+            --amber: #E8B072;
+            --line: rgba(245, 241, 240, 0.09);
+            --line-strong: rgba(245, 241, 240, 0.18);
+            --line-ruby: rgba(224, 43, 88, 0.28);
+            --line-mint: rgba(125, 211, 191, 0.28);
+            --grid: rgba(245, 241, 240, 0.032);
+            --shadow: 0 24px 72px rgba(0, 0, 0, 0.55);
+            --font: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+            --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+
+            /* Easing tokens */
+            --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+            --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+        html {
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            color-scheme: dark;
+        }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--ink);
+            font-family: var(--font);
+            background-color: var(--bg);
+            background-image:
+                linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+                linear-gradient(var(--grid) 1px, transparent 1px),
+                radial-gradient(circle at 50% 4%, rgba(224, 43, 88, 0.12), transparent 38rem),
+                radial-gradient(circle at 86% 28%, rgba(125, 211, 191, 0.08), transparent 32rem);
+            background-size: 32px 32px, 32px 32px, auto, auto;
+            text-wrap: pretty;
+            line-height: 1.6;
+        }
+
+        a { color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+        a:focus-visible, button:focus-visible {
+            outline: 2px solid var(--ruby-soft);
+            outline-offset: 4px;
+        }
+        ::selection { background: var(--ruby); color: #fff; }
+        h1, h2, h3, h4, p { margin: 0; }
+
+        .skip-link {
+            position: absolute;
+            top: -100px;
+            left: 20px;
+            padding: 12px 18px;
+            background: var(--ruby);
+            color: #fff;
+            border-radius: 6px;
+            z-index: 100;
+            font: 14px var(--mono);
+            transition: top 160ms var(--ease-out);
+        }
+        .skip-link:focus { top: 20px; }
+
+        section[id], main[id], header[id] {
+            scroll-margin-top: 88px;
+        }
+        @media (max-width: 680px) {
+            section[id], main[id], header[id] {
+                scroll-margin-top: 76px;
+            }
+        }
+
+        /* Navigation - Clean without version badge or download button */
+        .nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 50;
+            height: 76px;
+            border-bottom: 1px solid var(--line);
+            background: rgba(9, 9, 13, 0.85);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 200ms var(--ease-out);
+        }
+        .nav-inner {
+            width: min(1200px, calc(100vw - 36px));
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--ink);
+            font-size: 16px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            min-height: 44px;
+        }
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            flex: none;
+        }
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 22px;
+        }
+        .nav-links a {
+            color: var(--dim);
+            font-size: 13px;
+            letter-spacing: 0.03em;
+            min-height: 44px;
+            display: inline-flex;
+            align-items: center;
+            transition: color 180ms var(--ease-out);
+        }
+        @media (hover: hover) and (pointer: fine) {
+            .nav-links a:hover { color: var(--ink); }
+        }
+
+        /* Container layout */
+        .container {
+            width: min(1200px, calc(100vw - 36px));
+            margin: 0 auto;
+        }
+        .report-header {
+            padding: 130px 0 60px;
+            border-bottom: 1px solid var(--line);
+        }
+        .kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font: 600 12px/1 var(--mono);
+            letter-spacing: 0.08em;
+            color: var(--ruby-soft);
+            margin-bottom: 20px;
+        }
+        .kicker::before {
+            content: '';
+            width: 7px;
+            height: 7px;
+            border-radius: 999px;
+            background: var(--ruby);
+            box-shadow: 0 0 10px var(--ruby);
+        }
+        h1 {
+            font-size: clamp(38px, 5.2vw, 68px);
+            line-height: 1.05;
+            letter-spacing: -0.04em;
+            font-weight: 400;
+            max-width: 960px;
+        }
+        .header-scope {
+            font: 500 14px/1.4 var(--mono);
+            color: var(--ruby-pale);
+            letter-spacing: 0.02em;
+            margin-top: 14px;
+        }
+        .lead {
+            font-size: clamp(17px, 1.8vw, 22px);
+            line-height: 1.48;
+            color: var(--muted);
+            max-width: 840px;
+            margin-top: 20px;
+        }
+
+        /* Publication metadata banner */
+        .meta-strip {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 36px;
+            padding: 22px 28px;
+            border-radius: 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--line);
+        }
+        .meta-item { display: flex; flex-direction: column; gap: 4px; }
+        .meta-item .label {
+            font: 500 11px/1 var(--mono);
+            color: var(--dim);
+            letter-spacing: 0.06em;
+        }
+        .meta-item .val {
+            font-size: 15px;
+            color: var(--ink);
+            font-weight: 500;
+        }
+        .meta-item .val-sub {
+            font-size: 12px;
+            color: var(--dim);
+        }
+
+        /* Action bar & Restrained Data/Code row */
+        .action-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 24px;
+            margin-top: 32px;
+        }
+        .btn {
+            min-height: 46px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            border-radius: 999px;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            transition:
+                transform 160ms var(--ease-out),
+                background 160ms var(--ease-out),
+                border-color 160ms var(--ease-out),
+                color 160ms var(--ease-out);
+        }
+        .btn:active { transform: scale(0.97); }
+
+        .btn-ruby {
+            background: linear-gradient(135deg, rgba(224, 43, 88, 0.28), rgba(224, 43, 88, 0.12));
+            border: 1px solid var(--ruby-soft);
+            color: var(--ink);
+            box-shadow: 0 8px 32px rgba(224, 43, 88, 0.22);
+        }
+        @media (hover: hover) and (pointer: fine) {
+            .btn-ruby:hover {
+                transform: translateY(-2px);
+                background: linear-gradient(135deg, rgba(224, 43, 88, 0.42), rgba(224, 43, 88, 0.22));
+                color: #fff;
+            }
+        }
+
+        .data-links-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font: 13px/1 var(--mono);
+            color: var(--dim);
+            flex-wrap: wrap;
+        }
+        .data-links-label {
+            color: var(--muted);
+            font-weight: 500;
+        }
+        .data-links-row a {
+            color: var(--muted);
+            text-decoration: underline;
+            text-underline-offset: 3px;
+            transition: color 160ms var(--ease-out);
+            min-height: 44px;
+            display: inline-flex;
+            align-items: center;
+        }
+        .data-links-row a:hover { color: var(--ink); }
+        .data-links-row .sep { color: var(--faint); }
+
+        /* Main Content Grid */
+        .report-body {
+            padding: 64px 0 100px;
+        }
+        .section-block {
+            padding: 56px 0;
+            border-bottom: 1px solid var(--line);
+        }
+        .section-block:last-of-type { border-bottom: none; }
+        .section-header-row {
+            display: grid;
+            grid-template-columns: minmax(0, 0.65fr) minmax(280px, 0.55fr);
+            gap: 48px;
+            align-items: start;
+            margin-bottom: 36px;
+        }
+        .section-kicker {
+            font: 500 12px/1 var(--mono);
+            letter-spacing: 0.08em;
+            color: var(--ruby-soft);
+            margin-bottom: 12px;
+        }
+        h2 {
+            font-size: clamp(30px, 3.4vw, 46px);
+            line-height: 1.08;
+            letter-spacing: -0.035em;
+            font-weight: 400;
+        }
+        .section-desc {
+            max-width: 44ch;
+            font-size: 14px;
+            line-height: 1.55;
+            color: var(--muted);
+        }
+
+        /* Metric cards grid */
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+            margin: 32px 0;
+        }
+        .metric-card {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 26px;
+            background: var(--bg-card);
+            position: relative;
+            overflow: hidden;
+            transition: border-color 200ms var(--ease-out), transform 200ms var(--ease-out);
+        }
+        @media (hover: hover) and (pointer: fine) {
+            .metric-card:hover {
+                border-color: var(--line-strong);
+                transform: translateY(-2px);
+            }
+        }
+        .metric-card.accent-ruby { border-top: 3px solid var(--ruby); }
+        .metric-card.accent-mint { border-top: 3px solid var(--mint); }
+        .metric-value {
+            font-size: clamp(38px, 4.5vw, 54px);
+            line-height: 1;
+            font-weight: 400;
+            letter-spacing: -0.04em;
+            color: var(--ink);
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        .metric-card.accent-ruby .metric-value { color: var(--ruby-pale); }
+        .metric-card.accent-mint .metric-value { color: var(--mint-soft); }
+        .metric-unit {
+            font-size: 14px;
+            font-family: var(--mono);
+            color: var(--dim);
+            letter-spacing: 0.04em;
+        }
+        .metric-title {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--ink);
+            margin-top: 14px;
+        }
+        .metric-sub {
+            font-size: 13px;
+            line-height: 1.45;
+            color: var(--dim);
+            margin-top: 6px;
+        }
+
+        /* Visual report cover showcase */
+        .cover-showcase {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 40px;
+            align-items: center;
+            padding: 32px;
+            border-radius: 20px;
+            background: linear-gradient(145deg, rgba(22, 16, 24, 0.8), rgba(12, 12, 16, 0.95));
+            border: 1px solid var(--line-strong);
+            margin: 40px 0;
+            box-shadow: var(--shadow);
+        }
+        .cover-img {
+            width: 100%;
+            height: auto;
+            border-radius: 10px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+            border: 1px solid var(--line);
+        }
+        .cover-content h3 {
+            font-size: 28px;
+            font-weight: 400;
+            letter-spacing: -0.02em;
+            margin-bottom: 12px;
+        }
+        .cover-content p {
+            color: var(--muted);
+            font-size: 16px;
+            line-height: 1.55;
+            margin-bottom: 20px;
+        }
+        .toc-list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 24px 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 8px;
+            font: 13px/1.4 var(--mono);
+            color: var(--muted);
+        }
+        .toc-list li {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .toc-list li::before {
+            content: '→';
+            color: var(--ruby-soft);
+        }
+
+        /* Interactive Benchmark Category Table & Visual Bars */
+        .category-table-wrapper {
+            margin: 32px 0;
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: var(--bg-card);
+            overflow: hidden;
+        }
+        .table-controls {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 14px;
+            background: rgba(14, 14, 20, 0.8);
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .control-btn {
+            font: 500 12px/1 var(--mono);
+            min-height: 44px;
+            padding: 10px 18px;
+            border-radius: 999px;
+            background: transparent;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            cursor: pointer;
+            transition: background 180ms var(--ease-out), border-color 180ms var(--ease-out), color 180ms var(--ease-out);
+        }
+        .control-btn:active { transform: scale(0.97); }
+        .control-btn[aria-pressed="true"] {
+            background: var(--ruby-faint);
+            border-color: var(--ruby-soft);
+            color: var(--ruby-pale);
+        }
+        .category-row {
+            display: grid;
+            grid-template-columns: 240px 1fr 140px;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--line);
+            align-items: center;
+            gap: 24px;
+            transition: background 160ms var(--ease-out);
+        }
+        .category-row:last-child { border-bottom: none; }
+        .category-row:hover { background: rgba(255, 255, 255, 0.02); }
+        .cat-name {
+            font-size: 15px;
+            font-weight: 500;
+            color: var(--ink);
+        }
+        .cat-meta {
+            font: 11px/1 var(--mono);
+            color: var(--dim);
+            margin-top: 4px;
+        }
+        .bar-container {
+            width: 100%;
+            height: 12px;
+            border-radius: 999px;
+            background: rgba(245, 241, 240, 0.06);
+            overflow: hidden;
+            position: relative;
+        }
+        .bar-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, var(--ruby), var(--ruby-soft));
+            transform-origin: left center;
+            transition: width 500ms var(--ease-out), transform 600ms var(--ease-out);
+        }
+        .bar-fill.mint {
+            background: linear-gradient(90deg, #3FA894, var(--mint));
+        }
+        .cat-stat {
+            text-align: right;
+            font-family: var(--mono);
+        }
+        .cat-pct {
+            font-size: 17px;
+            font-weight: 600;
+            color: var(--ink);
+        }
+        .cat-fraction {
+            font-size: 11px;
+            color: var(--dim);
+            margin-top: 2px;
+        }
+
+        /* Visual diagram embed card */
+        .diagram-card {
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 24px;
+            background: var(--bg-card);
+            margin: 36px 0;
+        }
+        .diagram-img {
+            width: 100%;
+            height: auto;
+            border-radius: 10px;
+            display: block;
+            border: 1px solid rgba(245, 241, 240, 0.05);
+        }
+        .diagram-caption {
+            margin-top: 14px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: var(--dim);
+            font-family: var(--mono);
+        }
+
+        /* Two column comparison card */
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin: 32px 0;
+        }
+        .comparison-card {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 28px;
+            background: var(--bg-card);
+        }
+        .comparison-card.highlight {
+            border-color: var(--line-ruby);
+            background: linear-gradient(160deg, rgba(224, 43, 88, 0.07), rgba(16, 16, 22, 0.9));
+        }
+        .comparison-card h4 {
+            font-size: 20px;
+            font-weight: 500;
+            margin-bottom: 10px;
+            color: var(--ink);
+        }
+        .comparison-card p {
+            font-size: 15px;
+            line-height: 1.5;
+            color: var(--muted);
+        }
+
+        /* Audit classification breakdown */
+        .audit-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin: 28px 0;
+        }
+        .audit-item {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 18px 20px;
+            background: rgba(18, 18, 25, 0.6);
+        }
+        .audit-item-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .audit-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--ink);
+        }
+        .audit-count {
+            font: 600 13px/1 var(--mono);
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: rgba(245, 241, 240, 0.08);
+            color: var(--muted);
+        }
+        .audit-item.success .audit-count {
+            background: var(--mint-faint);
+            color: var(--mint);
+            border: 1px solid var(--line-mint);
+        }
+        .audit-desc {
+            font-size: 13px;
+            line-height: 1.45;
+            color: var(--dim);
+        }
+
+        /* Methodology disclosure box */
+        .callout-box {
+            border: 1px solid var(--line-strong);
+            border-left: 4px solid var(--ruby);
+            border-radius: 12px;
+            padding: 24px 28px;
+            background: rgba(22, 16, 20, 0.6);
+            margin: 36px 0;
+        }
+        .callout-title {
+            font: 600 13px/1 var(--mono);
+            letter-spacing: 0.08em;
+            color: var(--ruby-soft);
+            margin-bottom: 8px;
+        }
+        .callout-text {
+            font-size: 15px;
+            line-height: 1.6;
+            color: var(--muted);
+        }
+
+        /* Table styling for token accounting */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 24px 0;
+            font-size: 14px;
+        }
+        .data-table th, .data-table td {
+            padding: 12px 18px;
+            text-align: left;
+            border-bottom: 1px solid var(--line);
+        }
+        .data-table th {
+            font: 500 11px/1 var(--mono);
+            letter-spacing: 0.06em;
+            color: var(--dim);
+            background: rgba(245, 241, 240, 0.02);
+        }
+        .data-table td {
+            font-family: var(--mono);
+            color: var(--muted);
+        }
+        .data-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--ink);
+        }
+
+        /* Footer */
+        .footer {
+            border-top: 1px solid var(--line);
+            padding: 60px 0 80px;
+            background: rgba(7, 7, 10, 0.95);
+            font-size: 13px;
+            color: var(--dim);
+        }
+        .footer-inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .footer-links {
+            display: flex;
+            flex-wrap: wrap;
+            min-width: 0;
+            gap: 24px;
+            font-family: var(--mono);
+        }
+        .footer-links a { color: var(--muted); min-height: 44px; display: inline-flex; align-items: center; transition: color 160ms var(--ease-out); }
+        @media (hover: hover) and (pointer: fine) {
+            .footer-links a:hover { color: var(--ink); }
+        }
+
+        /* Progressive Enhancement: Default is 100% visible and expanded */
+        .animate-enter {
+            opacity: 1;
+            transform: none;
+        }
+        .chart-bar-fill {
+            transform: scaleX(1);
+            transform-origin: left center;
+        }
+
+        /* Reveal animations only active when IntersectionObserver support is verified */
+        html.io-ready:not(.reduced-motion) .animate-enter {
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity 320ms var(--ease-out), transform 320ms var(--ease-out);
+        }
+        html.io-ready:not(.reduced-motion) .animate-enter.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        html.io-ready:not(.reduced-motion) .chart-bar-fill {
+            transform: scaleX(0);
+            transition: transform 600ms var(--ease-out);
+        }
+        html.io-ready:not(.reduced-motion) .is-visible .chart-bar-fill,
+        html.io-ready:not(.reduced-motion) .chart-bar-fill.is-visible {
+            transform: scaleX(1);
+        }
+
+        .stagger-1 { transition-delay: 40ms !important; }
+        .stagger-2 { transition-delay: 80ms !important; }
+        .stagger-3 { transition-delay: 120ms !important; }
+        .stagger-4 { transition-delay: 160ms !important; }
+        .stagger-5 { transition-delay: 200ms !important; }
+        .stagger-6 { transition-delay: 240ms !important; }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation: none !important;
+                transition: none !important;
+            }
+            .animate-enter,
+            .chart-bar-fill {
+                opacity: 1 !important;
+                transform: none !important;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .section-header-row,
+            .comparison-grid,
+            .cover-showcase {
+                grid-template-columns: 1fr;
+            }
+            .category-row {
+                grid-template-columns: 180px 1fr 100px;
+                gap: 14px;
+            }
+        }
+        @media (max-width: 680px) {
+            .nav { height: 68px; }
+            .nav-links a { font-size: 12px; }
+            .category-row {
+                grid-template-columns: 1fr auto;
+                gap: 10px;
+            }
+            .bar-container { grid-column: 1 / -1; order: 3; margin-top: 4px; }
+            .meta-strip { grid-template-columns: 1fr; }
+        }
+    </style>
+    <script defer src="/monitoring.js"></script>
+</head>
+<body>
+    <a class="skip-link" href="#report-content">Skip to content</a>
+
+    <header class="nav" role="banner">
+        <div class="nav-inner">
+            <a class="brand" href="../" aria-label="Titan Memory home">
+                <img class="brand-mark" src="../titan-logo.svg" width="34" height="34" alt="" aria-hidden="true"/>
+                <span>titan memory</span>
+            </a>
+            <nav class="nav-links" aria-label="Research navigation">
+                <a href="#summary">overview</a>
+                <a href="#benchmark">benchmark</a>
+                <a href="#audit">source audit</a>
+                <a href="#luna">luna comparison</a>
+                <a href="#runtime">efficiency</a>
+            </nav>
+        </div>
+    </header>
+
+    <main id="report-content">
+        <header class="report-header">
+            <div class="container">
+                <h1 class="animate-enter stagger-1">95.4% on LongMemEval-S.</h1>
+                <div class="header-scope animate-enter stagger-2">477 / 500 questions correct · GPT-6.1 Sol reader · Astra/high replacement judge</div>
+                <p class="lead animate-enter stagger-2">
+                    500 multi-session questions across ~40 sessions per case. Titan pairs compact semantic memory leads with full raw conversation scenes in local SQLite under the official LongMemEval benchmark rubric.
+                </p>
+
+                <div class="action-bar animate-enter stagger-4">
+                    <a class="btn btn-ruby" href="titan-memory-system-card-v7.8.pdf" download="titan-memory-system-card-v7.8.pdf">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        <span>Read PDF</span>
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <div class="report-body">
+            <!-- Executive Summary -->
+            <section class="section-block" id="summary">
+                <div class="container">
+                    <div class="section-header-row animate-enter">
+                        <div>
+                            <div class="section-kicker">Key findings</div>
+                            <h2>Results at a glance.</h2>
+                        </div>
+                        <p class="section-desc">500 questions. Answers checked against their sources.</p>
+                    </div>
+
+                    <div class="metric-grid">
+                        <div class="metric-card accent-ruby animate-enter stagger-1">
+                            <div class="metric-value">95.4% <span class="metric-unit">477 / 500</span></div>
+                            <div class="metric-title">Official rubric answer accuracy</div>
+                            <p class="metric-sub">Evaluated under official LongMemEval rubric with GPT-6 Astra/high replacement judge.</p>
+                        </div>
+                        <div class="metric-card accent-mint animate-enter stagger-2">
+                            <div class="metric-value">81.6% <span class="metric-unit">408 / 500</span></div>
+                            <div class="metric-title">Strict evidentiary source credit</div>
+                            <p class="metric-sub">406 fully supported answers + 2 minor citation defects directly verified against primary dialogue scenes.</p>
+                        </div>
+                        <div class="metric-card animate-enter stagger-3">
+                            <div class="metric-value">100% <span class="metric-unit">56 / 56</span></div>
+                            <div class="metric-title">Assistant recall · rubric</div>
+                            <p class="metric-sub">56 / 56 rubric passes on assistant instructions across extended multi-session histories; source audit credit is 55/56 (98.2%).</p>
+                        </div>
+                        <div class="metric-card animate-enter stagger-4">
+                            <div class="metric-value">99.9% <span class="metric-unit">996 / 997</span></div>
+                            <div class="metric-title">Exact quotation fidelity</div>
+                            <p class="metric-sub">996 exact original dialogue quotations verified character-by-character from opened scenes.</p>
+                        </div>
+                    </div>
+
+                    <!-- Cover Showcase -->
+                    <div class="cover-showcase animate-enter">
+                        <img class="cover-img" src="assets/report-cover.webp" width="320" height="452" alt="Titan Memory System Card v7.8 Cover" loading="lazy"/>
+                        <div class="cover-content">
+                            <h3>System card</h3>
+                            <p>
+                                Results, source audit, methods, and runtime measurements.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Benchmark & Categories -->
+            <section class="section-block" id="benchmark">
+                <div class="container">
+                    <div class="section-header-row animate-enter">
+                        <div>
+                            <div class="section-kicker">Benchmark evaluation</div>
+                            <h2>Results by task.</h2>
+                        </div>
+                        <p class="section-desc">Above 90% rubric accuracy in every category.</p>
+                    </div>
+
+                    <div class="category-table-wrapper animate-enter">
+                        <div class="table-controls">
+                            <span style="font-size: 14px; font-weight: 500; color: var(--ink);">LongMemEval-S category breakdown (500 questions)</span>
+                            <div class="control-group js-only" hidden role="group" aria-label="Choose score perspective">
+                                <button type="button" class="control-btn" id="btn-show-rubric" aria-pressed="true">Official rubric (95.4%)</button>
+                                <button type="button" class="control-btn" id="btn-show-source" aria-pressed="false">Strict source credit (81.6%)</button>
+                            </div>
+                        </div>
+
+                        <div class="category-row stagger-1">
+                            <div>
+                                <div class="cat-name">Single-session assistant</div>
+                                <div class="cat-meta">Assistant recall · rubric · 56 questions</div>
+                            </div>
+                            <div class="bar-container">
+                                <div class="bar-fill chart-bar-fill" id="bar-assistant" style="width: 100%;"></div>
+                            </div>
+                            <div class="cat-stat">
+                                <div class="cat-pct" id="pct-assistant">100.0%</div>
+                                <div class="cat-fraction" id="frac-assistant">56 / 56</div>
+                            </div>
+                        </div>
+
+                        <div class="category-row stagger-2">
+                            <div>
+                                <div class="cat-name">Single-session user</div>
+                                <div class="cat-meta">User facts · 70 questions</div>
+                            </div>
+                            <div class="bar-container">
+                                <div class="bar-fill chart-bar-fill" id="bar-user" style="width: 98.6%;"></div>
+                            </div>
+                            <div class="cat-stat">
+                                <div class="cat-pct" id="pct-user">98.6%</div>
+                                <div class="cat-fraction" id="frac-user">69 / 70</div>
+                            </div>
+                        </div>
+
+                        <div class="category-row stagger-3">
+                            <div>
+                                <div class="cat-name">Single-session preference</div>
+                                <div class="cat-meta">User preferences · 30 questions</div>
+                            </div>
+                            <div class="bar-container">
+                                <div class="bar-fill chart-bar-fill" id="bar-preference" style="width: 96.7%;"></div>
+                            </div>
+                            <div class="cat-stat">
+                                <div class="cat-pct" id="pct-preference">96.7%</div>
+                                <div class="cat-fraction" id="frac-preference">29 / 30</div>
+                            </div>
+                        </div>
+
+                        <div class="category-row stagger-4">
+                            <div>
+                                <div class="cat-name">Knowledge updates</div>
+                                <div class="cat-meta">Overcoming stale data · 78 questions</div>
+                            </div>
+                            <div class="bar-container">
+                                <div class="bar-fill chart-bar-fill" id="bar-updates" style="width: 96.2%;"></div>
+                            </div>
+                            <div class="cat-stat">
+                                <div class="cat-pct" id="pct-updates">96.2%</div>
+                                <div class="cat-fraction" id="frac-updates">75 / 78</div>
+                            </div>
+                        </div>
+
+                        <div class="category-row stagger-5">
+                            <div>
+                                <div class="cat-name">Temporal reasoning</div>
+                                <div class="cat-meta">Event sequences & dates · 133 questions</div>
+                            </div>
+                            <div class="bar-container">
+                                <div class="bar-fill chart-bar-fill" id="bar-temporal" style="width: 95.5%;"></div>
+                            </div>
+                            <div class="cat-stat">
+                                <div class="cat-pct" id="pct-temporal">95.5%</div>
+                                <div class="cat-fraction" id="frac-temporal">127 / 133</div>
+                            </div>
+                        </div>
+
+                        <div class="category-row stagger-6">
+                            <div>
+                                <div class="cat-name">Multi-session reasoning</div>
+                                <div class="cat-meta">Cross-session synthesis · 133 questions</div>
+                            </div>
+                            <div class="bar-container">
+                                <div class="bar-fill chart-bar-fill" id="bar-multisession" style="width: 91.0%;"></div>
+                            </div>
+                            <div class="cat-stat">
+                                <div class="cat-pct" id="pct-multisession">91.0%</div>
+                                <div class="cat-fraction" id="frac-multisession">121 / 133</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Dual-Track Source Audit -->
+            <section class="section-block" id="audit">
+                <div class="container">
+                    <div class="section-header-row animate-enter">
+                        <div>
+                            <div class="section-kicker">Dual-track verification</div>
+                            <h2>Answers and evidence.</h2>
+                        </div>
+                        <p class="section-desc">Correct answers and source support, measured separately.</p>
+                    </div>
+
+                    <div class="diagram-card animate-enter">
+                        <img class="diagram-img" src="assets/audit-dual-track.webp" width="1140" height="600" alt="Dual-track evaluation comparing semantic rubric agreement to strict evidentiary source audit" loading="lazy"/>
+                        <p class="diagram-caption">
+                            Figure 1: Dual-track evaluation comparing semantic rubric agreement to strict evidentiary source audit (worked example Case 002).
+                        </p>
+                    </div>
+
+                    <div class="audit-list animate-enter">
+                        <div class="audit-item success">
+                            <div class="audit-item-head">
+                                <span class="audit-name">Supported success</span>
+                                <span class="audit-count">406 cases</span>
+                            </div>
+                            <p class="audit-desc">Answers fully and explicitly supported by primary conversational evidence opened by the investigator.</p>
+                        </div>
+                        <div class="audit-item success">
+                            <div class="audit-item-head">
+                                <span class="audit-name">Citation defects</span>
+                                <span class="audit-count">2 cases</span>
+                            </div>
+                            <p class="audit-desc">Both supported: 1 inexact quotation among 997 supplied, and 1 answer with an omitted historical citation.</p>
+                        </div>
+                        <div class="audit-item">
+                            <div class="audit-item-head">
+                                <span class="audit-name">Supported conditional</span>
+                                <span class="audit-count">54 cases</span>
+                            </div>
+                            <p class="audit-desc">Answers requiring plausible contextual interpretation or unstated assumptions; 49 passed rubric, 5 did not.</p>
+                        </div>
+                        <div class="audit-item">
+                            <div class="audit-item-head">
+                                <span class="audit-name">Source underspecified</span>
+                                <span class="audit-count">33 cases</span>
+                            </div>
+                            <p class="audit-desc">Primary conversational records left specific parameters ambiguous or unstated in source dialogue.</p>
+                        </div>
+                        <div class="audit-item">
+                            <div class="audit-item-head">
+                                <span class="audit-name">Technical failures</span>
+                                <span class="audit-count">5 cases</span>
+                            </div>
+                            <p class="audit-desc">3 retrieval omissions, 1 incorrect event timeline resolution, and 1 partial stale estimate across all 500 questions.</p>
+                        </div>
+                    </div>
+
+                    <div class="callout-box animate-enter">
+                        <div class="callout-title">The division of labor: contextual intelligence vs strict textual proof</div>
+                        <p class="callout-text">
+                            In <strong>Case 002</strong>, dialogue mentioned a $5 coupon and shopping at Target. The investigator inferred Target, matching the benchmark reference; however, the explicit link between the coupon and Target was never formally stated in the primary text. The rubric marked reference agreement, while the strict audit classified it as supported conditional. Of 92 uncredited cases, 87 stemmed from ambiguous or conditional dialogue where the model agreed with the rubric on 71 cases and missed 16; only 5 were technical source failures.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Luna Comparison -->
+            <section class="section-block" id="luna">
+                <div class="container">
+                    <div class="section-header-row animate-enter">
+                        <div>
+                            <div class="section-kicker">Access condition comparison</div>
+                            <h2>Comparing memory access.</h2>
+                        </div>
+                        <p class="section-desc">500 questions · Luna/xhigh reader · Terra/high judge.</p>
+                    </div>
+
+                    <div class="metric-grid">
+                        <div class="metric-card animate-enter stagger-1">
+                            <div class="metric-value">93.0% <span class="metric-unit">465 / 500</span></div>
+                            <div class="metric-title">Full Titan Memory</div>
+                            <p class="metric-sub">Semantic search, recent scans, and full scene navigation enabled. Strict original attempt: 446/500 (89.2%).</p>
+                        </div>
+                        <div class="metric-card animate-enter stagger-2">
+                            <div class="metric-value">92.2% <span class="metric-unit">461 / 500</span></div>
+                            <div class="metric-title">Full history baseline</div>
+                            <p class="metric-sub">Supplies original unindexed history without Titan tools. Strict original attempt: 456/500 (91.2%).</p>
+                        </div>
+                        <div class="metric-card animate-enter stagger-3">
+                            <div class="metric-value">89.2% <span class="metric-unit">446 / 500</span></div>
+                            <div class="metric-title">No scene opening</div>
+                            <p class="metric-sub">Retains search passages, but scene opening and neighbor navigation are disabled. Strict original: 423/500 (84.6%).</p>
+                        </div>
+                    </div>
+
+                    <div class="diagram-card animate-enter">
+                        <img class="diagram-img" src="assets/paired-outcomes.webp" width="1140" height="500" alt="Paired rubric outcomes across comparison conditions" loading="lazy"/>
+                        <p class="diagram-caption">
+                            Figure 2: Paired rubric outcomes on the same 500 cases. Full Titan recovered 14 cases and regressed on 10 vs full history (net gain of 4 cases, +0.8 pp).
+                        </p>
+                    </div>
+
+                    <div class="callout-box animate-enter">
+                        <div class="callout-title"> sensitivity accounting reversal</div>
+                        <p class="callout-text">
+                            The primary comparison archives interrupted incomplete attempts and scores their resumed attempts (no valid answer was regenerated). A strict sensitivity rule that counts interrupted unfinished original attempts as zero scores <strong>Full History at 91.2% (456/500)</strong> and <strong>Full Titan at 89.2% (446/500)</strong>, which <em>reverses the primary ranking</em>. Readers, judges, and timing scopes also differ from the earlier Sol run (GPT-6 Luna reader vs GPT-6.1 Sol reader; Terra judge vs Astra judge), and these results are cross-run observations rather than a controlled single-variable ablation.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Runtime & Efficiency -->
+            <section class="section-block" id="runtime">
+                <div class="container">
+                    <div class="section-header-row animate-enter">
+                        <div>
+                            <div class="section-kicker">Execution time & token accounting</div>
+                            <h2>Where the time goes.</h2>
+                        </div>
+                        <p class="section-desc">272ms memory timers per question; 33.44s complete reader turn.</p>
+                    </div>
+
+                    <div class="diagram-card animate-enter">
+                        <img class="diagram-img" src="assets/execution-time.webp" width="1140" height="500" alt="Execution time scopes: complete reader turn vs internal Titan memory action scope" loading="lazy"/>
+                        <p class="diagram-caption">
+                            Figure 3: Execution time scopes. Complete reader turn (33.44s mean) compared to internal Titan memory action scope (272ms mean across 4.44 actions).
+                        </p>
+                    </div>
+
+                    <div class="comparison-grid animate-enter">
+                        <div class="comparison-card">
+                            <h4>Internal Titan action timer: 272ms</h4>
+                            <p>
+                                Summed internal SQLite retrieval, neighbor traversal, and candidate serialization. Across 2,220 actions: searches averaged 108.7ms, scene opens averaged 3.57ms, and recent scans averaged 5.34ms. <strong>This is not the end-to-end user wait time to answer.</strong>
+                            </p>
+                        </div>
+                        <div class="comparison-card">
+                            <h4>Complete reader turn: 33.44s</h4>
+                            <p>
+                                Measures the full GPT-6.1 Sol/high reader turn including multi-step model thinking, tool generation, network round trips, and answer formulation. Median turn was 30.06s; p95 was 58.84s.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="category-table-wrapper animate-enter">
+                        <div class="table-controls">
+                            <span style="font-size: 14px; font-weight: 500; color: var(--ink);">Token accounting across Luna access arms (per question)</span>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Token category</th>
+                                    <th>Full history baseline</th>
+                                    <th>No scene opening</th>
+                                    <th>Full Titan Memory</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Total input tokens</td>
+                                    <td>133,246</td>
+                                    <td>190,081</td>
+                                    <td>208,090</td>
+                                </tr>
+                                <tr>
+                                    <td>Cached input tokens</td>
+                                    <td>15,942 (12.0%)</td>
+                                    <td>152,127 (80.0%)</td>
+                                    <td>169,179 (81.3%)</td>
+                                </tr>
+                                <tr>
+                                    <td>Uncached input tokens</td>
+                                    <td>117,304</td>
+                                    <td>37,954</td>
+                                    <td>38,911 (66.8% less)</td>
+                                </tr>
+                                <tr>
+                                    <td>Output tokens</td>
+                                    <td>534</td>
+                                    <td>4,087</td>
+                                    <td>3,705</td>
+                                </tr>
+                                <tr>
+                                    <td>Client wall time (mean)</td>
+                                    <td>19.54s</td>
+                                    <td>92.21s</td>
+                                    <td>86.05s (4.40x)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div style="padding: 16px 24px; font: 12px/1.5 var(--mono); color: var(--dim); border-top: 1px solid var(--line); background: rgba(14, 14, 20, 0.4);">
+                            Cached input is included in total input. Input totals count repeated conversational context and prompt prefixes across successive model requests; they do not measure unique evidence read or an actual billing invoice.
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Methodology & Limitations -->
+            <section class="section-block" id="methodology">
+                <div class="container">
+                    <div class="section-header-row animate-enter">
+                        <div>
+                            <div class="section-kicker">Methodology & evaluation scope</div>
+                            <h2>Methods and limits.</h2>
+                        </div>
+                        <p class="section-desc">Evaluation setup and limits.</p>
+                    </div>
+
+                    <div class="audit-list animate-enter">
+                        <div class="audit-item">
+                            <div class="audit-item-head">
+                                <span class="audit-name">Development set evaluation</span>
+                            </div>
+                            <p class="audit-desc">This evaluation was conducted across all 500 LongMemEval-S benchmark scenarios on frozen local stores; performance on unseen tasks or held-out distributions remains to be evaluated.</p>
+                        </div>
+                        <div class="audit-item">
+                            <div class="audit-item-head">
+                                <span class="audit-name">Configured system evaluation</span>
+                            </div>
+                            <p class="audit-desc">Measures the configured memory-plus-reader system end-to-end, not isolated retrieval accuracy (not Recall@20) and not LoCoMo.</p>
+                        </div>
+                        <div class="audit-item">
+                            <div class="audit-item-head">
+                                <span class="audit-name">No universal SOTA claim</span>
+                            </div>
+                            <p class="audit-desc">Some independently published systems report higher LongMemEval-S answer scores under different models, judges, and evaluation protocols (e.g. Recallium 98.4%, Exabase M-1 96.4%).</p>
+                        </div>
+                        <div class="audit-item">
+                            <div class="audit-item-head">
+                                <span class="audit-name">Cross-run observations</span>
+                            </div>
+                            <p class="audit-desc">Sol vs Luna differences are cross-run observations with different judges and accounting, not a controlled model ablation.</p>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 48px; text-align: center;" class="animate-enter">
+                        <a class="btn btn-ruby" href="titan-memory-system-card-v7.8.pdf" download="titan-memory-system-card-v7.8.pdf">
+                            Download PDF
+                        </a>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-inner">
+                <div>
+                    <span style="font-weight: 600; color: var(--ink);">Titan Memory</span>
+                    <span> · Local-first persistent memory for AI coding agents</span>
+                </div>
+                <div class="footer-links">
+                    <a href="../">Website home</a>
+                    <a href="titan-memory-system-card-v7.8.pdf" download="titan-memory-system-card-v7.8.pdf">System card PDF</a>
+                    <a href="results.json" target="_blank" rel="noopener">Original run data</a>
+                    <a href="luna-comparison.json" target="_blank" rel="noopener">Luna comparison data</a>
+                    <a href="https://github.com/kuwosaad/titan-pi-memory" target="_blank" rel="noopener">GitHub</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        (function() {
+            // Reveal interactive controls that require working JS
+            var jsControls = document.querySelectorAll('.js-only');
+            for (var k = 0; k < jsControls.length; k++) {
+                jsControls[k].hidden = false;
+            }
+
+            // Interactive category table switch
+            var rubricData = {
+                assistant: { pct: '100.0%', frac: '56 / 56', width: '100%' },
+                user: { pct: '98.6%', frac: '69 / 70', width: '98.6%' },
+                preference: { pct: '96.7%', frac: '29 / 30', width: '96.7%' },
+                updates: { pct: '96.2%', frac: '75 / 78', width: '96.2%' },
+                temporal: { pct: '95.5%', frac: '127 / 133', width: '95.5%' },
+                multisession: { pct: '91.0%', frac: '121 / 133', width: '91.0%' }
+            };
+            var sourceData = {
+                assistant: { pct: '98.2%', frac: '55 / 56', width: '98.2%' },
+                user: { pct: '90.0%', frac: '63 / 70', width: '90.0%' },
+                preference: { pct: '90.0%', frac: '27 / 30', width: '90.0%' },
+                updates: { pct: '84.6%', frac: '66 / 78', width: '84.6%' },
+                temporal: { pct: '80.5%', frac: '107 / 133', width: '80.5%' },
+                multisession: { pct: '67.7%', frac: '90 / 133', width: '67.7%' }
+            };
+
+            var btnRubric = document.getElementById('btn-show-rubric');
+            var btnSource = document.getElementById('btn-show-source');
+
+            function setCategoryView(isSource) {
+                if (!btnRubric || !btnSource) return;
+                btnRubric.setAttribute('aria-pressed', String(!isSource));
+                btnSource.setAttribute('aria-pressed', String(isSource));
+                var data = isSource ? sourceData : rubricData;
+                var keys = Object.keys(data);
+                for (var i = 0; i < keys.length; i++) {
+                    var key = keys[i];
+                    var bar = document.getElementById('bar-' + key);
+                    var pct = document.getElementById('pct-' + key);
+                    var frac = document.getElementById('frac-' + key);
+                    if (bar) {
+                        bar.style.width = data[key].width;
+                        bar.classList.toggle('mint', isSource);
+                    }
+                    if (pct) pct.textContent = data[key].pct;
+                    if (frac) frac.textContent = data[key].frac;
+                }
+            }
+
+            if (btnRubric && btnSource) {
+                btnRubric.addEventListener('click', function() { setCategoryView(false); });
+                btnSource.addEventListener('click', function() { setCategoryView(true); });
+            }
+
+            // Viewport entry animation: IntersectionObserver playing once
+            var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (reducedMotion) {
+                document.documentElement.classList.add('reduced-motion');
+            } else if ('IntersectionObserver' in window) {
+                document.documentElement.classList.add('io-ready');
+                try {
+                    var observer = new IntersectionObserver(function(entries) {
+                        entries.forEach(function(entry) {
+                            if (entry.isIntersecting) {
+                                entry.target.classList.add('is-visible');
+                                observer.unobserve(entry.target);
+                            }
+                        });
+                    }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+
+                    var targets = document.querySelectorAll('.animate-enter, .chart-bar-fill, .cover-showcase');
+                    targets.forEach(function(el) {
+                        observer.observe(el);
+                    });
+                } catch (err) {
+                    document.documentElement.classList.remove('io-ready');
+                }
+            }
+        })();
+    </script>
+</body>
+</html>
