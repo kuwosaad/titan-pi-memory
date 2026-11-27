@@ -2,7 +2,7 @@
 """Isolated, paired Titan behavior evaluation (synthetic by default).
 
 Run this file from the experiment checkout; it imports each target only inside
-its own subprocess. No snapshot is modified. See docs/lean-memory-evaluation.md.
+its own subprocess. No snapshot is modified. See docs/research/lean-memory-evaluation.md.
 """
 from __future__ import annotations
 
