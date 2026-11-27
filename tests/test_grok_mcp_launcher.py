@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -26,8 +27,11 @@ class GrokMcpLauncherTests(unittest.TestCase):
             for overrides, home in [({}, Path(tmp) / ".titan" / "agents" / "grok"),
                                     ({"GROK_TITAN_HOME": str(custom_home)}, custom_home)]:
                 with self.subTest(overrides=overrides):
-                    env = {"HOME": tmp, "TITAN_AGENT_NAME": "codex", "TITAN_HOME": "/unused",
-                           "TITAN_SPOOL_DIR": "/unused", "TITAN_MEMORY_DB_PATH": "/unused.db", **overrides}
+                    # Windows needs SYSTEMROOT to start Python and USERPROFILE for Path.home().
+                    windows = {key: os.environ[key] for key in ("SYSTEMROOT", "TEMP", "TMP") if key in os.environ}
+                    env = {**windows, "HOME": tmp, "USERPROFILE": tmp, "TITAN_AGENT_NAME": "codex",
+                           "TITAN_HOME": "/unused", "TITAN_SPOOL_DIR": "/unused",
+                           "TITAN_MEMORY_DB_PATH": "/unused.db", **overrides}
                     proc = subprocess.run([sys.executable, str(plugin / "titan_mcp_launcher.py")],
                                           env=env, check=True, capture_output=True, text=True)
                     self.assertEqual(json.loads(proc.stdout),

@@ -11,6 +11,14 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1] / "integrations" / "claude_titan_plugin"
 
 
+def _path_without_tools(directory):
+    """A PATH with no user tools; Windows still needs System32 to load Python's DLLs."""
+    if os.name != "nt":
+        return str(directory)
+    system32 = os.path.join(os.environ.get("SYSTEMROOT", r"C:\\Windows"), "System32")
+    return os.pathsep.join([str(directory), system32, os.path.dirname(sys.executable)])
+
+
 def test_mcp_uses_managed_interpreter_and_keeps_stdio(tmp_path):
     scripts = tmp_path / "plugin with spaces" / "scripts"
     scripts.mkdir(parents=True)
@@ -27,7 +35,7 @@ def test_mcp_uses_managed_interpreter_and_keeps_stdio(tmp_path):
     result = subprocess.run(
         [sys.executable, str(scripts / "titan_claude_launcher.py")],
         input="MCP frame", text=True, capture_output=True,
-        env={**os.environ, "TITAN_CLAUDE_EXTRACTION_KEY": "synthetic-key", "PATH": str(tmp_path)},
+        env={**os.environ, "TITAN_CLAUDE_EXTRACTION_KEY": "synthetic-key", "PATH": _path_without_tools(tmp_path)},
         check=True, timeout=10,
     )
     assert json.loads(result.stdout) == ["synthetic-key", "MCP frame"]
