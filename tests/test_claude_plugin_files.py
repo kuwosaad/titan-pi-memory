@@ -50,17 +50,11 @@ class ClaudePluginFileTests(unittest.TestCase):
 
     def test_hooks_use_cross_platform_plugin_local_launcher(self):
         config = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
-        commands = {
-            hook["command"]
-            for entries in config["hooks"].values()
-            for entry in entries
-            for hook in entry["hooks"]
-        }
-
-        self.assertEqual(len(commands), 1)
-        command = commands.pop()
-        self.assertIn("${CLAUDE_PLUGIN_ROOT}", command)
-        self.assertFalse(command.rstrip().endswith(".py"), "Claude hooks must not rely on direct .py execution")
+        for entries in config["hooks"].values():
+            for entry in entries:
+                for hook in entry["hooks"]:
+                    self.assertEqual(hook["command"], "python3")
+                    self.assertEqual(hook["args"], ["${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.py"])
 
     def test_hook_script_is_executable(self):
         script = PLUGIN_ROOT / "scripts" / "titan_claude_hook.py"

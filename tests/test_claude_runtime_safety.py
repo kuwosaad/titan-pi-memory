@@ -86,6 +86,20 @@ def test_version_handoff_stops_verified_old_owner_before_replacement(monkeypatch
             _shutdown(first)
 
 
+def test_native_provider_key_change_restarts_idle_daemon(monkeypatch, tmp_path):
+    agent = "claude-key-change"
+    _configure(monkeypatch, tmp_path, agent)
+    first = ensure_daemon(agent, timeout=20)
+    second = None
+    try:
+        monkeypatch.setenv("TITAN_CLAUDE_CONFIG_REVISION", "synthetic-config-revision")
+        second = ensure_daemon(agent, timeout=20)
+        assert second.owner_nonce != first.owner_nonce
+        assert ensure_daemon(agent, timeout=20).owner_nonce == second.owner_nonce
+    finally:
+        _shutdown(second or first)
+
+
 def test_lifetime_lease_rejects_second_mutating_daemon(monkeypatch, tmp_path):
     agent = "claude-lifetime-lease"
     _configure(monkeypatch, tmp_path, agent)

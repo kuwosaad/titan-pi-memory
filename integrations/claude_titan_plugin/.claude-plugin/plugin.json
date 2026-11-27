@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "titan-memory",
   "displayName": "Titan Memory",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "description": "Persistent, provenance-aware memory and passive trace capture for Claude Code.",
   "author": {
     "name": "Titan"
@@ -10,7 +10,12 @@
   "homepage": "https://github.com/kuwosaad/titan-pi-memory",
   "repository": "https://github.com/kuwosaad/titan-pi-memory",
   "license": "Apache-2.0",
-  "keywords": ["memory", "mcp", "claude-code", "coding-agent"],
+  "keywords": [
+    "memory",
+    "mcp",
+    "claude-code",
+    "coding-agent"
+  ],
   "userConfig": {
     "agent_name": {
       "type": "string",
@@ -23,7 +28,13 @@
       "type": "string",
       "title": "Capture mode",
       "description": "How much Claude session data Titan may save: full, messages, metadata, or off.",
-      "default": "messages"
+      "default": "messages",
+      "options": [
+        "full",
+        "messages",
+        "metadata",
+        "off"
+      ]
     },
     "capture_tool_io": {
       "type": "boolean",
@@ -35,7 +46,12 @@
       "type": "string",
       "title": "Recall mode",
       "description": "Recall behavior: automatic bounded injection, manual skill/tool use, or off.",
-      "default": "automatic"
+      "default": "automatic",
+      "options": [
+        "automatic",
+        "manual",
+        "off"
+      ]
     },
     "excluded_projects": {
       "type": "string",
@@ -67,6 +83,13 @@
       "default": 3000,
       "min": 250,
       "max": 5000
+    },
+    "opencode_go_api_key": {
+      "type": "string",
+      "title": "OpenCode Go API key",
+      "description": "Optional credential for the default extraction model. Leave blank to keep your existing Titan provider settings.",
+      "sensitive": true,
+      "default": ""
     }
   }
 }

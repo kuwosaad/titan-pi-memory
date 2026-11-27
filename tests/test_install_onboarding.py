@@ -30,6 +30,7 @@ PI_REQUIRED_PAYLOADS = (
     "tools/cli/onboarding_ui/FONT-LICENSE.md", "tools/opencode/__init__.py",
     "tools/opencode/install_plugin.py", "tools/pi_extension/index.ts", "tools/pi_extension/install.sh",
     "tools/pi_extension/README.md", "tools/pi_extension/server.py",
+    "tools/pi_extension/titan_runtime.py", "tools/pi_extension/titan_engine.zip",
     "tools/pi_extension/titan_dashboard.py", "tools/pi_extension/prompts/memory-sync.md",
     "tools/pi_extension/skills/memory-sync/SKILL.md",
     "tools/pi_extension/skills/titan-memory-workflow/SKILL.md",
@@ -405,11 +406,12 @@ def test_readme_points_new_users_at_current_install_path():
     assert "git+https://github.com/kuwosaad/titan-karu.git" not in readme
 
 
-def test_codex_install_docs_use_npm_or_pypi_without_root_installer():
+def test_cli_install_docs_use_npm_or_python_source_without_root_installer():
     npm_readme = (ROOT / "packages/titan-memory-cli/README.md").read_text(encoding="utf-8")
     pypi_readme = (ROOT / "docs/pypi_titan_memory_cli.md").read_text(encoding="utf-8")
 
     assert "npx -y titan-memory-cli@latest setup codex" in npm_readme
-    assert "pip install titan-memory-cli" in pypi_readme
+    assert "pipx install ." in pypi_readme
+    assert "pip install titan-memory-cli" not in pypi_readme
     assert "install.sh" not in npm_readme
     assert "install.sh" not in pypi_readme

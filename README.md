@@ -59,187 +59,35 @@ requests may go to an external provider, depending on your configuration.
 
 ## Get started
 
-Choose the integration for the agent you use. The **Pi extension**
-(`titan-pi-memory`) and the **standalone CLI** (`titan-memory-cli`) are separate
-packages; installing the Pi extension does not install the `titan` command.
+Install Titan through your agent, then choose your extraction and embedding providers.
+The six capture plugins in this checkout include the memory engine. On first use,
+Python 3.10+ (with venv and pip) installs the engine’s dependencies in a private
+environment. Allow time for that download. Later starts reuse the environment.
+The standalone Titan CLI is optional.
 
-| Interface | Setup path | Guide |
-| --- | --- | --- |
-| Pi | npm extension and in-agent setup | [Pi](tools/pi_extension/README.md) |
-| Codex | CLI-managed plugin setup; manual hook trust | [Codex](integrations/codex_titan_plugin/README.md) |
-| Claude Code | Plugin from a source checkout | [Claude Code](integrations/claude_titan_plugin/README.md) |
-| OpenCode | Source installer for classic OpenCode 1.x | [OpenCode](integrations/opencode_titan_plugin/README.md) |
-| Grok | Local plugin installer from source | [Grok](integrations/grok_titan_plugin/README.md) |
-| Hermes Agent | Hermes plugin catalog, plus Titan CLI and MCP configuration | [Hermes Agent](integrations/hermes_titan_plugin/README.md) |
-| BB | Separate visual explorer plugin | [BB](integrations/bb_titan_memory_plugin/README.md) |
+Use the source or local-package instructions in each guide to try this version.
+Public registries and catalogs deliver the versions listed by those providers.
 
-### Pi
+| Agent | First step |
+| --- | --- |
+| [Codex](integrations/codex_titan_plugin/README.md) | Add the local marketplace, install Titan Memory, and follow its setup skill. Approve its hooks in Codex for automatic capture. |
+| [Claude Code](integrations/claude_titan_plugin/README.md) | Install Titan Memory from the local marketplace and choose a provider. |
+| [Pi](tools/pi_extension/README.md) | Install the Pi package from this checkout, then run `/titan-setup`. The registry command `pi install npm:titan-pi-memory` installs the published version. |
+| [Grok Build](integrations/grok_titan_plugin/README.md) | Install the local plugin and open its setup workflow before connecting MCP. |
+| [Hermes Agent](integrations/hermes_titan_plugin/README.md) | Install and enable this plugin revision, then use the native connect command in your Hermes profile. |
+| [OpenCode](integrations/opencode_titan_plugin/README.md) | Follow the instructions for your host version. The plugin guide covers current and classic OpenCode. |
+| [bb explorer](integrations/bb_titan_memory_plugin/README.md) | Install the explorer to read the memories your agents have saved. |
 
-You need Pi, Python **3.10+** with pip, and a configured extraction provider.
-The default embedding backend also needs [Ollama](https://ollama.com) running
-with the model below:
+To verify your installation, ask the agent to save a specific decision, restart the agent,
+and ask it to recall that decision and show its source. The default MCP tool set includes
+`query_memories`, `store_trace_packet`, `get_scene_context`, and `doctor`.
+Set `TITAN_MCP_TOOL_PROFILE=full` on the MCP server to expose optional tools.
 
-```bash
-ollama pull nomic-embed-text:v1.5
-pi install npm:titan-pi-memory
-```
+### Optional command-line tools
 
-Inside Pi:
-
-```text
-/titan-setup
-/titan-key
-/titan-status
-```
-
-Setup prepares `~/.titan/agents/pi`, installs missing Python dependencies, and
-starts Titan's local server. `/titan-key` currently offers **OpenCode Go** and
-**Gemini**. Choose your provider and enter its key.
-
-Pi setup does not install Ollama or download its model. You can use OpenAI
-embeddings instead; see [configuration](#configuration-and-data).
-
-### Codex
-
-You need Codex, Node.js **18+**, and Python **3.10+**:
-
-```bash
-npx -y titan-memory-cli@latest setup codex
-```
-
-The installer prepares the managed runtime and registers Titan's plugin and MCP
-configuration. In Codex, inspect `/plugins` and `/mcp`, then open `/hooks` and
-approve Titan Memory if you want passive capture.
-
-**Hook trust is manual.** MCP tools can work while passive capture remains
-unapproved. See the [Codex guide](integrations/codex_titan_plugin/README.md) for
-verification, repair, and provider setup.
-
-MCP defaults to the core profile: `query_memories`, `store_trace_packet`,
-`get_scene_context`, and `doctor`. To expose all tools, set
-`TITAN_MCP_TOOL_PROFILE=full` in the MCP server environment and restart the
-server. Set `TITAN_MCP_TOOL_PROFILE=core` to explicitly select the smaller
-profile; an existing integration configuration may override the default.
-
-### Hermes Agent
-
-You need Hermes Agent 0.23.4+ and the Titan CLI on the Hermes process's `PATH`,
-installed from the same Titan revision as the plugin (the catalog entry lists
-the commit; check it out and run `pipx install .` from the repository root).
-Then install the plugin from the catalog:
-
-```bash
-hermes plugins install titan-memory --enable
-```
-
-In your Hermes profile's `config.yaml`, add a `titan-memory` MCP server that
-runs `titan mcp --agent hermes`, and add `titan-memory` to the plugin's
-`mcp_allowlist`. Configure Titan's extraction and embedding providers before
-the first capture; for the bundled defaults, run
-`titan key set OPENCODE_GO_API_KEY --agent hermes` and
-`ollama pull nomic-embed-text:v1.5`. The plugin captures successful text turns
-and works alongside Hermes' built-in memory. See the
-[Hermes guide](integrations/hermes_titan_plugin/README.md) for the exact YAML,
-per-profile stores, and verification.
-
-### Claude Code, OpenCode, and Grok
-
-These source-based paths start from a checkout:
-
-```bash
-git clone https://github.com/kuwosaad/titan-pi-memory.git
-cd titan-pi-memory
-```
-
-<details>
-<summary><strong>Claude Code</strong></summary>
-
-Load the plugin from the checkout:
-
-```bash
-claude --plugin-dir ./integrations/claude_titan_plugin
-```
-
-The plugin uses Node.js 18+, npm, and Python 3.10+ for its managed runtime.
-Inspect `/plugin`, `/mcp`, and `/hooks` after loading. Restart Claude or use
-`/reload-plugins` after configuration changes.
-
-The adapter supports automatic recall, configurable capture, and project
-exclusions. See the [Claude Code guide](integrations/claude_titan_plugin/README.md)
-for settings and marketplace installation details.
-
-</details>
-
-<details>
-<summary><strong>OpenCode 1.x</strong></summary>
-
-Install the standalone CLI below first. With `titan`, `opencode`, and Bun on
-your `PATH`, run:
-
-```bash
-cd integrations/opencode_titan_plugin
-bun run setup
-```
-
-Setup builds and installs the global plugin, workflow skills, and MCP entry.
-Restart OpenCode and confirm that the `titan-memory_` tools are available.
-This adapter targets the classic OpenCode **1.x** plugin contract.
-
-See the [OpenCode guide](integrations/opencode_titan_plugin/README.md).
-
-</details>
-
-<details>
-<summary><strong>Grok</strong></summary>
-
-With Grok and Titan's Python runtime dependencies available, run from the
-repository root:
-
-```bash
-./integrations/grok_titan_plugin/scripts/install_grok.sh
-```
-
-Enable the plugin in `~/.grok/config.toml` if needed:
-
-```toml
-[plugins]
-enabled = ["titan-memory"]
-```
-
-Restart Grok, then check `/plugins` and `/mcps`. The installer creates a
-`titan-grok` launcher in `~/.local/bin`; add that directory to your `PATH` if it
-isn't already there. This is a local integration, with no separate Grok npm
-package.
-
-See the [Grok guide](integrations/grok_titan_plugin/README.md).
-
-</details>
-
-### Standalone CLI
-
-Install the npm wrapper (Node.js 18+ and Python 3.10+):
-
-```bash
-npm install -g titan-memory-cli
-```
-
-Titan is not published on PyPI. To install the Python package instead, run
-this from the root of a source checkout:
-
-```bash
-pipx install .   # or: pip install .
-```
-
-Then:
-
-```bash
-titan --help
-titan doctor --agent codex
-```
-
-The npm wrapper manages the Python runtime dependencies. The source install
-puts the `titan` entrypoint on your `PATH` directly. See the
-[CLI guide](docs/pypi_titan_memory_cli.md) for distribution and maintenance.
+For diagnostics, scripting and administration from this checkout, install the Python
+package into an isolated environment with `pipx install .`. Run `titan --help` to
+see the available commands. See the [CLI guide](docs/pypi_titan_memory_cli.md).
 
 ## Use Titan
 
@@ -298,8 +146,7 @@ npm run check
 python3 scripts/install-local.py --install
 ```
 
-Set **Titan root on target host** in the plugin settings to your Titan checkout,
-then open **Titan Memory** from a BB thread's panel actions.
+Open **Titan Memory** from a BB thread’s panel actions. The explorer bundles its reader and uses Python on the target host.
 
 The explorer reads existing data and stored embeddings. It does not capture
 conversations, generate embeddings, or change memories. Its graph shows at most
@@ -384,6 +231,11 @@ cd integrations/bb_titan_memory_plugin
 npm ci --ignore-scripts
 npm run check
 ```
+
+After changing the engine or the native runtime launcher, run
+`python3 tools/release/sync_plugin_runtime.py`. This regenerates the six native
+plugins’ identical engine archives and launcher copies. CI checks their contents
+against the source. The bb explorer ships only its read-only Python bridge.
 
 The Pi npm package, standalone npm CLI, and Python CLI have separate packaging
 paths. See [repository ownership](docs/repository-ownership.md) and the

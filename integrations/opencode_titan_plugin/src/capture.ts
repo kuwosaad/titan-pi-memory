@@ -1,3 +1,4 @@
+import { namespaceEnvironment } from "./namespace"
 import { chmodSync, closeSync, mkdirSync, openSync, renameSync, unlinkSync, writeSync } from "node:fs"
 import { createHash, randomUUID } from "node:crypto"
 import { join } from "node:path"
@@ -8,7 +9,6 @@ const SOURCE = "opencode"
 const MAX_OUTPUT_CHARS = 1200
 const MAX_ERROR_CHARS = 600
 const MAX_ARGS_SERIALIZED_CHARS = 4000
-const MAX_DEDUPE_IDS_PER_SESSION = 4096
 const MAX_DEDUPE_SESSIONS = 64
 const MAX_SYNC_ATTEMPTS = 3
 let batchSequence = 0
@@ -67,7 +67,7 @@ function text(value: unknown): string {
   }
 }
 
-function compact(value: unknown, limit = MAX_OUTPUT_CHARS): string {
+export function compact(value: unknown, limit = MAX_OUTPUT_CHARS): string {
   const normalized = text(value).replace(/\s+/g, " ").trim()
   if (normalized.length <= limit) return normalized
   return `${normalized.slice(0, Math.max(0, limit - 3)).trimEnd()}...`
@@ -86,7 +86,7 @@ function redactString(value: string): string {
   return SECRET_PATTERNS.reduce((current, pattern) => current.replace(pattern, "[REDACTED]"), value)
 }
 
-function redact(value: unknown, keyHint = ""): unknown {
+export function redact(value: unknown, keyHint = ""): unknown {
   if (isSensitiveKey(keyHint)) return "[REDACTED]"
   if (typeof value === "string") return redactString(value)
   if (Array.isArray(value)) return value.map((item) => redact(item, keyHint))
@@ -118,7 +118,7 @@ function resolveSessionId(event: AnyRecord): string {
   return ""
 }
 
-function isTitanTool(name: unknown): boolean {
+export function isTitanTool(name: unknown): boolean {
   if (typeof name !== "string") return false
   // OpenCode may expose the same MCP tool as titan-memory_recall,
   // mcp__titan-memory_recall, or another namespaced spelling.
@@ -133,7 +133,7 @@ function textParts(record: AnyRecord): string {
     .join("\n")
 }
 
-function eventBase(sessionId: string, eventId: string, eventType: string, payload: AnyRecord): AnyRecord {
+export function eventBase(sessionId: string, eventId: string, eventType: string, payload: AnyRecord): AnyRecord {
   return {
     session_id: sessionId,
     event_id: eventId,
@@ -209,7 +209,7 @@ function toolEvents(sessionId: string, records: AnyRecord[]): AnyRecord[] {
   return events
 }
 
-function boundedArgs(value: unknown): unknown {
+export function boundedArgs(value: unknown): unknown {
   const sanitized = redact(value)
   let serialized = ""
   try {
@@ -242,19 +242,9 @@ function idleEvent(sessionId: string, records: AnyRecord[]): AnyRecord | undefin
   })
 }
 
-function spoolDir(): string {
-  const explicit = process.env.TITAN_SPOOL_DIR?.trim()
-  if (explicit) return explicit
-  const titanHome = process.env.TITAN_HOME?.trim()
-  if (titanHome) return join(titanHome, "traces")
-  const sharedHome = join(process.env.HOME || ".", ".titan")
-  const agent = process.env.TITAN_AGENT_NAME?.trim() || "opencode"
-  return join(sharedHome, "agents", agent, "traces")
-}
-
-function writeBatch(sessionId: string, events: AnyRecord[]): void {
+export function writeBatch(sessionId: string, events: AnyRecord[]): void {
   if (events.length === 0) return
-  const directory = spoolDir()
+  const directory = namespaceEnvironment().TITAN_SPOOL_DIR
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   chmodSync(directory, 0o700)
   const sessionHash = createHash("sha256").update(sessionId).digest("hex").slice(0, 16)
@@ -283,7 +273,7 @@ function writeBatch(sessionId: string, events: AnyRecord[]): void {
 
 export class CaptureCoordinator {
   private readonly queues = new Map<string, Queue>()
-  private readonly emitted = new Map<string, Map<string, true>>()
+  private readonly emitted = new Map<string, Set<string>>()
 
   constructor(private readonly client: CaptureClient, private readonly directory: string) {}
 
@@ -357,22 +347,15 @@ export class CaptureCoordinator {
       const idle = idleEvent(sessionId, records)
       if (idle) candidates.push(idle)
     }
-    const emitted = this.emitted.get(sessionId) || new Map<string, true>()
+    const emitted = this.emitted.get(sessionId) || new Set<string>()
     const fresh = candidates.filter((event) => {
       const id = String(event.event_id || "")
       return Boolean(id) && !emitted.has(id)
     })
     writeBatch(sessionId, fresh)
-    for (const event of fresh) {
-      const id = String(event.event_id)
-      emitted.delete(id)
-      emitted.set(id, true)
-      while (emitted.size > MAX_DEDUPE_IDS_PER_SESSION) {
-        const oldest = emitted.keys().next().value
-        if (oldest === undefined) break
-        emitted.delete(oldest)
-      }
-    }
+    // Classic returns the entire transcript. Evict sessions as a unit so an
+    // unchanged long conversation never re-emits records erased from its cache.
+    for (const event of fresh) emitted.add(String(event.event_id))
     this.emitted.delete(sessionId)
     this.emitted.set(sessionId, emitted)
     while (this.emitted.size > MAX_DEDUPE_SESSIONS) {

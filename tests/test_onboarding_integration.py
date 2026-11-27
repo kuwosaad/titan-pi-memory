@@ -128,3 +128,34 @@ def test_validation_is_bound_to_exact_payload_and_failure_writes_nothing(server,
         assert request(server, 'POST', '/api/validate', data, auth(server))[0] == 400
     assert request(server, 'POST', '/api/install', data, auth(server))[0] == 400
     assert not (tmp_path / 'titan').exists()
+
+
+@pytest.mark.parametrize("agent", ["codex", "claude-code", "grok", "hermes-work", "opencode", "pi"])
+def test_plugin_provider_setup_only_saves_the_selected_namespace(tmp_path, monkeypatch, agent):
+    monkeypatch.setattr(titan, 'TITAN_HOME', tmp_path / 'titan')
+    monkeypatch.setattr(titan, '_explicit_titan_home', False)
+    with onboarding.OnboardingServer(agent, providers_only=True) as instance:
+        thread = threading.Thread(target=instance.serve_forever, daemon=True)
+        thread.start()
+        try:
+            headers = auth(instance)
+            status, body = request(instance, 'GET', '/api/state', headers=headers)
+            assert status == 200
+            state = json.loads(body)
+            assert state['providers_only'] and state['locked_agent'] == agent
+            assert [item['id'] for item in state['agents']] == [agent]
+            data = {**selection(), 'agent': agent}
+            with patch.object(onboarding, 'check_configuration', return_value={'ok': True, 'errors': []}):
+                assert request(instance, 'POST', '/api/validate', data, headers)[0] == 200
+                other = {**data, 'agent': 'other-agent'}
+                assert request(instance, 'POST', '/api/install', other, headers)[0] == 400
+            with patch.object(onboarding, '_install', side_effect=AssertionError('must preserve native host registration')):
+                assert request(instance, 'POST', '/api/install', data, headers)[0] == 200
+                deadline = time.monotonic() + 5
+                while instance.status['state'] == 'running' and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                assert instance.status['state'] == 'complete'
+            assert (tmp_path / 'titan' / 'agents' / agent / '.env').is_file()
+        finally:
+            instance.shutdown()
+            thread.join()

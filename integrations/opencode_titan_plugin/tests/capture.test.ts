@@ -324,6 +324,18 @@ describe("TitanMemoryPlugin capture hook", () => {
     expect(allEvents.map((item) => item.event_id)).toEqual([...firstEvents, ...firstEvents].map((item) => item.event_id))
   })
 
+  test("keeps a long unchanged transcript from spooling again", async () => {
+    const history = Array.from({ length: 4200 }, (_, i) => userMessage(String(i), "test"))
+    sessions.set("session-1", history)
+    const hooks = await TitanMemoryPlugin({ client: makeClient() as never, directory: "/workspace" } as never)
+    const event = { event: { type: "session.idle", properties: { sessionID: "session-1" } } }
+    await hooks.event?.(event as never)
+    await waitForFileCount(1)
+    await hooks.event?.(event as never)
+    await Bun.sleep(50)
+    expect(await readAllEvents()).toHaveLength(history.length + 1)
+  })
+
   test("swallows SDK failures so the event callback never rejects", async () => {
     const client = makeClient()
     client.session.messages = async () => {

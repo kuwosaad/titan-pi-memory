@@ -50,6 +50,7 @@ exclude = [
   "tools.benchmarks*",
   "tools.dev*",
   "tools.pi_extension*",
+  "tools.plugin_runtime*",
   "tools.presentations*",
   "tools.release*",
   "tools.scripts*",
@@ -75,6 +76,7 @@ config = [
   "assets/*.png",
   "hooks/*.json",
   "scripts/*.py",
+  "scripts/titan_engine.zip",
   "skills/*/SKILL.md",
 ]
 "integrations.claude_titan_plugin" = [
@@ -83,13 +85,29 @@ config = [
   "TERMS.md",
   ".mcp.json",
   ".claude-plugin/*.json",
+  ".claude-plugin/icon.png",
   "hooks/*.json",
   "scripts/*.py",
-  "scripts/*.js",
+  "scripts/titan_engine.zip",
   "runtime/*.py",
-  "runtime/*.js",
   "skills/*/SKILL.md",
-  "package.json",
-  "package-lock.json",
 ]
-"integrations.hermes_titan_plugin" = ["README.md", "plugin.yaml"]
+"integrations.grok_titan_plugin" = [
+  "README.md",
+  "plugin.json",
+  ".mcp.json",
+  "hooks/hooks.json",
+  "commands/*.md",
+  "scripts/titan_engine.zip",
+  "scripts/install_grok.sh",
+  "scripts/titan-grok",
+  "skills/*/SKILL.md",
+]
+"integrations.hermes_titan_plugin" = ["README.md", "plugin.yaml", "titan_engine.zip"]
+"integrations.opencode_titan_plugin" = [
+  "package.json",
+  "dist/server.js",
+  "dist/titan_v2_spool_plugin.ts",
+  "scripts/titan_engine.zip",
+  "skills/*/SKILL.md",
+]

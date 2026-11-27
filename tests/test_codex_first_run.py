@@ -34,7 +34,7 @@ class CodexFirstRunTests(unittest.TestCase):
         self.assertIn("/hooks", rendered)
         self.assertIn("/mcp", rendered)
         self.assertIn("/plugins", rendered)
-        self.assertIn("python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py", rendered)
+        self.assertIn('python3 "${PLUGIN_ROOT}/scripts/titan_codex_hook.py"', rendered)
         self.assertIn("Passive capture only starts after you trust hooks", rendered)
         self.assertNotIn("codex hook trust", rendered.lower())
 

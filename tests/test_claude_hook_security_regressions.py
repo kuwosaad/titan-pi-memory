@@ -96,6 +96,11 @@ class ClaudeHookSecurityRegressionTests(unittest.TestCase):
 
             self.assertTrue(hook._project_excluded({"cwd": str(alias / "project")}, env))
 
+    def test_project_exclusion_applies_to_subdirectories(self):
+        env = {"CLAUDE_PLUGIN_OPTION_EXCLUDED_PROJECTS": "/tmp/private-project"}
+        self.assertTrue(hook._project_excluded({"cwd": "/tmp/private-project/src"}, env))
+        self.assertFalse(hook._project_excluded({"cwd": "/tmp/private-project-copy"}, env))
+
     def test_session_start_uses_existing_owner_before_starting_one(self):
         calls = []
 

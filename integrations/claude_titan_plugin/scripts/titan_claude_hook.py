@@ -508,7 +508,13 @@ def _project_excluded(payload: dict[str, Any], env: dict[str, str]) -> bool:
     if not patterns:
         return False
     resolved_cwd = str(Path(cwd).expanduser().resolve(strict=False))
-    return any(fnmatch.fnmatch(resolved_cwd, _resolved_glob(pattern)) for pattern in patterns)
+    for pattern in patterns:
+        resolved = _resolved_glob(pattern)
+        if fnmatch.fnmatch(resolved_cwd, resolved):
+            return True
+        if not any(char in pattern for char in "*?[") and Path(resolved_cwd).is_relative_to(resolved):
+            return True
+    return False
 
 
 def _suppression_marker(trace_dir: Path, session_id: str) -> Path:
@@ -660,30 +666,14 @@ def automatic_recall(
             return ""
     try:
         recall_context, _submit_events = _import_runtime()
-        started = time.monotonic()
         query = str(prompt) if event_name == "UserPromptSubmit" else ""
         result = recall_context(
             query,
             session_id=None,
             limit=limit,
             name=agent_name,
-            timeout=min(0.5, timeout),
+            timeout=timeout,
         )
-        if result is None and event_name == "SessionStart":
-            remaining = timeout - (time.monotonic() - started)
-            if remaining > 0.25:
-                from runtime.proxy import ensure_daemon
-
-                ensure_daemon(agent_name, timeout=max(0.25, remaining * 0.65))
-                remaining = timeout - (time.monotonic() - started)
-                if remaining > 0.1:
-                    result = recall_context(
-                        query,
-                        session_id=None,
-                        limit=limit,
-                        name=agent_name,
-                        timeout=remaining,
-                    )
     except Exception:
         return ""
     if not result:
@@ -717,6 +707,8 @@ def main(stdin: Any = sys.stdin, stdout: Any = sys.stdout) -> int:
         event_name = str(payload.get("hook_event_name") or "")
         prompt = payload.get("prompt") or payload.get("user_prompt") or payload.get("message")
 
+        if event_name in {"PostToolUse", "PostToolUseFailure"} and mode != "full":
+            return 0
         if _project_excluded(payload, env):
             return 0
         if mode != "off":

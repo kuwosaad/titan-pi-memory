@@ -97,7 +97,7 @@ def _event_type_records(event_name: str, payload: dict[str, Any]) -> list[tuple[
                     **source,
                     "transcript_path": _excerpt(payload, "transcript_path", "transcriptPath"),
                     "model": _excerpt(payload, "model", "model_name"),
-                    "reason": _excerpt(payload, "reason", "matcher"),
+                    "reason": _excerpt(payload, "source", "reason", "matcher"),
                 },
             )
         ]
@@ -166,6 +166,8 @@ def resolve_trace_dir(env: dict[str, str] | None = None) -> Path:
     agent_name = env.get("TITAN_AGENT_NAME", "codex") or "codex"
     if env.get("TITAN_SPOOL_DIR"):
         return Path(env["TITAN_SPOOL_DIR"]).expanduser()
+    if env.get("TITAN_HOME"):
+        return Path(env["TITAN_HOME"]).expanduser() / "traces"
     return Path.home() / ".titan" / "agents" / agent_name / "traces"
 
 

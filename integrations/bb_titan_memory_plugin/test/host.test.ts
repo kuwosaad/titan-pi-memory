@@ -3,11 +3,22 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { registerHooks } from "node:module";
 import type { ExperimentalHostRpcContext } from "@get-bb/plugin-sdk/host";
-import { __testing, explorerHostEntry } from "../src/host.js";
 import { detailOutputSchema, snapshotOutputSchema } from "../src/contract.js";
 import type { HostExecuteInput } from "../src/contract.js";
+
+// Node runs these source tests directly. bb's bundler handles text imports in production.
+const pythonText = registerHooks({
+  load(url, context, nextLoad) {
+    if (!url.endsWith(".py")) return nextLoad(url, context);
+    const source = JSON.stringify(readFileSync(new URL(url), "utf8"));
+    return { format: "module", shortCircuit: true, source: "export default " + source };
+  },
+});
+const { __testing, explorerHostEntry } = await import("../src/host.js");
+test.after(() => pythonText.deregister());
 
 function context(signal: AbortSignal): ExperimentalHostRpcContext {
   return {
@@ -20,14 +31,15 @@ function context(signal: AbortSignal): ExperimentalHostRpcContext {
   };
 }
 
-async function withHostEnvironment(root: string, home: string, callback: () => Promise<void>): Promise<void> {
+async function withHostEnvironment(root: string | undefined, home: string, callback: () => Promise<void>): Promise<void> {
   const previous = {
     root: process.env.TITAN_ROOT,
     home: process.env.TITAN_HOME,
     sharedHome: process.env.TITAN_SHARED_HOME,
     python: process.env.TITAN_PYTHON,
   };
-  process.env.TITAN_ROOT = root;
+  if (root === undefined) delete process.env.TITAN_ROOT;
+  else process.env.TITAN_ROOT = root;
   process.env.TITAN_HOME = join(home, "agents", "pi");
   delete process.env.TITAN_SHARED_HOME;
   process.env.TITAN_PYTHON = "python3";
@@ -110,8 +122,13 @@ print(json.dumps({"payload": payload, "args": sys.argv[1:]}))
   }
 });
 
-test("the real Python bridge returns renderable correction and scene data", async () => {
-  const root = fileURLToPath(new URL("../../../", import.meta.url));
+test("the bundled reader matches the canonical Titan bridge", async () => {
+  const canonical = new URL("../../../app/graph/explorer.py", import.meta.url);
+  const bundled = new URL("../assets/explorer.py", import.meta.url);
+  assert.deepEqual(await readFile(bundled), await readFile(canonical));
+});
+
+test("the bundled reader returns renderable correction and scene data without a Titan checkout", async () => {
   const home = await mkdtemp(join(tmpdir(), "titan-explorer-evidence-"));
   const store = join(home, "agents", "pi", "out", "memories");
   const previousText = "🗓️".repeat(121);
@@ -130,7 +147,7 @@ test("the real Python bridge returns renderable correction and scene data", asyn
         { scene_id: "scene", evidence_status: "complete", evidence_version: 1, extraction_user_text: evidence, source_event_ids: ["event"] },
       ])),
     ]);
-    await withHostEnvironment(root, home, async () => {
+    await withHostEnvironment(undefined, home, async () => {
       const host = context(new AbortController().signal);
       const snapshot = await execute({ command: "snapshot", request: { filters: { agent: "pi" } } }, host);
       assert.equal(snapshot.exitCode, 0, snapshot.stderr);

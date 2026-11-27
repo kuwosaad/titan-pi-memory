@@ -1,5 +1,8 @@
+import json
 import unittest
-from unittest.mock import Mock
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from integrations import hermes_titan_plugin as plugin
 
@@ -33,6 +36,36 @@ class HermesPluginTests(unittest.TestCase):
     def capture(self, **turn):
         self.stage(**turn)
         self.end_turn(turn)
+
+    def test_native_connect_preserves_store_and_unrelated_grants_on_upgrade(self):
+        server = {"command": "titan", "args": ["mcp", "--agent", "hermes-archive"]}
+        grants = ["other-server"]
+        profile = {"mcp_servers": {"titan-memory": server},
+                   "plugins": {"entries": {"titan-memory": {"mcp_allowlist": grants}}}}
+        host_config = Mock()
+        host_config.load_config.return_value = profile
+        host_config.get_config_path.return_value = Path("/profiles/archive/config.yaml")
+        modules = {"hermes_cli.config": host_config, "hermes_cli.profiles": Mock()}
+        args = SimpleNamespace(agent=None, configure_providers=True)
+        with patch.dict("sys.modules", modules), patch.object(Path, "is_file", return_value=True), \
+                patch.object(plugin.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run:
+            plugin._connect_profile(args)
+            self.assertEqual(run.call_args.args[0][-3:], ["configure", "--agent", "hermes-archive"])
+            settings = {key: json.loads(value) for (key, value), _ in host_config.set_config_value.call_args_list}
+            server = settings["mcp_servers.titan-memory"]
+            self.assertEqual(server["args"][-3:], ["mcp", "--agent", "hermes-archive"])
+            self.assertTrue(server["args"][0].endswith("titan_runtime.py"))
+            self.assertEqual(settings["plugins.entries.titan-memory.mcp_allowlist"], ["other-server", "titan-memory"])
+            profile["mcp_servers"]["titan-memory"] = server
+            grants.append("titan-memory")
+            host_config.set_config_value.reset_mock()
+            plugin._connect_profile(args)
+            host_config.set_config_value.assert_not_called()
+
+    def test_native_connect_leaves_custom_mcp_endpoints_alone(self):
+        server = {"url": "https://example.invalid"}
+        with self.assertRaisesRegex(SystemExit, "custom titan-memory MCP server"):
+            plugin._existing_store(server, Path("/plugin/titan_runtime.py"))
 
     def test_discards_blocked_failed_and_interrupted_turns(self):
         for outcome in (

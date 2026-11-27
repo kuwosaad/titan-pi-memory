@@ -28,26 +28,7 @@ from typing import Any
 from uuid import uuid4
 
 
-PLUGIN_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_AGENT = "grok"
-
-
-def _pipx_python() -> Path | None:
-    candidate = Path.home() / ".local" / "pipx" / "venvs" / "titan-memory-cli" / "bin" / "python"
-    return candidate if candidate.exists() else None
-
-
-def _reexec_if_needed() -> None:
-    try:
-        import numpy  # noqa: F401
-        import yaml  # noqa: F401
-    except ImportError:
-        runtime = _pipx_python()
-        if runtime is None:
-            print("Titan Python deps missing. Install titan-memory-cli or pip install -e . from titan-pi-memory.", file=sys.stderr)
-            raise SystemExit(2)
-        os.execv(str(runtime), [str(runtime), str(Path(__file__).resolve()), *sys.argv[1:]])
+from titan_grok_env import DEFAULT_AGENT, runtime_env
 
 
 def _load_env_file(path: Path) -> None:
@@ -65,18 +46,12 @@ def _load_env_file(path: Path) -> None:
 
 
 def bootstrap_grok_runtime(agent: str = DEFAULT_AGENT) -> Path:
-    safe = (agent or DEFAULT_AGENT).strip() or DEFAULT_AGENT
-    # Grok is commonly launched from a shell shared with another adapter.  Do
-    # not let that adapter's generic TITAN_HOME leak into this namespace.  A
-    # Grok-specific override remains available for custom installations.
-    home = Path(
-        os.environ.get("GROK_TITAN_HOME")
-        or (Path.home() / ".titan" / "agents" / safe)
-    ).expanduser()
+    isolated = runtime_env(agent)
+    for key in os.environ.keys() - isolated.keys():
+        del os.environ[key]
+    os.environ.update(isolated)
+    home = Path(os.environ["TITAN_HOME"])
     home.mkdir(parents=True, exist_ok=True)
-    os.environ["TITAN_AGENT_NAME"] = safe
-    os.environ["TITAN_HOME"] = str(home)
-    os.environ["TITAN_BASE_DIR"] = str(home)
     _load_env_file(home / ".env")
     extraction = home / "config" / "extraction_models.yaml"
     embedding = home / "config" / "embedding_models.yaml"
@@ -84,8 +59,6 @@ def bootstrap_grok_runtime(agent: str = DEFAULT_AGENT) -> Path:
         os.environ.setdefault("TITAN_EXTRACTION_CONFIG_PATH", str(extraction))
     if embedding.exists():
         os.environ.setdefault("TITAN_EMBEDDING_CONFIG_PATH", str(embedding))
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
     return home
 
 
@@ -103,27 +76,21 @@ def _emit(payload: Any, as_json: bool) -> int:
     return 0
 
 
-def _format_memories(memories: list[Any], heading: str) -> str:
+def _format_memories(memories: list[dict], heading: str) -> str:
     if not memories:
         return "No sufficiently relevant memories found."
     lines = [heading, ""]
     for index, memory in enumerate(memories, start=1):
-        if hasattr(memory, "text"):
-            text = memory.text
-            scene_id = getattr(memory, "scene_id", None)
-            kind = getattr(memory, "type", None)
-        else:
-            text = str(memory.get("text") or "")
-            scene_id = memory.get("scene_id")
-            kind = memory.get("type")
-        prefix = f"[{kind}] " if kind else ""
-        suffix = f"  [scene: {scene_id}]" if scene_id else ""
-        lines.append(f"{index}. {prefix}{text}{suffix}")
+        prefix = f"[{memory['type']}] " if memory.get("type") else ""
+        suffix = ""
+        if memory.get("scene_id"):
+            suffix = f"  [scene: {memory['scene_id']}, source: {memory['source_agent']}]"
+        lines.append(f"{index}. {prefix}{memory['text']}{suffix}")
     return "\n".join(lines)
 
 
 def cmd_query(args: argparse.Namespace) -> int:
-    from app.save_pipeline.pipeline import retrieve_memory_brief
+    from app.save_pipeline.pipeline import retrieve_memory_brief, serialize_public_memory
 
     result = retrieve_memory_brief(
         query=args.query or "",
@@ -132,48 +99,20 @@ def cmd_query(args: argparse.Namespace) -> int:
         date_to=args.date_to,
         include_scenes=False,
     )
+    memories = [serialize_public_memory(m) for m in result.get("memories") or []]
     if args.json:
-        result["memories"] = [
-            {
-                "text": getattr(m, "text", m.get("text") if isinstance(m, dict) else str(m)),
-                "type": getattr(m, "type", m.get("type") if isinstance(m, dict) else None),
-                "scene_id": getattr(m, "scene_id", m.get("scene_id") if isinstance(m, dict) else None),
-                "ts": getattr(m, "ts", m.get("ts") if isinstance(m, dict) else None),
-                "session_id": getattr(m, "session_id", m.get("session_id") if isinstance(m, dict) else None),
-            }
-            for m in result.get("memories") or []
-        ]
-        return _emit(result, True)
-    brief = (result.get("brief") or "").strip()
-    memories = result.get("memories") or []
-    if brief:
-        print(brief)
-        return 0
-    print(_format_memories(memories, f"Titan query ({result.get('count') or 0} hits):"))
+        return _emit({**result, "memories": memories}, True)
+    print(result.get("brief") or _format_memories(memories, f"Titan query ({len(memories)} hits):"))
     return 0
 
 
 def cmd_recent(args: argparse.Namespace) -> int:
+    from app.save_pipeline.pipeline import serialize_public_memory
     from app.storage.memories import get_recent_memories
 
-    memories = get_recent_memories(limit=args.limit)
+    memories = [serialize_public_memory(m) for m in get_recent_memories(limit=args.limit)]
     if args.json:
-        return _emit(
-            {
-                "count": len(memories),
-                "memories": [
-                    {
-                        "text": m.text,
-                        "type": m.type,
-                        "scene_id": m.scene_id,
-                        "ts": m.ts,
-                        "stream": m.stream,
-                    }
-                    for m in memories
-                ],
-            },
-            True,
-        )
+        return _emit({"count": len(memories), "memories": memories}, True)
     print(_format_memories(memories, f"Recent Titan memories ({len(memories)}):"))
     return 0
 
@@ -181,8 +120,9 @@ def cmd_recent(args: argparse.Namespace) -> int:
 def cmd_scene(args: argparse.Namespace) -> int:
     from app.save_pipeline.pipeline import get_scene_context
 
-    result = get_scene_context(args.scene_id)
-    return _emit(result, args.json or True) if args.json else _emit(result, True)
+    result = get_scene_context(args.scene_id, source_agent=args.source_agent)
+    _emit(result, True)
+    return 1 if result.get("error") else 0
 
 
 def cmd_save(args: argparse.Namespace) -> int:
@@ -200,7 +140,8 @@ def cmd_save(args: argparse.Namespace) -> int:
     )
     result = handle_trace_packet(req)
     if args.json:
-        return _emit(result, True)
+        _emit(result, True)
+        return 0 if result.get("stored") else 1
     status = result.get("memory_status") or "unknown"
     recap = (result.get("recap") or "").strip()
     print(f"Titan save: {status}")
@@ -330,9 +271,16 @@ def cmd_patterns(args: argparse.Namespace) -> int:
     return _emit(data, True)
 
 
+def cmd_configure(args: argparse.Namespace) -> int:
+    helper = Path(__file__).with_name("titan_plugin_runtime.py")
+    cmd = [sys.executable, str(helper), "configure", "--agent", args.agent]
+    if args.no_browser:
+        cmd.append("--no-browser")
+    return subprocess.call(cmd)
+
+
 def cmd_graph(args: argparse.Namespace) -> int:
-    titan = os.environ.get("TITAN_CLI_COMMAND") or "titan"
-    cmd = [titan, "graph", "--agent", os.environ.get("TITAN_AGENT_NAME", DEFAULT_AGENT)]
+    cmd = [sys.executable, "-I", "-m", "tools.cli.titan", "graph", "--agent", os.environ.get("TITAN_AGENT_NAME", DEFAULT_AGENT)]
     if args.open:
         cmd.append("--open")
     if args.session_id:
@@ -384,6 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     scene = sub.add_parser("scene", help="Open a scene by id")
     scene.add_argument("scene_id")
+    scene.add_argument("--source-agent", help="Owner returned by query or recent")
 
     save = sub.add_parser("save", help="Store a trace packet")
     save.add_argument("--goal", required=True)
@@ -393,6 +342,8 @@ def build_parser() -> argparse.ArgumentParser:
     save.add_argument("--event-id")
     save.add_argument("--intent")
 
+    configure = sub.add_parser("configure", help="Open the local provider setup form")
+    configure.add_argument("--no-browser", action="store_true", help="Print the setup URL without opening it")
     sub.add_parser("doctor", help="Health / workspace check")
 
     clusters = sub.add_parser("clusters", help="Inspect memory graph clusters")
@@ -426,7 +377,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    _reexec_if_needed()
     parser = build_parser()
     args = parser.parse_args(argv)
     bootstrap_grok_runtime(args.agent)
@@ -438,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         "recent": cmd_recent,
         "scene": cmd_scene,
         "save": cmd_save,
+        "configure": cmd_configure,
         "doctor": cmd_doctor,
         "clusters": cmd_clusters,
         "cortex": cmd_cortex,

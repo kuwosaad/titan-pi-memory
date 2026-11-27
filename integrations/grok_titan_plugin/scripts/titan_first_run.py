@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Sequence, TextIO
 
-DEFAULT_AGENT = "grok"
+from titan_grok_env import DEFAULT_AGENT, agent_home as grok_agent_home
 HOOK_COMMAND = 'python3 "${GROK_PLUGIN_ROOT}/scripts/titan_grok_hook.py"'
 FIRST_PROMPTS = [
     "Use Titan Memory to find prior decisions about this repo.",
@@ -25,24 +25,23 @@ FIRST_PROMPTS = [
 
 def ensure_agent_home(agent: str = DEFAULT_AGENT) -> Path:
     safe_agent = (agent or DEFAULT_AGENT).strip() or DEFAULT_AGENT
-    agent_home = Path.home() / ".titan" / "agents" / safe_agent
+    agent_home = grok_agent_home(safe_agent)
     for sub in ("config", "traces", "out/memories"):
         (agent_home / sub).mkdir(parents=True, exist_ok=True)
     env_path = agent_home / ".env"
-    if not env_path.exists():
-        env_path.write_text(
-            "# Titan agent env for Grok\n"
-            "# Add a provider key so memory extraction can run, for example:\n"
-            "# GEMINI_API_KEY=\n"
-            "# OPENAI_API_KEY=\n",
-            encoding="utf-8",
-        )
+    try:
+        descriptor = os.open(env_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        pass
+    else:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write("# Titan provider settings for Grok. Use /titan-setup to configure.\n")
     return agent_home
 
 
 def onboarding_payload(agent: str = DEFAULT_AGENT) -> dict:
     safe_agent = (agent or DEFAULT_AGENT).strip() or DEFAULT_AGENT
-    agent_home = Path.home() / ".titan" / "agents" / safe_agent
+    agent_home = grok_agent_home(safe_agent)
     return {
         "title": "Titan Memory is ready for Grok.",
         "agent": safe_agent,
@@ -62,8 +61,8 @@ def onboarding_payload(agent: str = DEFAULT_AGENT) -> dict:
                 "description": "Confirm the titan-memory MCP server is connected.",
             },
             {
-                "command": "trust",
-                "description": "Plugins under ~/.grok/plugins/ are trusted automatically; project plugins need trust.",
+                "command": "/titan-setup",
+                "description": "Select extraction and embedding providers in the local form, then restart Grok.",
             },
         ],
         "first_prompts": FIRST_PROMPTS,
@@ -101,7 +100,7 @@ def render_text(payload: dict) -> str:
 
 def run(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
     parser = argparse.ArgumentParser(description="Show Titan Memory for Grok first-run instructions.")
-    parser.add_argument("--agent", default=os.getenv("TITAN_AGENT_NAME", DEFAULT_AGENT))
+    parser.add_argument("--agent", default=DEFAULT_AGENT)
     parser.add_argument("--json", action="store_true", help="Print machine-readable onboarding details.")
     parser.add_argument(
         "--prepare",

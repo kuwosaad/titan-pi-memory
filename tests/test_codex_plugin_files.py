@@ -97,7 +97,7 @@ class CodexPluginFileTests(unittest.TestCase):
 
     def test_hooks_point_at_titan_codex_hook_script(self):
         payload = json.loads((PLUGIN_DIR / "hooks" / "hooks.json").read_text(encoding="utf-8"))
-        script = "python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py"
+        script = 'python3 "${PLUGIN_ROOT}/scripts/titan_codex_hook.py"'
 
         for hook_entries in payload["hooks"].values():
             for entry in hook_entries:

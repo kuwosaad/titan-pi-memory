@@ -4,8 +4,8 @@
   "description": "A lightweight, read-only Titan memory explorer for BB.",
   "type": "module",
   "engines": {
-    "bb": ">=0.42",
-    "bbPluginSdk": ">=0.4.47"
+    "bb": ">=0.50.1",
+    "bbPluginSdk": ">=0.6.157"
   },
   "bb": {
     "name": "Titan Memory Explorer",
@@ -18,17 +18,18 @@
     "host": "./src/host.ts"
   },
   "scripts": {
+    "prepack": "bb plugin build .",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"test/**/*.test.ts\" \"tests/**/*.test.ts\"",
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
     "3d-force-graph": "^1.79.0",
+    "@get-bb/plugin-sdk": "0.6.157",
     "three": "^0.185.1",
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@get-bb/plugin-sdk": "0.4.47",
     "@testing-library/react": "^16.3.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/jsdom": "^30.0.0",
@@ -43,5 +44,11 @@
     "react-dom": "^19.2.8",
     "tsx": "^4.20.6",
     "typescript": "^5.7.0"
-  }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "src/",
+    "assets/"
+  ]
 }

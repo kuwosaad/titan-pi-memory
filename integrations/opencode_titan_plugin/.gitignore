@@ -1,0 +1,5 @@
+!dist/
+dist/*
+!dist/server.js
+!dist/titan_v2_spool_plugin.ts
+node_modules/

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Wrapper so Grok can call Pi-parity Titan tools as `titan-grok`.
+# Run Grok commands using the Python environment installed with this plugin.
 SOURCE=$0
 while [ -L "$SOURCE" ]; do
   DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
@@ -10,8 +10,6 @@ while [ -L "$SOURCE" ]; do
   esac
 done
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd)
-TITAN_PY="${TITAN_PYTHON:-$HOME/.local/pipx/venvs/titan-memory-cli/bin/python}"
-if [ ! -x "$TITAN_PY" ]; then
-  TITAN_PY="python3"
-fi
-exec "$TITAN_PY" "$SCRIPT_DIR/titan_grok_tools.py" "$@"
+set -e
+TITAN_PY=$(python3 "$SCRIPT_DIR/titan_plugin_runtime.py" --runtime-python)
+exec "$TITAN_PY" -Es "$SCRIPT_DIR/titan_grok_tools.py" "$@"

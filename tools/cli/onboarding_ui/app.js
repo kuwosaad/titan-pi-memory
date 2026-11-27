@@ -70,8 +70,8 @@
       const agent = catalog.agents.find(a => a.id === selection.agent);
       const ext = catalog.extraction.find(p => p.id === selection.extraction.backend);
       const emb = catalog.embedding.find(p => p.id === selection.embedding.backend);
-      content.innerHTML = heading('04 / review', 'Ready to remember.', 'Take one last look before installing Titan.') + `<dl class="review"><div><dt>Agent</dt><dd>${esc(agent?.label || selection.agent)}</dd></div><div><dt>Extraction</dt><dd>${esc(ext?.label || '')} · ${esc(selection.extraction.model)}</dd></div><div><dt>Embeddings</dt><dd>${esc(emb?.label || '')} · ${esc(selection.embedding.model)}</dd></div></dl><p class="review-note">Installing checks your selected providers with small test requests and verifies local Ollama models. Cloud requests may incur normal API charges.</p>`;
-      buttons(() => {page--;render();}, install, 'Install Titan');
+      content.innerHTML = heading('04 / review', 'Ready to remember.', catalog.providers_only ? 'Review the providers for this agent.' : 'Take one last look before installing Titan.') + `<dl class="review"><div><dt>Agent</dt><dd>${esc(agent?.label || selection.agent)}</dd></div><div><dt>Extraction</dt><dd>${esc(ext?.label || '')} · ${esc(selection.extraction.model)}</dd></div><div><dt>Embeddings</dt><dd>${esc(emb?.label || '')} · ${esc(selection.embedding.model)}</dd></div></dl><p class="review-note">Installing checks your selected providers with small test requests and verifies local Ollama models. Cloud requests may incur normal API charges.</p>`;
+      buttons(() => {page--;render();}, install, catalog.providers_only ? 'Save providers' : 'Install Titan');
     }
     focusTitle();
   }
@@ -102,7 +102,7 @@
     const cancel = document.querySelector('#cancel');
     button.disabled = true; back.disabled = true; cancel.disabled = true;
     button.textContent = 'Checking providers…'; error('');
-    const restore = () => { button.disabled = false; back.disabled = false; cancel.disabled = false; button.textContent = 'Install Titan →'; };
+    const restore = () => { button.disabled = false; back.disabled = false; cancel.disabled = false; button.textContent = catalog.providers_only ? 'Save providers →' : 'Install Titan →'; };
     const payload = {...selection, keys: Object.fromEntries(Object.entries(keys).filter(([,value]) => value.trim()))};
     try {
       const validation = await api('/api/validate', payload);
@@ -143,7 +143,7 @@
   };
   async function init() {
     if (!token) throw new Error('This setup link is missing its session token. Return to your terminal and open the provided link.');
-    catalog = await api('/api/state'); selection = structuredClone(catalog.selected); render();
+    catalog = await api('/api/state'); selection = structuredClone(catalog.selected); if (catalog.providers_only) page = 1; render();
   }
   init().catch(err => { content.innerHTML = heading('setup unavailable', 'Could not open setup.', 'Return to your terminal and try again.'); error(err.message); });
 })();

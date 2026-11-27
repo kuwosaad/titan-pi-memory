@@ -37,6 +37,9 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Verify native plugin runtimes
+        run: python tools/release/sync_plugin_runtime.py --check
+
       - name: Prepare bundled runtime
         run: npm --prefix packages/titan-memory-cli run prepack
 

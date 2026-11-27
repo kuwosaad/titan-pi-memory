@@ -1,9 +1,13 @@
 """Capture Hermes Agent turns through its configured Titan MCP connection."""
 
 import hashlib
+import json
 import logging
 import re
+import subprocess
+import sys
 from collections import OrderedDict
+from pathlib import Path
 from threading import Lock
 
 
@@ -49,7 +53,77 @@ def _bounded(text):
     return clipped.rstrip()
 
 
+def _connect_options(parser):
+    parser.add_argument("--agent", help="Titan store name for this Hermes profile.")
+    parser.add_argument("--configure-providers", action="store_true",
+                        help="Open Titan's extraction and embedding provider setup.")
+
+
+def _existing_store(server, helper):
+    if server is None:
+        return None
+    if isinstance(server, dict) and set(server) == {"command", "args"}:
+        arguments = server["args"]
+        if isinstance(arguments, list):
+            if server["command"] == "titan":
+                prefix = ["mcp", "--agent"]
+            else:
+                prefix = [str(helper), "mcp", "--agent"]
+            if arguments[:-1] == prefix:
+                return arguments[-1]
+    raise SystemExit("This profile already has a custom titan-memory MCP server. "
+                     "Review that server in the Hermes configuration before connecting.")
+
+
+def _connect_profile(args):
+    from hermes_cli.config import get_config_path, load_config, set_config_value
+    from hermes_cli.profiles import get_active_profile_name
+
+    helper = Path(__file__).resolve().with_name("titan_runtime.py")
+    if not helper.is_file():
+        raise SystemExit("Titan's bundled launcher is missing. Reinstall this plugin release.")
+    config = load_config()
+    server = (config.get("mcp_servers") or {}).get("titan-memory")
+    previous_agent = _existing_store(server, helper)
+    agent = args.agent or previous_agent
+    if not agent:
+        profile = get_active_profile_name()
+        if profile == "default":
+            agent = "hermes"
+        elif profile == "custom":
+            home = str(get_config_path().parent.resolve())
+            agent = "hermes-custom-" + hashlib.sha256(home.encode()).hexdigest()[:10]
+        else:
+            slug = re.sub(r"[^a-z0-9]+", "-", profile).strip("-")
+            agent = "hermes-" + slug
+            if slug != profile:
+                agent += "-" + hashlib.sha256(profile.encode()).hexdigest()[:10]
+    if not isinstance(agent, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", agent):
+        raise SystemExit("Choose a Titan store name made of lowercase letters, numbers, and hyphens.")
+    entry = (config.get("plugins") or {}).get("entries", {}).get("titan-memory", {})
+    grants = entry.get("mcp_allowlist", [])
+    if not isinstance(grants, list):
+        raise SystemExit("Expected a list in plugins.entries.titan-memory.mcp_allowlist.")
+    python = getattr(sys, "_base_executable", None) or sys.executable
+    local_server = {"command": python, "args": [str(helper), "mcp", "--agent", agent]}
+    # Prepare outside the MCP startup deadline, before changing the active profile.
+    setup_args = ["configure", "--agent", agent] if args.configure_providers else ["--runtime-python"]
+    result = subprocess.run([sys.executable, str(helper), *setup_args],
+                            stdout=None if args.configure_providers else subprocess.DEVNULL)
+    if result.returncode:
+        raise SystemExit(result.returncode)
+    if server != local_server:
+        set_config_value("mcp_servers.titan-memory", json.dumps(local_server))
+    if "titan-memory" not in grants:
+        set_config_value("plugins.entries.titan-memory.mcp_allowlist", json.dumps([*grants, "titan-memory"]))
+    print(f"Titan is connected to {get_config_path()} using store {agent}. Restart Hermes chat or gateway.")
+    if not args.configure_providers:
+        print("To select extraction and embedding providers, run hermes titan-connect --configure-providers.")
+
+
 def register(ctx):
+    ctx.register_cli_command("titan-connect", "Connect this profile to local Titan and allow turn capture.",
+                             _connect_options, _connect_profile)
     pending = OrderedDict()
     pending_lock = Lock()
 
@@ -102,7 +176,7 @@ def register(ctx):
         try:
             result = ctx.call_mcp("titan-memory", "store_trace_packet", packet, timeout=CAPTURE_TIMEOUT_SECONDS)
         except PermissionError:
-            LOGGER.warning("Titan capture needs titan-memory in the plugin MCP allowlist.")
+            LOGGER.warning("Run hermes titan-connect to grant Titan capture in this profile.")
         except Exception:
             LOGGER.warning("Titan capture could not reach the titan-memory MCP server.")
         else:

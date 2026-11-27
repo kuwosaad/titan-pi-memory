@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import tempfile
@@ -7,8 +8,6 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-
-import httpx
 
 from .common import _chmod_private, agent_name, fallback_dir, read_state
 
@@ -35,6 +34,28 @@ def _spool(events: list[dict[str, Any]], name: str) -> Path:
         tmp.unlink(missing_ok=True)
 
 
+def _post(name: str, route: str, payload: dict[str, Any], timeout: float) -> dict[str, Any] | None:
+    state = read_state(name)
+    if state is None:
+        return None
+    connection = http.client.HTTPConnection("127.0.0.1", state.port, timeout=timeout)
+    try:
+        connection.request(
+            "POST", route, body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-Titan-Claude-Token": state.token},
+        )
+        response = connection.getresponse()
+        if response.status == 200:
+            result = json.loads(response.read())
+            if isinstance(result, dict) and result.get("ok") is True:
+                return result
+    except (OSError, ValueError, http.client.HTTPException):
+        pass
+    finally:
+        connection.close()
+    return None
+
+
 def recall_context(
     query: str = "",
     *,
@@ -46,47 +67,17 @@ def recall_context(
 ) -> dict[str, Any] | None:
     """Read compact recall from an already-running owner; never starts or spools."""
 
-    name = name or agent_name()
-    state = read_state(name)
-    if state is None:
-        return None
-    payload: dict[str, Any] = {
-        "query": query,
-        "session_id": session_id,
-        "sources": sources,
-        "limit": limit,
-    }
-    try:
-        response = httpx.post(
-            f"http://127.0.0.1:{state.port}/recall",
-            headers={"X-Titan-Claude-Token": state.token},
-            json=payload,
-            timeout=timeout,
-        )
-        if response.status_code != 200:
-            return None
-        result = response.json()
-        return result if isinstance(result, dict) and result.get("ok") is True else None
-    except (httpx.HTTPError, ValueError):
-        return None
+    return _post(
+        name or agent_name(), "/recall",
+        {"query": query, "session_id": session_id, "sources": sources, "limit": limit}, timeout,
+    )
 
 
 def submit_events(events: list[dict[str, Any]], *, name: str | None = None, timeout: float = 1.5) -> bool:
     if not events:
         return True
     name = name or agent_name()
-    state = read_state(name)
-    if state is not None:
-        try:
-            response = httpx.post(
-                f"http://127.0.0.1:{state.port}/events",
-                headers={"X-Titan-Claude-Token": state.token},
-                json={"events": events},
-                timeout=timeout,
-            )
-            if response.status_code == 200 and response.json().get("ok") is True:
-                return True
-        except (httpx.HTTPError, ValueError):
-            pass
+    if _post(name, "/events", {"events": events}, timeout) is not None:
+        return True
     _spool(events, name)
     return False
