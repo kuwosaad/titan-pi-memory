@@ -5,14 +5,4 @@ description: Open or describe the Titan memory graph for the Grok agent. Use whe
 
 # Titan Graph
 
-Show the local Titan graph for agent `grok`.
-
-## Steps
-
-1. Run `titan-grok graph --open` (or `titan graph --agent grok --open`).
-2. Optionally `titan-grok clusters` for a text map first.
-
-## Notes
-
-- Graph data lives under `~/.titan/agents/grok`.
-- For cluster synthesis inside chat, prefer `/titan-clusters` or `inspect_clusters` / `analyze_clusters`.
+Resolve `../../scripts/titan_mcp_launcher.py` relative to this skill's directory and run `python3 "<resolved script path>" graph --open`. The command prints the local graph address. For a text summary, use `titan-memory__inspect_clusters`.

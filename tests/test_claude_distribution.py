@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -71,26 +72,46 @@ class ClaudeDistributionTests(unittest.TestCase):
                 "hooks/hooks.json",
                 "scripts/titan_claude_hook.py",
                 "skills/titan-memory-workflow/SKILL.md",
-                "package.json",
-                "package-lock.json",
+                "scripts/titan_runtime.py",
+                "scripts/titan_claude_launcher.py",
             ):
                 self.assertTrue((target / "plugins" / "titan-memory" / relative).exists(), relative)
 
-    def test_plugin_pins_managed_runtime_dependency(self):
-        package = json.loads((PLUGIN / "package.json").read_text(encoding="utf-8"))
-        lock = json.loads((PLUGIN / "package-lock.json").read_text(encoding="utf-8"))
+    def test_local_marketplace_documents_qualified_plugin_id(self):
+        readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"claude plugin install {CLAUDE_PLUGIN_ID}", readme)
 
-        self.assertEqual(package["dependencies"], {"titan-memory-cli": "0.1.4"})
-        locked = lock["packages"]["node_modules/titan-memory-cli"]
-        self.assertEqual(locked["version"], "0.1.4")
-        self.assertTrue(locked["integrity"].startswith("sha512-"))
+    def _readme_install_commands(self):
+        readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
+        block = readme.split("## Install", 1)[1].split("```bash\n", 1)[1].split("```", 1)[0]
+        return [line.split() for line in block.splitlines() if line.strip()]
+
+    def test_readme_marketplace_path_is_one_claude_accepts_and_holds_the_manifest(self):
+        add, install = self._readme_install_commands()
+        self.assertEqual(add[:4], ["claude", "plugin", "marketplace", "add"])
+        source = add[4]
+        # Claude Code rejects a bare "." as a marketplace source.
+        self.assertTrue(source.startswith(("./", "../", "/", "~")), source)
+        manifest = json.loads((ROOT / source / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        plugin, marketplace = install[3].split("@")
+        self.assertEqual(marketplace, manifest["name"])
+        self.assertIn(plugin, [entry["name"] for entry in manifest["plugins"]])
+
+    @unittest.skipUnless(shutil.which("claude"), "Claude Code CLI is not installed")
+    def test_readme_install_commands_work_verbatim_from_the_repository_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "HOME": tmp, "CLAUDE_CONFIG_DIR": str(Path(tmp) / ".claude")}
+            for command in self._readme_install_commands():
+                result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True,
+                                        timeout=120, check=False)
+                self.assertEqual(result.returncode, 0, f"{command}: {result.stdout}{result.stderr}")
 
     def test_python_package_declares_runtime_dependency_and_claude_files(self):
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
         self.assertIn('"rich"', pyproject)
         self.assertIn('"integrations.claude_titan_plugin"', pyproject)
-        for pattern in (".claude-plugin/*.json", "package-lock.json", "skills/*/SKILL.md"):
+        for pattern in (".claude-plugin/*.json", "scripts/*.py", "skills/*/SKILL.md"):
             self.assertIn(pattern, pyproject)
 
     def test_setup_routes_claude_to_dedicated_setup(self):

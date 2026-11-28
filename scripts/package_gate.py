@@ -8,6 +8,7 @@ materializing the exact files, and bounded subprocess execution.
 from __future__ import annotations
 
 import argparse
+import filecmp
 import json
 import os
 import shutil
@@ -15,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Iterable, Sequence
 
@@ -151,6 +153,23 @@ def _run_canonical_audit(package_root: Path) -> None:
         raise GateError(f"canonical runtime audit timed out after {SUBPROCESS_TIMEOUT_SEC}s") from exc
     if result.returncode:
         raise GateError((result.stderr or result.stdout).strip())
+    # Each native launcher ships a copy of the engine. Check the nested payloads
+    # against the loose files the content audit just inspected.
+    runtime = package_root / "runtime"
+    first, *others = sorted(runtime.rglob("titan_engine.zip"))
+    for bundle in others:
+        if not filecmp.cmp(first, bundle, shallow=False):
+            raise GateError(f"{bundle.relative_to(runtime)}: plugins must ship identical engine archives")
+    try:
+        with zipfile.ZipFile(first) as archive:
+            if not {"requirements.txt", "tools/cli/titan.py", "entrypoints/mcp_server.py"} <= set(archive.namelist()):
+                raise GateError(f"{first.relative_to(runtime)}: incomplete engine zip")
+            for member in archive.infolist():
+                source = _root_path(runtime, member.filename)
+                if not source.is_file() or source.read_bytes() != archive.read(member):
+                    raise GateError(f"{first.relative_to(runtime)}: engine member differs: {member.filename}")
+    except zipfile.BadZipFile as error:
+        raise GateError(f"{first.relative_to(runtime)}: invalid engine zip") from error
 
 
 def scan_archive(archive: Path) -> list[str]:

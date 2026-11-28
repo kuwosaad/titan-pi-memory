@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -82,11 +83,12 @@ class RuntimeState:
 
 
 def agent_name() -> str:
-    return (
-        os.getenv("TITAN_AGENT_NAME")
-        or os.getenv("CLAUDE_PLUGIN_OPTION_agent_name")
-        or "claude-code"
-    ).strip()
+    name = (os.getenv("TITAN_AGENT_NAME") or os.getenv("CLAUDE_PLUGIN_OPTION_AGENT_NAME")
+            or os.getenv("CLAUDE_PLUGIN_OPTION_agent_name") or "claude-code")
+    normalized = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if not normalized:
+        raise ValueError("Agent name must contain at least one letter or number.")
+    return normalized
 
 
 def data_root() -> Path:

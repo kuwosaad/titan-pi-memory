@@ -8,29 +8,27 @@ graph subset. Hide the memory list for more graph space; use numbered pages or
 Go to page to jump through matching records. It reads existing stores; opening it never generates embeddings or
 changes memories. The existing agent integrations continue handling capture.
 
-## Local setup
+## Connect
 
-Run these commands from this directory in a Titan source checkout:
+Install the **Titan Memory Explorer** plugin package in bb 0.50.1 or later.
+The thread host needs Python 3.10 or later. Opening **Titan Memory** reads
+existing memories from that host's `~/.titan`. The packaged host bundle
+contains the Python reader, including for remote thread hosts.
+
+If you received a staged release directory from the installer, run
+`bb plugin install /absolute/path/to/the/release`. When building from a Titan source checkout, run this
+command from `integrations/bb_titan_memory_plugin` on the machine running bb:
 
 ```bash
-npm ci --ignore-scripts
-npm run check
 python3 scripts/install-local.py --install
 ```
 
-Set the plugin's **Titan root on target host** setting to the absolute path of
-the Titan checkout containing `app/graph/explorer.py`. Python 3.10+ is required;
-the explorer helper uses only the standard library. Set **Shared Titan home**
-only if your memories are outside the default `~/.titan` location. These paths
-refer to the machine running the selected BB thread.
-
-The installer builds a separate release under `~/.bb/local-plugin-builds/`
-before switching BB to it. Keep the installed copy separate from the source
-checkout: BB's live Tailwind scanner can block its server while reading parent
-Git ignore files on a stalled filesystem. Do not run `bb plugin dev` or reload
-directly from this working checkout. Run the installer again for local updates;
-previous release directories remain available for rollback. Without `--install`,
-the script only prepares and validates the build.
+The installer stages and builds a separate release under
+`~/.bb/local-plugin-builds/` before switching bb to it. Omit `--install` to
+build the release for inspection. Repeat the command to update. For development,
+the canonical reader lives in `app/graph/explorer.py`. Copy it into
+`assets/explorer.py` when updating it. The tests check that they match and the
+SDK build embeds the asset in `dist/host.js`.
 
 Open **Titan Memory** from the thread's panel actions to browse beside chat.
 The graph shows up to 150 matching memories and 450 links. Use the relationship
@@ -54,7 +52,7 @@ exact cancellation and are not sent to Titan. Data requests for the same thread
 remain independent.
 
 The server resolves the host from the BB thread's environment, falling back to
-BB's primary host. The host starts exactly one bounded process per request:
+BB's primary host. For an explicit checkout override, the host uses this command:
 
 ```text
 python3 -m app.graph.explorer < request.json
@@ -68,8 +66,7 @@ request, so changing them does not require restarting BB. If a setting is empty,
 the host falls back to these target-host environment variables:
 
 - `TITAN_ROOT`: a Titan source checkout, added to `PYTHONPATH` and used as the
-  process working directory. Omit it when Titan is installed as a Python
-  package.
+  process working directory. Leave it empty to use the bundled reader.
 - `TITAN_SHARED_HOME` or `TITAN_HOME`: the shared Titan home containing
   `agents/`. An agent-specific `.../agents/<name>` value is normalized to its
   shared parent. The helper defaults to `~/.titan` when omitted.

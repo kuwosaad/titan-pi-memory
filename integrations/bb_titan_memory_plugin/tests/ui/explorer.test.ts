@@ -67,7 +67,7 @@ function handlers(overrides: Record<string, (input: any) => any> = {}) {
 }
 
 function mount(rpc: any = handlers()) {
-  return renderSlot(action, { threadId: "thread-123", params: null }, { rpc, context: { threadId: "thread-123" } });
+  return renderSlot(action, { threadId: "thread-123", params: null, environment: null }, { rpc, context: { threadId: "thread-123" } });
 }
 
 function calls(view: any, method: string) {

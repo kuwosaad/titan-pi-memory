@@ -67,28 +67,13 @@ class PiExtensionContractTests(unittest.TestCase):
         self.assertNotIn("const dedupBlock", self.source)
         self.assertNotIn("dedup_buffer_size", self.dashboard_source)
 
-    def test_server_selects_a_compatible_python_instead_of_first_path_match(self):
-        self.assertIn("function pythonCandidates()", self.source)
-        self.assertIn("process.env.TITAN_PYTHON", self.source)
-        self.assertIn("assert sys.version_info >= (3, 10)", self.source)
-        self.assertIn("const proc = spawn(pythonCommand, [serverScript]", self.source)
-        self.assertNotIn('spawn("python3", [serverScript]', self.source)
+    def test_managed_interpreter_is_used_for_server_and_dashboard(self):
+        self.assertIn('[RUNTIME_HELPER, "--runtime-python"]', self.source)
+        self.assertIn('const proc = spawn(pythonCommand, [serverScript]', self.source)
+        self.assertNotIn('"pip", "install"', self.source)
 
-    def test_dashboard_rich_install_is_verified_and_has_user_scope_fallback(self):
-        self.assertIn("async function ensureRichDependency", self.source)
-        self.assertIn('["-m", "pip", "install", "--user", "rich"]', self.source)
-        self.assertIn('["-m", "pip", "install", "--user", "--break-system-packages", "rich"]', self.source)
-        self.assertIn("const richReady = await ensureRichDependency(pythonCommand);", self.source)
-        self.assertIn("if (!richReady)", self.source)
-        self.assertIn('scriptArgs.push("--plain");', self.source)
-        self.assertIn("Rich is unavailable; launching the plain-text dashboard.", self.source)
-
-    def test_dashboard_rich_mode_is_gated_by_verified_import(self):
-        dashboard = self.source[self.source.index('pi.registerCommand("titan-dashboard"'):]
-        check = dashboard.index("const richReady = await ensureRichDependency(pythonCommand);")
-        launch = dashboard.index("const result = await runProcess(pythonCommand, scriptArgs")
-        self.assertLess(check, launch)
-        self.assertIn("if (await canImportRich()) return true;", self.source)
+    def test_dashboard_checks_rich_in_its_managed_runtime(self):
+        self.assertIn('runProcess(pythonCommand, ["-c", "import rich"])', self.source)
 
     def test_dashboard_unavailable_rich_uses_explicit_plain_mode(self):
         dashboard = self.source[self.source.index('pi.registerCommand("titan-dashboard"'):]

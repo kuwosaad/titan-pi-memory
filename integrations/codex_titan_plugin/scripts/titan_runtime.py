@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Mapping, NamedTuple
 
@@ -138,6 +139,10 @@ def exec_managed_runtime(
         f"{runtime.runtime_root}{os.pathsep}{existing_path}" if existing_path else str(runtime.runtime_root)
     )
     argv = build_launch_argv(runtime, agent)
+    if exec_fn is os.execvpe and os.name == "nt":
+        # Windows has no real exec: os.exec* there neither quotes arguments containing
+        # spaces nor keeps the caller's stdio attached, which breaks MCP servers.
+        raise SystemExit(subprocess.call(argv, env=launch_env))
     exec_fn(argv[0], argv, launch_env)
     return runtime
 

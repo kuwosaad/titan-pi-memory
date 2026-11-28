@@ -5,8 +5,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.js\"",
-            "timeout": 5
+            "command": "python3",
+            "timeout": 5,
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.py"
+            ]
           }
         ]
       }
@@ -16,8 +19,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.js\"",
-            "timeout": 5
+            "command": "python3",
+            "timeout": 5,
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.py"
+            ]
           }
         ]
       }
@@ -28,8 +34,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.js\"",
-            "timeout": 3
+            "command": "python3",
+            "timeout": 3,
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.py"
+            ]
           }
         ]
       }
@@ -40,8 +49,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.js\"",
-            "timeout": 3
+            "command": "python3",
+            "timeout": 3,
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.py"
+            ]
           }
         ]
       }
@@ -51,8 +63,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.js\"",
-            "timeout": 3
+            "command": "python3",
+            "timeout": 3,
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.py"
+            ]
           }
         ]
       }
@@ -62,8 +77,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.js\"",
-            "timeout": 5
+            "command": "python3",
+            "timeout": 5,
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.py"
+            ]
           }
         ]
       }
@@ -73,8 +91,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.js\"",
-            "timeout": 5
+            "command": "python3",
+            "timeout": 5,
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.py"
+            ]
           }
         ]
       }
@@ -84,8 +105,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.js\"",
-            "timeout": 2
+            "command": "python3",
+            "timeout": 2,
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.py"
+            ]
           }
         ]
       }

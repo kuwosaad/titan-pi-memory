@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Small Codex MCP entrypoint for Titan's managed runtime."""
+"""Start the Codex MCP server from its installed plugin directory."""
 from __future__ import annotations
 
 import argparse
 import importlib.util
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Sequence, TextIO
@@ -41,7 +42,20 @@ def run(
 
     runtime = _load_runtime_module()
     try:
-        managed = runtime.load_manifest(env=environment)
+        managed_runtime_requested = any(
+            environment.get(name)
+            for name in ("TITAN_RUNTIME_MANIFEST", "TITAN_RUNTIME_HOME", "TITAN_RUNTIME_DIR")
+        )
+        if not managed_runtime_requested:
+            helper = Path(__file__).with_name("titan_plugin_runtime.py")
+            command = [sys.executable, str(helper), "mcp", "--agent", args.agent]
+            launch_env = runtime.build_environment(args.agent, environment)
+            # Windows has no real exec: os.exec* there neither quotes arguments containing
+            # spaces nor keeps the caller's stdio attached, which breaks MCP servers.
+            if exec_fn is os.execvpe and os.name == "nt":
+                return subprocess.call(command, env=launch_env)
+            exec_fn(command[0], command, launch_env)
+            return 0
         runtime.exec_managed_runtime(
             args.agent,
             env=environment,
@@ -51,14 +65,9 @@ def run(
         print("Titan Memory MCP could not start.", file=stderr)
         print(f"- {exc}", file=stderr)
         print("", file=stderr)
-        print("Install or repair Titan, then restart Codex:", file=stderr)
-        print("  titan setup codex", file=stderr)
-        print("  titan codex verify", file=stderr)
+        print("Check the configured runtime manifest or remove that override to use the plugin runtime.", file=stderr)
         return 127
 
-    # exec_managed_runtime replaces this process. This branch exists only for
-    # test doubles that return from execvpe.
-    print(f"[titan-mcp-launcher] launching managed runtime {managed.version}", file=stderr)
     return 0
 
 

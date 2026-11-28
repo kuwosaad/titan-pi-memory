@@ -11,11 +11,13 @@ The default configuration is:
 - `recall_mode = automatic`
 - `retention_days = 30` for adapter raw traces
 
+The optional OpenCode Go API key is a sensitive Claude plugin setting. Claude stores it in the platform credential store and forwards it to the runtime. The configured extraction provider receives the trace content it needs to extract memories. The default embedding provider is local Ollama.
+
 The adapter captures redacted user/assistant messages and lifecycle metadata. It does not capture tool arguments or results unless `capture_tool_io` is enabled.
 
 ## Storage
 
-- Managed plugin runtime, daemon metadata, private logs, and fallback traces live under `${CLAUDE_PLUGIN_DATA}`.
+- Daemon metadata, private logs, and fallback traces live under `${CLAUDE_PLUGIN_DATA}`.
 - Extracted memories, scenes, and indexes live in Titan’s established namespace under `~/.titan/agents/<agent_name>/`.
 - Foreign agent namespaces are read-only during federated recall. Claude writes only to its active namespace.
 

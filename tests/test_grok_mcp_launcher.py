@@ -1,95 +1,41 @@
-import importlib.util
+import json
 import os
+from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-LAUNCHER_PATH = ROOT_DIR / "integrations" / "grok_titan_plugin" / "scripts" / "titan_mcp_launcher.py"
-
-
-def _load_launcher():
-    spec = importlib.util.spec_from_file_location("grok_titan_mcp_launcher", LAUNCHER_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-launcher = _load_launcher()
-
-
-class ExecCaptured(Exception):
-    def __init__(self, argv, env):
-        self.argv = list(argv)
-        self.env = dict(env)
+SCRIPTS = Path(__file__).resolve().parents[1] / "integrations" / "grok_titan_plugin" / "scripts"
 
 
 class GrokMcpLauncherTests(unittest.TestCase):
-    def test_runtime_env_ignores_ambient_adapter_home(self):
-        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
-            launcher.Path, "home", return_value=Path(tmp_dir)
-        ):
-            env = launcher.build_runtime_env(
-                "grok",
-                {
-                    "TITAN_AGENT_NAME": "codex",
-                    "TITAN_HOME": str(Path(tmp_dir) / "codex-home"),
-                    "TITAN_BASE_DIR": str(Path(tmp_dir) / "codex-home"),
-                },
+    def test_installed_launcher_runs_its_sibling_runtime_in_the_grok_namespace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin = Path(tmp) / "plugin" / "scripts"
+            plugin.mkdir(parents=True)
+            for filename in ("titan_mcp_launcher.py", "titan_grok_env.py"):
+                shutil.copy2(SCRIPTS / filename, plugin / filename)
+            (plugin / "titan_plugin_runtime.py").write_text(
+                "import json, os, sys\n"
+                "print(json.dumps([sys.argv[1:], os.environ['TITAN_AGENT_NAME'], "
+                "os.environ['TITAN_HOME'], os.environ['TITAN_SPOOL_DIR'], os.getenv('TITAN_MEMORY_DB_PATH')]))\n"
             )
-
-        expected_home = str(Path(tmp_dir) / ".titan" / "agents" / "grok")
-        self.assertEqual(env["TITAN_AGENT_NAME"], "grok")
-        self.assertEqual(env["TITAN_HOME"], expected_home)
-        self.assertEqual(env["TITAN_BASE_DIR"], expected_home)
-
-    def test_runtime_env_honors_explicit_grok_home_override(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            explicit_home = str(Path(tmp_dir) / "grok-work")
-            env = launcher.build_runtime_env(
-                "grok",
-                {
-                    "TITAN_AGENT_NAME": "codex",
-                    "TITAN_HOME": str(Path(tmp_dir) / "codex-home"),
-                    "TITAN_BASE_DIR": str(Path(tmp_dir) / "codex-home"),
-                    "GROK_TITAN_HOME": explicit_home,
-                },
-            )
-
-        self.assertEqual(env["TITAN_AGENT_NAME"], "grok")
-        self.assertEqual(env["TITAN_HOME"], explicit_home)
-        self.assertEqual(env["TITAN_BASE_DIR"], explicit_home)
-
-    def test_launcher_default_agent_ignores_ambient_agent(self):
-        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
-            launcher.Path, "home", return_value=Path(tmp_dir)
-        ):
-            def exec_fn(_file, argv, env):
-                raise ExecCaptured(argv, env)
-
-            with self.assertRaises(ExecCaptured) as raised:
-                launcher.run(
-                    [],
-                    base_env={
-                        "TITAN_AGENT_NAME": "codex",
-                        "TITAN_HOME": str(Path(tmp_dir) / "codex-home"),
-                    },
-                    which_fn=lambda _name: None,
-                    run_fn=lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "ok", ""),
-                    exec_fn=exec_fn,
-                )
-
-        self.assertEqual(raised.exception.argv[-2:], ["--agent", "grok"])
-        expected_home = str(Path(tmp_dir) / ".titan" / "agents" / "grok")
-        self.assertEqual(raised.exception.env["TITAN_AGENT_NAME"], "grok")
-        self.assertEqual(raised.exception.env["TITAN_HOME"], expected_home)
-        self.assertEqual(raised.exception.env["TITAN_BASE_DIR"], expected_home)
+            custom_home = Path(tmp) / "custom"
+            for overrides, home in [({}, Path(tmp) / ".titan" / "agents" / "grok"),
+                                    ({"GROK_TITAN_HOME": str(custom_home)}, custom_home)]:
+                with self.subTest(overrides=overrides):
+                    # Windows needs SYSTEMROOT to start Python and USERPROFILE for Path.home().
+                    windows = {key: os.environ[key] for key in ("SYSTEMROOT", "TEMP", "TMP") if key in os.environ}
+                    env = {**windows, "HOME": tmp, "USERPROFILE": tmp, "TITAN_AGENT_NAME": "codex",
+                           "TITAN_HOME": "/unused", "TITAN_SPOOL_DIR": "/unused",
+                           "TITAN_MEMORY_DB_PATH": "/unused.db", **overrides}
+                    proc = subprocess.run([sys.executable, str(plugin / "titan_mcp_launcher.py")],
+                                          env=env, check=True, capture_output=True, text=True)
+                    self.assertEqual(json.loads(proc.stdout),
+                                     [["mcp", "--agent", "grok"], "grok", str(home), str(home / "traces"), None])
 
 
 if __name__ == "__main__":

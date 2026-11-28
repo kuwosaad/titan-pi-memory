@@ -1,118 +1,31 @@
 # Titan Memory for Codex
 
-Your Codex agent should remember.
+Titan remembers project decisions and retrieves the conversation that supports each memory. Codex writes its own memories under `~/.titan/agents/codex` and can read other Titan namespaces with source attribution.
 
-Titan Memory gives Codex durable project memory: prior decisions, scene recovery, recent work, graph inspection, pattern workflows, and passive session capture. It runs locally through MCP and writes Codex data under your own `~/.titan/agents/codex` directory. Recall is read-only and federated across all discovered agent namespaces.
+## Install in Codex
 
-## Install
+From the root of this Titan checkout, use Codex’s marketplace commands:
 
-Run one command:
-
-```bash
-npx -y titan-memory-cli@latest setup codex
+```sh
+codex plugin marketplace add .
+codex plugin add titan-memory@titan-pi-memory
 ```
 
-That command prepares Titan, creates the Codex memory folder, asks which extraction model to use, configures the required `nomic-embed-text:v1.5` embedding model, installs this plugin, patches Codex MCP config, materializes the stable marketplace under `~/.titan/codex-marketplace`, and runs a health check.
+Open a new Codex session and ask **“Set up Titan Memory for Codex.”** The plugin starts its own local MCP runtime using Python 3.10 or newer. The first launch requires internet access to install its Python dependencies. Later launches reuse the installed runtime.
 
-Then do the one manual safety step Codex requires:
+The setup skill opens a local configuration form. Choose an extraction provider and an embedding provider. Enter any required API key in the form. With the default OpenCode Go extractor and Ollama embeddings, supply an OpenCode Go key and run Ollama locally with `nomic-embed-text:v1.5` installed. Run `ollama pull nomic-embed-text:v1.5` to download that model. Restart Codex after saving provider settings.
 
-```text
-open Codex
-/hooks
-approve Titan Memory
-```
+## Verify the connection
 
-Advanced manual install, only if you are debugging the plugin itself:
+1. Open `/plugins` and confirm Titan Memory is enabled.
+2. Open `/mcp` and confirm `titan-memory` is available. Ask **“Run Titan doctor and check my configured providers.”**
+3. To capture conversations automatically, open `/hooks` and review and trust the Titan hooks. Active memory tools are available independently of hook trust.
+4. Ask **“Remember that the test project uses a cobalt notebook.”** Start a new session and ask **“What notebook does the test project use? Use Titan and show the source.”**
 
-```bash
-npm install -g titan-memory-cli
-npx codex-marketplace add kuwosaad/titan-pi-memory --plugin --global
-titan setup codex
-```
-
-## First run
-
-Codex requires manual hook trust. Titan will not bypass that safety gate.
-
-Inside Codex:
-
-1. run `/hooks` and trust exactly `python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py`
-2. run `/mcp` and confirm `titan-memory`
-3. run `/plugins` and confirm Titan Memory is installed
-
-You can also print these instructions locally:
-
-```bash
-python3 scripts/titan_first_run.py
-```
-
-## What Codex gets
-
-- `query_memories` for semantic recall
-- `get_scene_context` for scene recovery
-- `get_recent_memories` for recent work
-- `doctor` for health checks
-- `inspect_clusters` and `analyze_clusters` for graph inspection
-- Titan pattern tools for candidate pattern review and mining
-- passive lifecycle capture after hook trust
-
-## First prompts
-
-```text
-Use Titan Memory to find prior decisions about this repo.
-Remember the outcome of this work in Titan.
-Show recent Titan memories for this Codex agent.
-Check whether Titan is healthy in this Codex session.
-Use Titan patterns workflow to inspect candidate patterns.
-```
-
-## Privacy and local storage
-
-Titan Memory is local-first. Codex writes memory and operational state only
-under:
-
-```text
-~/.titan/agents/codex
-```
-
-Passive capture writes hook traces under:
-
-```text
-~/.titan/agents/codex/traces
-```
-
-Passive capture only starts after you trust hooks in `/hooks`. If you do not trust hooks, active MCP tools can still work, but passive session capture will not run.
-
-## Federated recall
-
-By default, `query_memories` and other recall tools search every discovered
-agent namespace under `~/.titan/agents` through a read-only federation. A
-missing or invalid namespace is skipped. Every result keeps its `source_agent`
-provenance; when a result belongs to another agent, pass that value to
-`get_scene_context` to recover the correct foreign scene.
-
-Codex never writes into another agent's namespace. Traces, pending/spool state,
-and pattern workspaces remain local to Codex. Cross-agent import is a separate
-operation when you need a copied record, not a prerequisite for recall:
-
-```text
-Use memory-sync to import Claude Code history into Codex memory.
-```
+The default tools are `store_trace_packet`, `query_memories`, `get_scene_context`, and `doctor`. To use dedicated recent-memory, graph, and pattern tools, add `TITAN_MCP_TOOL_PROFILE=full` to the Codex namespace’s `.env` file and restart the MCP server.
 
 ## Troubleshooting
 
-If `/mcp` does not show `titan-memory`:
+If `/mcp` lists no Titan server, check the installation with `codex plugin list --json` and the launcher path with `codex mcp get titan-memory --json`. Start a fresh session after installing the plugin. If the server is visible but memory extraction or semantic search fails, rerun **“Set up Titan Memory for Codex”** to change the provider settings. An existing `TITAN_RUNTIME_MANIFEST` override selects the specified managed runtime.
 
-```bash
-titan codex list-tools
-titan codex reinstall-plugin
-titan setup codex --verify
-```
-
-If hooks are untrusted, run `/hooks` inside Codex and trust the Titan hook manually.
-
-If passive traces do not appear, confirm hooks are trusted and then check:
-
-```bash
-ls ~/.titan/agents/codex/traces
-```
+Passive capture writes traces under `~/.titan/agents/codex/traces`. If the directory stays empty after a completed turn, check `/hooks` for disabled or untrusted Titan events. See [privacy and network behavior](PRIVACY.md).

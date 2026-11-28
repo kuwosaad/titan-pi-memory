@@ -13,13 +13,13 @@ from pathlib import Path
 from typing import Sequence, TextIO
 
 DEFAULT_AGENT = "codex"
-HOOK_COMMAND = "python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py"
+HOOK_COMMAND = 'python3 "${PLUGIN_ROOT}/scripts/titan_codex_hook.py"'
 FIRST_PROMPTS = [
     "Use Titan Memory to find prior decisions about this repo.",
     "Remember the outcome of this work in Titan.",
     "Show recent Titan memories for this Codex agent.",
     "Check whether Titan is healthy in this Codex session.",
-    "Use Titan patterns workflow to inspect candidate patterns.",
+    "Set up Titan Memory for Codex.",
 ]
 
 

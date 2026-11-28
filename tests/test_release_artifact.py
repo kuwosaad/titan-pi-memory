@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 import textwrap
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -51,7 +52,7 @@ def prepare_candidate(state: Path) -> Path:
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "node_modules", ".venv"),
         )
     for relative in (
-        "config/.env.example", "config/embedding_models.yaml", "config/extraction_models.yaml",
+        "config/__init__.py", "config/.env.example", "config/embedding_models.yaml", "config/extraction_models.yaml",
         "config/settings.yaml", "config/visual_config.yaml", "tools/__init__.py",
         "tools/opencode/__init__.py", "tools/opencode/install_plugin.py", "requirements.txt",
         "LICENSE", "package.json", "scripts/package_gate.py", "scripts/verify_packed_artifact.py",
@@ -126,6 +127,21 @@ class ReleaseArtifactTests(unittest.TestCase):
             self.assertFalse(any(name.endswith("_agents.md") for name in names))
             for asset in ("FONT-SOURCE.txt", "source-serif-regular.ttf", "titan-logo.svg"):
                 self.assertIn(f"package/runtime/tools/cli/onboarding_ui/{asset}", names)
+
+            # Native hosts execute the nested engine, so the release gate must
+            # inspect changes inside those ZIPs even when the outer list matches.
+            engine = package_root / "runtime/integrations/hermes_titan_plugin/titan_engine.zip"
+            with zipfile.ZipFile(engine, "a") as modified:
+                modified.writestr("extra.py", "pass\n")
+            checked = run([sys.executable, str(GATE), "--pack", "--root", str(candidate)], cwd=ROOT)
+            self.assertNotEqual(checked.returncode, 0)
+            self.assertIn("plugins must ship identical engine archives", checked.stderr)
+            for other in (package_root / "runtime/integrations").rglob("titan_engine.zip"):
+                if other != engine:
+                    shutil.copyfile(engine, other)
+            checked = run([sys.executable, str(GATE), "--pack", "--root", str(candidate)], cwd=ROOT)
+            self.assertNotEqual(checked.returncode, 0)
+            self.assertIn("engine member differs: extra.py", checked.stderr)
 
             # The onboarding exceptions are exact paths, not blanket type allowances.
             unexpected = package_root / "runtime" / "tools" / "cli" / "onboarding_ui" / "other.svg"

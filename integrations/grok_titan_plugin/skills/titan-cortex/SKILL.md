@@ -5,10 +5,4 @@ description: Analyze Titan memory clusters for bridges, central memories, and te
 
 # Titan Cortex
 
-Pi command: `/titan-cortex`. Grok equivalent:
-
-```bash
-titan-grok cortex 1,2 --question "how do these topics relate"
-```
-
-If cluster ids are unknown, run `titan-grok clusters` first. Treat tensions as evidence, not diagnoses.
+Use `titan-memory__inspect_clusters` to identify the cluster IDs, then call `titan-memory__analyze_clusters` with those IDs and the user's question. Report the evidence for connections or tensions.

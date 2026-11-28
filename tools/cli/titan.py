@@ -1629,16 +1629,15 @@ def validate_claude_marketplace(payload: object) -> tuple[bool, str]:
 _CLAUDE_PLUGIN_RELEASE_FILES = (
     ".claude-plugin/plugin.json",
     ".mcp.json",
+    ".claude-plugin/icon.png",
+    "scripts/titan_claude_launcher.py",
+    "scripts/titan_runtime.py",
+    "scripts/titan_engine.zip",
     "README.md",
     "PRIVACY.md",
-    "package.json",
-    "package-lock.json",
     "hooks/hooks.json",
     "scripts/titan_claude_hook.py",
-    "scripts/titan_claude_hook.js",
     "scripts/titan_claude_mcp.py",
-    "scripts/titan_claude_mcp.js",
-    "scripts/titan_claude_runtime.js",
     "runtime/__init__.py",
     "runtime/client.py",
     "runtime/common.py",
@@ -1646,6 +1645,7 @@ _CLAUDE_PLUGIN_RELEASE_FILES = (
     "runtime/proxy.py",
     "skills/titan-memory-workflow/SKILL.md",
     "skills/titan-patterns-workflow/SKILL.md",
+    "skills/setup/SKILL.md",
 )
 
 
@@ -2643,7 +2643,7 @@ def run_setup_codex(
             print(f"- Patch Codex config: {config_target}")
         print("- Smoke-test local Titan MCP tool exports")
         print("- Show first-run guidance: python3 integrations/codex_titan_plugin/scripts/titan_first_run.py")
-        print("- Manual final step: in Codex run /hooks and trust `python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py`")
+        print("- Manual final step: in Codex run /hooks and trust Titan Memory")
         return 0
 
     agent_home = bootstrap_agent_home(CODEX_AGENT_NAME)
@@ -2679,7 +2679,7 @@ def run_setup_codex(
     managed_manifest = Path(os.getenv("TITAN_RUNTIME_MANIFEST", str(Path.home() / ".titan" / "runtime" / "current.json"))).expanduser()
     if not managed_manifest.exists():
         print("[titan] Managed MCP runtime is not activated yet. Repair it with: npx -y titan-memory-cli@latest setup codex")
-    print("[titan] Next manual step: open Codex, run /hooks, and trust `python3 ${PLUGIN_ROOT}/scripts/titan_codex_hook.py`.")
+    print("[titan] Next manual step: open Codex, run /hooks, and trust Titan Memory.")
     print("[titan] Then run: titan codex verify")
     return 0
 
@@ -2707,6 +2707,7 @@ def load_claude_mcp_contract(
         "${CLAUDE_PLUGIN_ROOT}": str(root),
         "${CLAUDE_PLUGIN_DATA}": str(data),
         "${user_config.agent_name}": _normalize_agent_name(agent),
+        "${user_config.opencode_go_api_key}": "",
     }
 
     def resolve(value: object) -> object:
@@ -2819,7 +2820,7 @@ def _claude_plugin_registration_status() -> tuple[bool, str]:
 
 def run_claude_reinstall_plugin(*, dry_run: bool = False) -> int:
     commands = [
-        (["claude", "plugin", "uninstall", CLAUDE_PLUGIN_ID], True),
+        (["claude", "plugin", "uninstall", CLAUDE_PLUGIN_ID, "--keep-data"], True),
         (["claude", "plugin", "marketplace", "remove", CLAUDE_MARKETPLACE_NAME], True),
         (["claude", "plugin", "marketplace", "add", str(CLAUDE_MARKETPLACE_DIR)], False),
         (["claude", "plugin", "install", CLAUDE_PLUGIN_ID], False),

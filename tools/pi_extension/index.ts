@@ -18,9 +18,10 @@
 import type { ExtensionAPI, ExtensionCommandContext, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { fileURLToPath } from "node:url";
-import { delimiter, dirname, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, existsSync, copyFileSync, writeFileSync, readFileSync } from "node:fs";
+import { appendFileSync, constants, realpathSync, chmodSync, mkdirSync, existsSync, copyFileSync, writeFileSync, readFileSync } from "node:fs";
 import { spawn, type ChildProcess, type SpawnOptionsWithoutStdio } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -34,16 +35,17 @@ const __dirname = dirname(__filename);
 
 /** Resolve repo root (tools/pi_extension/ → repo root) */
 const REPO_ROOT = resolve(__dirname, "../..");
+const RUNTIME_HELPER = resolve(__dirname, "titan_runtime.py");
 
 /** Default TiPi agent home */
 const DEFAULT_TITAN_HOME = resolve(
-  process.env.HOME || "/tmp",
+  homedir(),
   ".titan/agents/pi",
 );
-const TITAN_HOME = process.env.TITAN_HOME || DEFAULT_TITAN_HOME;
+const TITAN_HOME = resolve(process.env.TITAN_HOME || DEFAULT_TITAN_HOME);
 
 /** Titan HTTP API base URL for Pi */
-const TITAN_API_BASE = process.env.TITAN_PI_API_URL || "http://127.0.0.1:8002";
+const TITAN_API_BASE = (process.env.TITAN_PI_API_URL || `http://127.0.0.1:${process.env.TITAN_PI_PORT || "8002"}`).replace(/\/$/, "");
 
 /** Spool directory for trace events */
 const SPOOL_DIR =
@@ -57,7 +59,7 @@ const TITAN_VERBOSE_LOGS = /^(1|true|yes)$/i.test(process.env.TITAN_PI_VERBOSE |
 // State
 // ---------------------------------------------------------------------------
 
-/** Unique session ID — generated once on session_start, stable for the session */
+/** Use Pi's durable ID across reloads and resumes. */
 let sessionId: string = "default";
 
 /** Reference to the Titan server subprocess (if started by extension) */
@@ -86,7 +88,7 @@ function writeSpoolEvent(
   };
 
   appendFileSync(target, JSON.stringify(traceEvent) + "\n", {
-    encoding: "utf-8",
+    encoding: "utf-8", mode: 0o600,
   });
 }
 
@@ -149,236 +151,64 @@ function runProcess(
   });
 }
 
-const REQUIRED_PYTHON_IMPORTS = [
-  "fastapi",
-  "uvicorn",
-  "requests",
-  "yaml",
-  "numpy",
-  "networkx",
-  "pydantic",
-];
+let pythonReady: Promise<string | null> | undefined;
+let runtimeError = "";
 
-let titanPythonCommand: string | null = null;
-
-function pythonCandidates(): string[] {
-  const executableNames = process.platform === "win32"
-    ? ["python.exe", "python3.exe"]
-    : ["python3", "python"];
-  const fromPath = (process.env.PATH || "")
-    .split(delimiter)
-    .filter(Boolean)
-    .flatMap((directory) => executableNames.map((name) => resolve(directory, name)))
-    .filter((candidate) => existsSync(candidate));
-  return Array.from(new Set([
-    process.env.TITAN_PYTHON || "",
-    ...fromPath,
-    ...executableNames,
-  ].filter(Boolean)));
-}
-
-async function pythonIsCompatible(command: string, requireDependencies: boolean): Promise<boolean> {
-  const imports = requireDependencies
-    ? REQUIRED_PYTHON_IMPORTS.map((name) => `import ${name}`).join("; ")
-    : "import pip";
-  const script = `import sys; assert sys.version_info >= (3, 10); ${imports}`;
-  const result = await runProcess(command, ["-c", script], { cwd: REPO_ROOT });
-  return result.code === 0;
-}
-
-async function resolveTitanPython(): Promise<string | null> {
-  if (titanPythonCommand && await pythonIsCompatible(titanPythonCommand, true)) {
-    return titanPythonCommand;
+async function bootstrapTitanPython(): Promise<string | null> {
+  const candidates = [...new Set([process.env.TITAN_PYTHON, "python3", "python"].filter((item): item is string => !!item))];
+  for (const candidate of candidates) {
+    const check = await runProcess(candidate, ["-c", "import sys; assert sys.version_info >= (3, 10)"]);
+    if (check.code !== 0) continue;
+    const result = await runProcess(candidate, [RUNTIME_HELPER, "--runtime-python"], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, TITAN_HOME },
+    });
+    const interpreter = result.stdout.trim();
+    if (result.code === 0 && interpreter && existsSync(interpreter)) return interpreter;
+    runtimeError = (result.stderr || result.stdout || "Runtime setup failed").trim().slice(-800);
+    return null;
   }
-  for (const candidate of pythonCandidates()) {
-    if (await pythonIsCompatible(candidate, true)) {
-      titanPythonCommand = candidate;
-      return candidate;
-    }
-  }
-  titanPythonCommand = null;
+  runtimeError = "Install Python 3.10 or newer and run /titan-setup.";
   return null;
 }
 
-async function ensurePythonDependencies(): Promise<{ ok: boolean; message: string }> {
-  const existing = await resolveTitanPython();
-  if (existing) {
-    return { ok: true, message: `already installed (${existing})` };
-  }
-
-  const requirementsPath = resolve(REPO_ROOT, "requirements.txt");
-  if (!existsSync(requirementsPath)) {
-    return {
-      ok: false,
-      message: `requirements.txt not found at ${requirementsPath}`,
-    };
-  }
-
-  let installPython: string | null = null;
-  for (const candidate of pythonCandidates()) {
-    if (await pythonIsCompatible(candidate, false)) {
-      installPython = candidate;
-      break;
-    }
-  }
-  if (!installPython) {
-    return { ok: false, message: "Python 3.10+ with pip was not found" };
-  }
-
-  const result = await runProcess(
-    installPython,
-    ["-m", "pip", "install", "-r", requirementsPath],
-    { cwd: REPO_ROOT, env: process.env },
-  );
-
-  if (await pythonIsCompatible(installPython, true)) {
-    titanPythonCommand = installPython;
-    return { ok: true, message: `installed (${installPython})` };
-  }
-
-  // Some Python installs reject system-wide package writes. Try user scope next.
-  const userResult = await runProcess(
-    installPython,
-    ["-m", "pip", "install", "--user", "-r", requirementsPath],
-    { cwd: REPO_ROOT, env: process.env },
-  );
-
-  if (await pythonIsCompatible(installPython, true)) {
-    titanPythonCommand = installPython;
-    return { ok: true, message: `installed with --user (${installPython})` };
-  }
-
-  const excerpt = (userResult.stderr || userResult.stdout || result.stderr || result.stdout || "unknown error")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 500);
-  return { ok: false, message: `install failed: ${excerpt}` };
+async function resolveTitanPython(): Promise<string | null> {
+  pythonReady ??= bootstrapTitanPython();
+  const python = await pythonReady;
+  if (!python) pythonReady = undefined;
+  return python;
 }
 
-/** Ensure the optional Rich dashboard dependency is importable by this Python. */
-async function ensureRichDependency(pythonCommand: string): Promise<boolean> {
-  const canImportRich = async (): Promise<boolean> => {
-    const result = await runProcess(
-      pythonCommand,
-      ["-c", "import rich"],
-      { cwd: REPO_ROOT, env: process.env },
-    );
-    return result.code === 0;
-  };
-
-  if (await canImportRich()) return true;
-
-  // Try the normal install first, then user-scoped installs for externally
-  // managed interpreters (PEP 668). Never launch rich mode until the import
-  // check succeeds after an install attempt; the caller may use plain mode.
-  for (const installArgs of [
-    ["-m", "pip", "install", "rich"],
-    ["-m", "pip", "install", "--user", "rich"],
-    // pip 23+ may require this explicit opt-in even for a user-site install
-    // when the selected interpreter carries the PEP 668 marker. User scope
-    // keeps the override out of the managed interpreter's site-packages.
-    ["-m", "pip", "install", "--user", "--break-system-packages", "rich"],
-  ]) {
-    await runProcess(pythonCommand, installArgs, {
-      cwd: REPO_ROOT,
-      env: process.env,
-    });
-    if (await canImportRich()) return true;
-  }
-
-  return false;
-}
-
-function ensurePiWorkspace(): { copiedConfigs: string[]; envCreated: boolean } {
+function ensurePiWorkspace(): void {
   const configDir = resolve(TITAN_HOME, "config");
-  mkdirSync(configDir, { recursive: true });
-  mkdirSync(SPOOL_DIR, { recursive: true });
+  mkdirSync(configDir, { recursive: true, mode: 0o700 });
+  mkdirSync(SPOOL_DIR, { recursive: true, mode: 0o700 });
 
-  const copiedConfigs: string[] = [];
   for (const filename of ["extraction_models.yaml", "embedding_models.yaml"]) {
-    const source = resolve(REPO_ROOT, "config", filename);
-    const target = resolve(configDir, filename);
-    if (!existsSync(target) && existsSync(source)) {
-      copyFileSync(source, target);
-      copiedConfigs.push(filename);
+    try {
+      copyFileSync(resolve(REPO_ROOT, "config", filename), resolve(configDir, filename), constants.COPYFILE_EXCL);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
   }
-
   const envPath = resolve(TITAN_HOME, ".env");
-  let envCreated = false;
-  if (!existsSync(envPath)) {
-    writeFileSync(
-      envPath,
-      [
-        "# Titan Pi workspace secrets",
-        "# Add the key for your configured extraction model, for example:",
-        "# OPENCODE_GO_API_KEY=your_key_here",
-        "# GEMINI_API_KEY=your_key_here",
-        "# OPENAI_API_KEY=your_key_here",
-        "",
-      ].join("\n"),
-      "utf-8",
-    );
-    envCreated = true;
-  }
-
-  return { copiedConfigs, envCreated };
+  appendFileSync(envPath, "", { mode: 0o600 });
+  chmodSync(envPath, 0o600);
 }
 
-function setExtractionProvider(provider: "opencode_go" | "gemini"): string {
-  ensurePiWorkspace();
-  const configPath = resolve(TITAN_HOME, "config", "extraction_models.yaml");
-  if (!existsSync(configPath)) return configPath;
-
-  let text = readFileSync(configPath, "utf-8");
-  text = text.replace(/^current:\s*\S+\s*$/m, `current: ${provider}`);
-
-  if (!/^opencode_go:\s*$/m.test(text)) {
-    const opencodeBlock = [
-      "opencode_go:",
-      "  enabled: true",
-      "  api_key_env: OPENCODE_GO_API_KEY",
-      "  base_url: https://opencode.ai/zen/go/v1",
-      "  model: deepseek-v4-flash",
-      "  temperature: 0.1",
-      "",
-    ].join("\n");
-    text = text.replace(/gemini:\n/, `${opencodeBlock}gemini:\n`);
-  }
-
-  writeFileSync(configPath, text, "utf-8");
-  return configPath;
-}
-
-/** Add or replace one KEY=value in the Pi workspace .env file. */
-function upsertEnvKey(keyName: string, value: string): string {
-  ensurePiWorkspace();
-  const envPath = resolve(TITAN_HOME, ".env");
-  const lines = existsSync(envPath)
-    ? readFileSync(envPath, "utf-8").split(/\r?\n/)
-    : [];
-
-  const keyPattern = new RegExp(`^\\s*${keyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=`);
-  let replaced = false;
-  const nextLines = lines.map((line) => {
-    if (keyPattern.test(line)) {
-      replaced = true;
-      return `${keyName}=${value}`;
-    }
-    return line;
+async function stopOwnedServer(): Promise<void> {
+  const server = titanServerProcess;
+  if (!server || server.exitCode !== null || server.signalCode !== null) return;
+  await new Promise<void>((done) => {
+    const forceStop = setTimeout(() => server.kill("SIGKILL"), 5000);
+    server.once("exit", () => { clearTimeout(forceStop); done(); });
+    server.kill();
   });
-
-  if (!replaced) nextLines.push(`${keyName}=${value}`);
-  writeFileSync(envPath, nextLines.join("\n").replace(/\n*$/, "\n"), "utf-8");
-  return envPath;
 }
 
 async function restartOwnedServer(): Promise<boolean> {
-  if (titanServerProcess) {
-    titanServerProcess.kill();
-    titanServerProcess = null;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 800));
-  }
+  if (!titanServerProcess && await isServerHealthy()) return false;
+  await stopOwnedServer();
   return ensureServerRunning();
 }
 
@@ -397,27 +227,48 @@ function extractTextContent(
     .join("\n");
 }
 
-/** Check if Titan server is healthy. */
-async function isServerHealthy(): Promise<boolean> {
+async function inspectServer(): Promise<"ready" | "offline" | "occupied"> {
+  let response: Response;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`${TITAN_API_BASE}/health`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    return res.ok;
+    response = await fetch(`${TITAN_API_BASE}/api/runtime`, { signal: AbortSignal.timeout(3000) });
   } catch {
-    return false;
+    return "offline";
   }
+  if (!response.ok) return "occupied";
+  try {
+    const runtime = await response.json() as TitanRuntimeResponse;
+    if (runtime.agent_name === "pi" && typeof runtime.titan_home === "string" &&
+        realpathSync(runtime.titan_home) === realpathSync(TITAN_HOME)) return "ready";
+  } catch {
+    // An unrelated service can answer HTTP without identifying a Titan workspace.
+  }
+  return "occupied";
 }
 
-/** Start Titan server as a subprocess. Returns true if started or already running. */
+async function isServerHealthy(): Promise<boolean> {
+  return await inspectServer() === "ready";
+}
+
+let serverStarting: Promise<boolean> | undefined;
+
 async function ensureServerRunning(): Promise<boolean> {
-  if (await isServerHealthy()) return true;
+  serverStarting ??= connectOrStartServer().finally(() => { serverStarting = undefined; });
+  return serverStarting;
+}
+
+async function connectOrStartServer(): Promise<boolean> {
+  const status = await inspectServer();
+  if (status === "ready") return true;
+  if (status === "occupied") {
+    runtimeError = `The endpoint ${TITAN_API_BASE} did not identify this Pi workspace. Choose a free TITAN_PI_PORT.`;
+    return false;
+  }
+  runtimeError = "";
   if (titanServerProcess) return false; // already tried starting
 
-  const serverScript = resolve(REPO_ROOT, "tools/pi_extension/server.py");
+  const endpoint = new URL(TITAN_API_BASE);
+  if (endpoint.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(endpoint.hostname)) return false;
+  const serverScript = resolve(__dirname, "server.py");
   if (!existsSync(serverScript)) {
     console.warn("[titan] server.py not found at", serverScript);
     return false;
@@ -425,7 +276,7 @@ async function ensureServerRunning(): Promise<boolean> {
 
   const pythonCommand = await resolveTitanPython();
   if (!pythonCommand) {
-    console.warn("[titan] Python 3.10+ with Titan dependencies was not found. Run /titan-setup.");
+    console.warn("[titan]", runtimeError);
     return false;
   }
 
@@ -435,9 +286,11 @@ async function ensureServerRunning(): Promise<boolean> {
       env: {
         ...process.env,
         TITAN_PI_ADAPTER: "1",
-        TITAN_PI_DEFAULT_AGENT: process.env.TITAN_AGENT_NAME || "pi",
+        TITAN_AGENT_NAME: "pi",
+        TITAN_HOME,
+        TITAN_PI_DEFAULT_AGENT: "pi",
         TITAN_PI_DEFAULT_HOME: TITAN_HOME,
-        TITAN_PI_PORT: "8002",
+        TITAN_PI_PORT: endpoint.port || "80",
         PYTHONPATH: REPO_ROOT,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -476,7 +329,10 @@ async function ensureServerRunning(): Promise<boolean> {
     const pollInterval = 500;
     const startTime = Date.now();
     const poll = setInterval(async () => {
-      if (await isServerHealthy()) {
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        clearInterval(poll);
+        resolvePromise(false);
+      } else if (await isServerHealthy()) {
         clearInterval(poll);
         resolvePromise(true);
       } else if (Date.now() - startTime > maxWait) {
@@ -683,15 +539,12 @@ interface TitanPatternEvidencePacket {
 
 /** Parse a fetch Response as JSON, returning an error object on failure. */
 async function safeJson(res: Response): Promise<Record<string, unknown>> {
-  try {
-    const data = (await res.json()) as Record<string, unknown>;
-    if (!res.ok && !("error" in data)) {
-      data.error = `API error: HTTP ${res.status}`;
-    }
-    return data;
-  } catch {
-    return { error: `API error: HTTP ${res.status}` };
+  const data = await res.json() as Record<string, unknown>;
+  if (!res.ok || data.error) {
+    const detail = data.error || data.detail || res.statusText;
+    throw new Error(`Titan HTTP ${res.status}: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
   }
+  return data;
 }
 
 async function apiRetrieve(
@@ -777,9 +630,14 @@ async function apiStoreTracePacket(payload: Record<string, unknown>): Promise<Re
   const res = await fetch(`${TITAN_API_BASE}/api/trace`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ outcome: "", ...payload }),
   });
   return safeJson(res);
+}
+
+function describeTrace(result: Record<string, unknown>): string {
+  if (result.stored === true) return String(result.recap || "Memory stored.");
+  return String(result.recap || result.store_reason || "Trace received. Memory storage has not been confirmed.");
 }
 
 async function apiGetPatternStatus(): Promise<TitanPatternStatus> {
@@ -1201,7 +1059,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
 
   // Session started: initialize session ID, check server, write opening event
   pi.on("session_start", async (event, ctx) => {
-    sessionId = randomUUID();
+    sessionId = ctx.sessionManager.getSessionId();
 
     // Ensure Pi workspace/config exists
     ensurePiWorkspace();
@@ -1223,7 +1081,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
     const serverOk = await ensureServerRunning();
     if (serverOk && hasConfig) {
       ctx.ui.setStatus("titan-memory", "TITAN READY");
-      ctx.ui.notify("Titan memory ready", "success");
+      ctx.ui.notify("Titan memory connected. Use /titan-setup to configure or change providers.", "info");
     } else if (!hasConfig) {
       ctx.ui.setStatus("titan-memory", "TITAN UNCONFIGURED");
       ctx.ui.notify(
@@ -1233,7 +1091,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
     } else if (!serverOk) {
       ctx.ui.setStatus("titan-memory", "TITAN OFFLINE");
       ctx.ui.notify(
-        "Titan server not running. Run /titan-start or /titan-setup.",
+        runtimeError || "Titan server not running. Run /titan-start or /titan-setup.",
         "warning",
       );
     }
@@ -1305,6 +1163,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       raw_type: "session_shutdown",
       session_id: sessionId,
     });
+    await stopOwnedServer();
   });
 
   // =======================================================================
@@ -1386,7 +1245,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
               `  Server:     ${healthy ? "✅ running" : "❌ not running"} (${TITAN_API_BASE})`,
               `  Workspace:  ${reportedHome}`,
               `  Spool dir:  ${reportedSpoolDir} ${spoolExists ? "✅" : "⚠️ missing"}`,
-              `  Config:     ${hasConfig ? "✅" : "⚠️ not configured (run /titan-setup)"}`,
+              `  Config files: ${hasConfig ? "present" : "missing (run /titan-setup)"}`,
               runtime.memory_backend ? `  Backend:    ${runtime.memory_backend}` : "",
               `  Session ID: ${sessionId}`,
               healthy ? `  Memories:   ${JSON.stringify(stats)}` : "",
@@ -1396,9 +1255,10 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         };
       }
 
-      if (!(await isServerHealthy())) {
+      if (!(await ensureServerRunning())) {
         return {
           content: [{ type: "text" as const, text: "Titan server is not running. Tell the user to check /titan-status." }],
+          details: undefined,
         };
       }
 
@@ -1414,7 +1274,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         });
         const memories = data.memories ?? [];
         if (memories.length === 0) {
-          return { content: [{ type: "text" as const, text: "No sufficiently relevant memories found." }] };
+          return { content: [{ type: "text" as const, text: "No sufficiently relevant memories found." }], details: undefined };
         }
         const lines = memories.map((m, i) => {
           const sceneRef = m.scene_id ? ` [scene: ${m.scene_id}]` : "";
@@ -1428,11 +1288,11 @@ export default function titanPiExtension(pi: ExtensionAPI) {
 
       if (params.action === "get_scene_context") {
         if (!params.scene_id) {
-          return { content: [{ type: "text" as const, text: "scene_id is required for get_scene_context." }] };
+          return { content: [{ type: "text" as const, text: "scene_id is required for get_scene_context." }], details: undefined };
         }
         const data = await apiGetScene(params.scene_id, params.source_agent);
         if ("error" in data) {
-          return { content: [{ type: "text" as const, text: String(data.error) }] };
+          return { content: [{ type: "text" as const, text: String(data.error) }], details: undefined };
         }
         return {
           content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -1442,7 +1302,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
 
       if (params.action === "store_trace_packet") {
         if (!params.goal) {
-          return { content: [{ type: "text" as const, text: "goal is required for store_trace_packet." }] };
+          return { content: [{ type: "text" as const, text: "goal is required for store_trace_packet." }], details: undefined };
         }
         const payload: Record<string, unknown> = {
           goal: params.goal,
@@ -1453,7 +1313,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         if (params.outcome) payload.outcome = params.outcome;
         const result = await apiStoreTracePacket(payload);
         return {
-          content: [{ type: "text" as const, text: `Trace packet stored: ${JSON.stringify(result)}` }],
+          content: [{ type: "text" as const, text: describeTrace(result) }],
           details: result,
         };
       }
@@ -1462,7 +1322,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         const data = await apiGetRecentMemories(params.limit ?? 8);
         const memories = data.memories ?? [];
         if (memories.length === 0) {
-          return { content: [{ type: "text" as const, text: "No memories yet." }] };
+          return { content: [{ type: "text" as const, text: "No memories yet." }], details: undefined };
         }
         const lines = memories.map((m, i) => {
           const sceneRef = m.scene_id ? ` [scene: ${m.scene_id}]` : "";
@@ -1489,11 +1349,11 @@ export default function titanPiExtension(pi: ExtensionAPI) {
 
       if (params.action === "analyze_clusters") {
         if (!params.cluster_ids) {
-          return { content: [{ type: "text" as const, text: "cluster_ids is required for analyze_clusters." }] };
+          return { content: [{ type: "text" as const, text: "cluster_ids is required for analyze_clusters." }], details: undefined };
         }
         const parsed = parseTitanCortexArgs(params.cluster_ids);
         if (!parsed) {
-          return { content: [{ type: "text" as const, text: "cluster_ids must contain at least one numeric cluster ID." }] };
+          return { content: [{ type: "text" as const, text: "cluster_ids must contain at least one numeric cluster ID." }], details: undefined };
         }
         const data = await apiAnalyzeClusters({
           clusterIds: parsed.clusterIds,
@@ -1508,7 +1368,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         };
       }
 
-      return { content: [{ type: "text" as const, text: `Unknown Titan action: ${params.action}` }] };
+      return { content: [{ type: "text" as const, text: `Unknown Titan action: ${params.action}` }], details: undefined };
     },
   });
 
@@ -1556,7 +1416,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params) {
-      if (!(await isServerHealthy())) {
+      if (!(await ensureServerRunning())) {
         return {
           content: [
             {
@@ -1564,6 +1424,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
               text: "Titan server is not running. Tell the user to check /titan-status.",
             },
           ],
+          details: undefined,
         };
       }
       const data = await apiRetrieve(params.query, {
@@ -1578,6 +1439,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       if (memories.length === 0) {
         return {
           content: [{ type: "text" as const, text: "No sufficiently relevant memories found." }],
+          details: undefined,
         };
       }
 
@@ -1608,17 +1470,19 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       })),
     }),
     async execute(_toolCallId, params) {
-      if (!(await isServerHealthy())) {
+      if (!(await ensureServerRunning())) {
         return {
           content: [
             { type: "text" as const, text: "Titan server is not running." },
           ],
+          details: undefined,
         };
       }
       const data = await apiGetScene(params.scene_id, params.source_agent);
       if ("error" in data) {
         return {
           content: [{ type: "text" as const, text: String(data.error) }],
+          details: undefined,
         };
       }
       return {
@@ -1656,11 +1520,12 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params) {
-      if (!(await isServerHealthy())) {
+      if (!(await ensureServerRunning())) {
         return {
           content: [
             { type: "text" as const, text: "Titan server is not running." },
           ],
+          details: undefined,
         };
       }
       const payload: Record<string, unknown> = {
@@ -1676,7 +1541,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         content: [
           {
             type: "text" as const,
-            text: `Trace packet stored: ${JSON.stringify(result)}`,
+            text: describeTrace(result),
           },
         ],
         details: result,
@@ -1694,17 +1559,18 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params) {
-      if (!(await isServerHealthy())) {
+      if (!(await ensureServerRunning())) {
         return {
           content: [
             { type: "text" as const, text: "Titan server is not running." },
           ],
+          details: undefined,
         };
       }
       const data = await apiGetRecentMemories(params.limit ?? 8);
       const memories = data.memories ?? [];
       if (memories.length === 0) {
-        return { content: [{ type: "text" as const, text: "No memories yet." }] };
+        return { content: [{ type: "text" as const, text: "No memories yet." }], details: undefined };
       }
       const lines = memories.map((m, i) => {
         const sceneRef = m.scene_id ? ` [scene: ${m.scene_id}]` : "";
@@ -1742,8 +1608,8 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params) {
-      if (!(await isServerHealthy())) {
-        return { content: [{ type: "text" as const, text: "Titan server is not running." }] };
+      if (!(await ensureServerRunning())) {
+        return { content: [{ type: "text" as const, text: "Titan server is not running." }], details: undefined };
       }
       const data = await apiGetClusters({
         clusterId: params.cluster_id,
@@ -1786,12 +1652,12 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params) {
-      if (!(await isServerHealthy())) {
-        return { content: [{ type: "text" as const, text: "Titan server is not running." }] };
+      if (!(await ensureServerRunning())) {
+        return { content: [{ type: "text" as const, text: "Titan server is not running." }], details: undefined };
       }
       const parsed = parseTitanCortexArgs(params.cluster_ids);
       if (!parsed) {
-        return { content: [{ type: "text" as const, text: "cluster_ids must contain at least one numeric cluster ID." }] };
+        return { content: [{ type: "text" as const, text: "cluster_ids must contain at least one numeric cluster ID." }], details: undefined };
       }
       const data = await apiAnalyzeClusters({
         clusterIds: parsed.clusterIds,
@@ -1860,8 +1726,8 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       mode: Type.Optional(Type.String({ description: "Processing mode, e.g. backfill or incremental." })),
     }),
     async execute(_toolCallId, params) {
-      if (!(await isServerHealthy())) {
-        return { content: [{ type: "text" as const, text: "Titan server is not running. Tell the user to run /titan-start." }] };
+      if (!(await ensureServerRunning())) {
+        return { content: [{ type: "text" as const, text: "Titan server is not running. Tell the user to run /titan-start." }], details: undefined };
       }
 
       if (params.action === "status") {
@@ -1886,20 +1752,20 @@ export default function titanPiExtension(pi: ExtensionAPI) {
       }
 
       if (params.action === "get_pattern") {
-        if (!params.pattern_id) return { content: [{ type: "text" as const, text: "pattern_id is required." }] };
+        if (!params.pattern_id) return { content: [{ type: "text" as const, text: "pattern_id is required." }], details: undefined };
         const data = await apiGetPattern(params.pattern_id);
         return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }], details: data };
       }
 
       if (params.action === "accept_pattern" || params.action === "reject_pattern") {
-        if (!params.pattern_id) return { content: [{ type: "text" as const, text: "pattern_id is required." }] };
+        if (!params.pattern_id) return { content: [{ type: "text" as const, text: "pattern_id is required." }], details: undefined };
         const data = await apiUpdatePatternStatus(params.pattern_id, params.action === "accept_pattern" ? "accept" : "reject");
         return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }], details: data };
       }
 
       if (params.action === "mark_processed") {
         if (!params.memory_ids || params.memory_ids.length === 0) {
-          return { content: [{ type: "text" as const, text: "memory_ids is required for mark_processed." }] };
+          return { content: [{ type: "text" as const, text: "memory_ids is required for mark_processed." }], details: undefined };
         }
         const data = await apiMarkPatternsProcessed({
           memory_ids: params.memory_ids,
@@ -1913,7 +1779,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
 
       if (params.action === "create_pattern") {
         if (!params.title || !params.summary || !params.recommended_behavior) {
-          return { content: [{ type: "text" as const, text: "title, summary, and recommended_behavior are required for create_pattern." }] };
+          return { content: [{ type: "text" as const, text: "title, summary, and recommended_behavior are required for create_pattern." }], details: undefined };
         }
         const data = await apiCreatePattern({
           title: params.title,
@@ -1934,7 +1800,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }], details: data };
       }
 
-      return { content: [{ type: "text" as const, text: `Unknown Titan pattern action: ${params.action}` }] };
+      return { content: [{ type: "text" as const, text: `Unknown Titan pattern action: ${params.action}` }], details: undefined };
     },
   });
 
@@ -1971,7 +1837,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
               `  Server:     ${healthy ? "✅ running" : "❌ not running"} (${TITAN_API_BASE})`,
               `  Workspace:  ${TITAN_HOME}`,
               `  Spool dir:  ${SPOOL_DIR} ${spoolExists ? "✅" : "⚠️ missing"}`,
-              `  Config:     ${hasConfig ? "✅" : "⚠️ not configured (run /titan-setup)"}`,
+              `  Config files: ${hasConfig ? "present" : "missing (run /titan-setup)"}`,
               `  Session ID: ${sessionId}`,
               healthy ? `  Memories:   ${JSON.stringify(stats)}` : "",
             ]
@@ -1988,100 +1854,58 @@ export default function titanPiExtension(pi: ExtensionAPI) {
   // COMMANDS — User-facing slash commands
   // =======================================================================
 
-  pi.registerCommand("titan-setup", {
-    description: "Configure Titan Pi in your browser",
-    handler: async (_args, ctx) => {
-      if (onboardingInProgress) {
-        ctx.ui.notify("Titan setup is already running.", "warning");
-        return;
-      }
-      onboardingInProgress = true;
-      try {
-        ensurePiWorkspace();
-        ctx.ui.notify("Checking Titan Python dependencies...", "info");
-        const deps = await ensurePythonDependencies();
-        if (!deps.ok) {
-          ctx.ui.notify(`Titan setup failed: ${deps.message}`, "error");
-          return;
-        }
-        const pythonCommand = await resolveTitanPython();
-        if (!pythonCommand) {
-          ctx.ui.notify("Titan setup failed: compatible Python was not found.", "error");
-          return;
-        }
-        ctx.ui.notify("Opening Titan setup in your browser...", "info");
-        let onboardingOutput = "";
-        const result = await runProcess(pythonCommand, ["-m", "tools.cli.onboarding", "--agent", "pi"], {
-          cwd: REPO_ROOT,
-          env: { ...process.env, TITAN_HOME, PYTHONPATH: REPO_ROOT, PYTHONUNBUFFERED: "1" },
-        }, (chunk) => {
-          onboardingOutput += chunk;
-          const match = onboardingOutput.match(/\[titan\] Open onboarding: (http:\/\/127\.0\.0\.1:\d+\/#[^\s]+)/);
-          if (match) {
-            ctx.ui.notify(`If your browser did not open, visit ${match[1]}`, "info");
-            onboardingOutput = "";
-          }
-        });
-        if (result.code !== 0) {
-          const detail = (result.stderr || result.stdout).trim().slice(-500);
-          ctx.ui.notify(`Titan setup did not complete${detail ? `: ${detail}` : "."}`, "warning");
-          return;
-        }
-        if (!titanServerProcess && await isServerHealthy()) {
-          ctx.ui.notify("Titan setup saved. Restart the existing Titan server to apply it.", "warning");
-          return;
-        }
-        const serverOk = await restartOwnedServer();
-        ctx.ui.notify(
-          serverOk ? "Titan setup complete. The memory server is running." : "Titan setup saved, but the server could not start. Run /titan-status.",
-          serverOk ? "success" : "warning",
-        );
-      } finally {
-        onboardingInProgress = false;
-      }
-    },
-  });
-
-  pi.registerCommand("titan-key", {
-    description: "Add or update the Titan extraction API key",
-    handler: async (_args, ctx) => {
+  const configureProviders = async (_args: string, ctx: ExtensionCommandContext) => {
+    if (onboardingInProgress) {
+      ctx.ui.notify("Titan setup is already running.", "warning");
+      return;
+    }
+    onboardingInProgress = true;
+    try {
       ensurePiWorkspace();
-
-      const provider = await ctx.ui.select("Choose Titan extraction provider", [
-        "OpenCode Go / DeepSeek V4 Flash (OPENCODE_GO_API_KEY)",
-        "Gemini / AI Studio (GEMINI_API_KEY)",
-      ]);
-      if (!provider) return;
-
-      const useOpenCodeGo = provider.startsWith("OpenCode Go");
-      const keyName = useOpenCodeGo ? "OPENCODE_GO_API_KEY" : "GEMINI_API_KEY";
-      const value = await ctx.ui.input(
-        `Paste your ${keyName}`,
-        useOpenCodeGo ? "sk-opencode-..." : "AIza...",
-      );
-      const cleaned = value?.trim();
-      if (!cleaned) {
-        ctx.ui.notify("No API key entered. Nothing changed.", "warning");
+      ctx.ui.notify("Checking Titan Python dependencies...", "info");
+      const pythonCommand = await resolveTitanPython();
+      if (!pythonCommand) {
+        ctx.ui.notify(`Titan setup failed: ${runtimeError}`, "error");
         return;
       }
-
-      const envPath = upsertEnvKey(keyName, cleaned);
-      const configPath = setExtractionProvider(useOpenCodeGo ? "opencode_go" : "gemini");
+      ctx.ui.notify("Opening Titan setup in your browser...", "info");
+      let onboardingOutput = "";
+      const result = await runProcess(pythonCommand, [RUNTIME_HELPER, "configure", "--agent", "pi"], {
+        cwd: REPO_ROOT,
+        env: { ...process.env, TITAN_HOME, TITAN_AGENT_NAME: "pi", PYTHONUNBUFFERED: "1" },
+      }, (chunk) => {
+        onboardingOutput += chunk;
+        const match = onboardingOutput.match(/\[titan\] Open onboarding: (http:\/\/127\.0\.0\.1:\d+\/#[^\s]+)/);
+        if (match) {
+          ctx.ui.notify(`If your browser did not open, visit ${match[1]}`, "info");
+          onboardingOutput = "";
+        }
+      });
+      if (result.code !== 0) {
+        const detail = (result.stderr || result.stdout).trim().slice(-500);
+        ctx.ui.notify(`Titan setup did not complete${detail ? `: ${detail}` : "."}`, "warning");
+        return;
+      }
+      if (!titanServerProcess && await isServerHealthy()) {
+        ctx.ui.notify("Titan setup saved. Restart the existing Titan server to apply it.", "warning");
+        return;
+      }
       const serverOk = await restartOwnedServer();
-      const suffix = cleaned.length >= 4 ? cleaned.slice(-4) : "****";
-
       ctx.ui.notify(
-        [
-          "Titan API key saved.",
-          `Provider: ${provider}`,
-          `Saved: ${keyName}=...${suffix}`,
-          `Secrets: ${envPath}`,
-          `Config: ${configPath}`,
-          `Server: ${serverOk ? "running" : "not running — run /titan-status"}`,
-        ].join("\n"),
-        serverOk ? "success" : "warning",
+        serverOk ? "Titan setup complete. The memory server is running." : "Titan setup saved, but the server could not start. Run /titan-status.",
+        serverOk ? "info" : "warning",
       );
-    },
+    } finally {
+      onboardingInProgress = false;
+    }
+  };
+  pi.registerCommand("titan-setup", {
+    description: "Configure Titan extraction and embedding in your browser",
+    handler: configureProviders,
+  });
+  pi.registerCommand("titan-key", {
+    description: "Update Titan providers, models and credentials in your browser",
+    handler: configureProviders,
   });
 
   const graphCommand = {
@@ -2106,7 +1930,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
             graphUrl,
             "Pi is still usable — close the browser tab whenever you're done.",
           ].join("\n"),
-          "success",
+          "info",
         );
       } catch (err) {
         ctx.ui.notify(`Could not open Titan graph: ${err}`, "error");
@@ -2148,7 +1972,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
             url.toString(),
             "Node color = status. Node size = confidence + evidence count. Edges = shared evidence, triggers, supports, contradicts, supersedes.",
           ].join("\n"),
-          "success",
+          "info",
         );
       } catch (err) {
         ctx.ui.notify(`Could not open Titan pattern graph: ${err}`, "error");
@@ -2285,7 +2109,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
             return;
           }
           const data = await apiUpdatePatternStatus(patternId, action === "accept" ? "accept" : "reject");
-          ctx.ui.notify(JSON.stringify(data, null, 2), data.error ? "warning" : "success");
+          ctx.ui.notify(JSON.stringify(data, null, 2), data.error ? "warning" : "info");
           return;
         }
 
@@ -2305,7 +2129,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
           writeFileSync(outputPath, `${JSON.stringify(bundle, null, 2)}\n`, "utf-8");
           const patterns = Array.isArray(bundle.patterns) ? bundle.patterns.length : 0;
           const evidence = Array.isArray(bundle.evidence) ? bundle.evidence.length : 0;
-          ctx.ui.notify(`Titan pattern bundle exported: ${outputPath}\nPatterns: ${patterns}; evidence: ${evidence}`, "success");
+          ctx.ui.notify(`Titan pattern bundle exported: ${outputPath}\nPatterns: ${patterns}; evidence: ${evidence}`, "info");
           return;
         }
 
@@ -2320,7 +2144,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
             overwrite: Boolean(parsed.flags.overwrite),
             importProgress: !parsed.flags.no_progress,
           });
-          ctx.ui.notify(JSON.stringify(result, null, 2), result.error ? "warning" : "success");
+          ctx.ui.notify(JSON.stringify(result, null, 2), result.error ? "warning" : "info");
           return;
         }
 
@@ -2387,14 +2211,14 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         `Titan Memory Status`,
         `──────────────────`,
         `Server:     ${healthy ? "✅ running" : "❌ not running"}`,
-        `Endpoint:   ${TITAN_API_BASE}/health`,
+        `Endpoint:   ${TITAN_API_BASE}/api/runtime`,
         `Workspace:  ${TITAN_HOME}`,
         `Spool dir:  ${SPOOL_DIR} ${spoolExists ? "✅" : "⚠️ missing"}`,
-        `Config:     ${hasConfig ? "✅ configured" : "⚠️ not configured"}`,
+        `Config files: ${hasConfig ? "present (provider setup: /titan-setup)" : "missing"}`,
         `Session ID: ${sessionId}`,
       ];
 
-      ctx.ui.notify(lines.join("\n"), healthy ? "success" : "warning");
+      ctx.ui.notify(lines.join("\n"), healthy ? "info" : "warning");
     },
   });
 
@@ -2407,7 +2231,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         return;
       }
 
-      if (!(await isServerHealthy())) {
+      if (!(await ensureServerRunning())) {
         ctx.ui.notify("Titan server not running. Try /titan-start.", "warning");
         return;
       }
@@ -2432,8 +2256,8 @@ export default function titanPiExtension(pi: ExtensionAPI) {
   pi.registerCommand("titan-recent", {
     description: "Browse recent memories stored by Titan",
     handler: async (_args, ctx) => {
-      if (!(await isServerHealthy())) {
-        ctx.ui.notify("Titan server not running.", "warning");
+      if (!(await ensureServerRunning())) {
+        ctx.ui.notify(runtimeError || "Titan server not running.", "warning");
         return;
       }
       try {
@@ -2461,13 +2285,13 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         ctx.ui.notify("Usage: /titan-save <what I accomplished>", "warning");
         return;
       }
-      if (!(await isServerHealthy())) {
-        ctx.ui.notify("Titan server not running.", "warning");
+      if (!(await ensureServerRunning())) {
+        ctx.ui.notify(runtimeError || "Titan server not running.", "warning");
         return;
       }
       try {
         const result = await apiStoreTracePacket({ goal, session_id: sessionId });
-        ctx.ui.notify(`Saved: ${JSON.stringify(result)}`, "success");
+        ctx.ui.notify(describeTrace(result), result.stored === true ? "info" : "warning");
       } catch (err) {
         ctx.ui.notify(`Failed: ${err}`, "error");
       }
@@ -2479,7 +2303,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const ok = await ensureServerRunning();
       if (ok) {
-        ctx.ui.notify("Titan server started on port 8002", "success");
+        ctx.ui.notify(`Titan server ready at ${TITAN_API_BASE}`, "info");
       } else {
         ctx.ui.notify("Failed to start Titan server.", "error");
       }
@@ -2489,10 +2313,14 @@ export default function titanPiExtension(pi: ExtensionAPI) {
   pi.registerCommand("titan-restart", {
     description: "Restart the Titan memory server (picks up new code changes)",
     handler: async (_args, ctx) => {
+      if (!titanServerProcess && await isServerHealthy()) {
+        ctx.ui.notify("Another Pi session owns this Titan server. Restart it from that session.", "warning");
+        return;
+      }
       ctx.ui.notify("Restarting Titan server...", "info");
       const ok = await restartOwnedServer();
       if (ok) {
-        ctx.ui.notify("Titan server restarted on port 8002 with latest code.", "success");
+        ctx.ui.notify(`Titan server restarted at ${TITAN_API_BASE}`, "info");
       } else {
         ctx.ui.notify("Failed to restart Titan server. Try /titan-start.", "error");
       }
@@ -2520,9 +2348,7 @@ export default function titanPiExtension(pi: ExtensionAPI) {
         return;
       }
 
-      ctx.ui.notify("Checking dashboard dependency (rich)...", "info");
-      const richReady = await ensureRichDependency(pythonCommand);
-
+      const richReady = (await runProcess(pythonCommand, ["-c", "import rich"])).code === 0;
       const sessionArg = args?.trim() || "";
       const scriptArgs = sessionArg
         ? [dashboardScript, "--session-id", sessionArg]
@@ -2534,11 +2360,11 @@ export default function titanPiExtension(pi: ExtensionAPI) {
 
       const result = await runProcess(pythonCommand, scriptArgs, {
         cwd: REPO_ROOT,
-        env: { ...process.env, TITAN_PI_API_URL: TITAN_API_BASE },
+        env: { ...process.env, TITAN_PI_API_URL: TITAN_API_BASE, TITAN_HOME },
       });
 
       if (result.code === 0) {
-        ctx.ui.notify(result.stdout, "success");
+        ctx.ui.notify(result.stdout, "info");
       } else {
         const err = (result.stderr || result.stdout || "unknown error").trim().slice(0, 1000);
         ctx.ui.notify(`Dashboard failed: ${err}`, "error");

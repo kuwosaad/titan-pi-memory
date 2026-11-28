@@ -112,7 +112,7 @@ function parseHelperJson(raw: HostExecuteOutput): unknown {
   } catch {
     throw new ExplorerRequestError(
       raw.exitCode === 0 ? "invalid_helper_response" : "helper_failed",
-      raw.exitCode === 0 ? "Titan explorer returned invalid JSON" : "Titan explorer failed without a structured error",
+      raw.exitCode === 0 ? "Titan explorer returned invalid JSON" : (raw.stderr.trim() || "Titan explorer failed without a structured error"),
     );
   }
 
@@ -169,7 +169,7 @@ export default async function plugin(bb: BbPluginApi) {
     titanRoot: {
       type: "string",
       label: "Titan root on target host",
-      description: "Optional source checkout or installed-package root; never supplied by the panel.",
+      description: "Optional source checkout to use instead of the bundled reader.",
       default: "",
       experimental_schema: runtimeSettingSchema,
     },

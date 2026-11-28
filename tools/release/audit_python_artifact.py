@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import sys
 import tarfile
@@ -115,12 +116,23 @@ def _artifact_paths(path: Path) -> Iterable[Path]:
     return (path,)
 
 
+def _runtime_members(artifact: Path) -> Iterator[tuple[str, bytes]]:
+    for relative, data in _artifact_members(artifact):
+        yield relative, data
+        if PurePosixPath(relative).name == "titan_engine.zip":
+            with zipfile.ZipFile(io.BytesIO(data)) as engine:
+                for info in engine.infolist():
+                    member = _relative_name(info.filename)
+                    if not info.is_dir():
+                        yield member, engine.read(info)
+
+
 def audit(path: Path) -> list[str]:
     artifacts = list(_artifact_paths(path))
     violations: list[str] = []
     for artifact in artifacts:
         try:
-            for relative, data in _artifact_members(artifact):
+            for relative, data in _runtime_members(artifact):
                 if relative.startswith(FORBIDDEN_PREFIXES):
                     violations.append(f"{artifact.name}:{relative}: development-only path")
                 if any(pattern.search(relative) for pattern in FORBIDDEN_FILE_PATTERNS):

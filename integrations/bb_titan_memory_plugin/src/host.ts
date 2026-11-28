@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { basename, resolve } from "node:path";
+import explorerSource from "../assets/explorer.py" with { type: "text" };
 import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
 import {
   MAX_HELPER_STDERR_BYTES,
@@ -8,6 +9,11 @@ import {
   type HostExecuteInput,
   hostContract,
 } from "./contract.js";
+
+// bb sends the host bundle to the target machine without its source directory.
+// Feed the embedded Python on its own stdin line to avoid OS argument limits.
+const sourceLine = JSON.stringify(explorerSource) + "\n";
+const executeSource = "import json,sys; exec(compile(json.loads(sys.stdin.buffer.readline()), 'explorer.py', 'exec'))";
 
 const MAX_ACTIVE_CHILDREN = 4;
 const MAX_STDIN_BYTES = 64 * 1024;
@@ -65,7 +71,7 @@ function resolveSharedTitanHome(configuredValue?: string): string | undefined {
   return home;
 }
 
-function pythonInvocation(command: HostExecuteInput["command"], runtime?: HostExecuteInput["runtime"]): {
+function pythonInvocation(runtime?: HostExecuteInput["runtime"]): {
   executable: string;
   args: string[];
   cwd: string | undefined;
@@ -78,9 +84,7 @@ function pythonInvocation(command: HostExecuteInput["command"], runtime?: HostEx
     PYTHONUNBUFFERED: "1",
   };
 
-  // A source checkout needs its root on PYTHONPATH; an installed Titan package
-  // works without it. Both values come from the host environment, never the
-  // panel request.
+  // An explicit checkout uses its own reader. Other hosts use the embedded reader.
   if (root) {
     env.PYTHONPATH = env.PYTHONPATH ? `${root}${process.platform === "win32" ? ";" : ":"}${env.PYTHONPATH}` : root;
   }
@@ -88,10 +92,7 @@ function pythonInvocation(command: HostExecuteInput["command"], runtime?: HostEx
   const home = resolveSharedTitanHome(runtime?.sharedHome);
   return {
     executable: python,
-    // The helper receives the operation in-band so stdin is the exact
-    // method-specific JSON payload plus the dispatch method, without BB panel
-    // identity fields.
-    args: ["-m", "app.graph.explorer", ...(home ? ["--home", home] : [])],
+    args: [...(root ? ["-m", "app.graph.explorer"] : ["-I", "-c", executeSource]), ...(home ? ["--home", home] : [])],
     cwd: root,
     env,
   };
@@ -116,7 +117,7 @@ function runHelper(input: HostExecuteInput, signal: AbortSignal): Promise<{
     return Promise.reject(new HostExecutionError("input_too_large", "explorer request exceeds the input limit"));
   }
 
-  const invocation = pythonInvocation(input.command, input.runtime);
+  const invocation = pythonInvocation(input.runtime);
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -208,7 +209,7 @@ function runHelper(input: HostExecuteInput, signal: AbortSignal): Promise<{
       kill(child, "SIGKILL");
       fail(new HostExecutionError("stdin_failed", `could not send explorer request: ${error.message}`));
     });
-    child.stdin.end(request);
+    child.stdin.end(invocation.cwd ? request : sourceLine + request);
   });
 }
 

@@ -6,7 +6,14 @@ const path = require('node:path');
 const packageRoot = path.resolve(process.argv[2] || path.resolve(__dirname, '..'));
 const runtimeRoot = path.join(packageRoot, 'runtime');
 
+const engineBundles = new Set([
+  'integrations/claude_titan_plugin/scripts/titan_engine.zip',
+  'integrations/codex_titan_plugin/scripts/titan_engine.zip',
+  'integrations/hermes_titan_plugin/titan_engine.zip',
+  'integrations/opencode_titan_plugin/scripts/titan_engine.zip',
+]);
 const requiredRuntimeFiles = [
+  ...engineBundles,
   'app/api/routes.py',
   'app/graph/cortex_analysis.py',
   'entrypoints/main.py',
@@ -15,11 +22,20 @@ const requiredRuntimeFiles = [
   'integrations/codex_titan_plugin/.codex-plugin/plugin.json',
   'integrations/codex_titan_plugin/.mcp.json',
   'integrations/codex_titan_plugin/hooks/hooks.json',
+  'integrations/codex_titan_plugin/scripts/titan_plugin_runtime.py',
   'integrations/claude_titan_plugin/.claude-plugin/plugin.json',
+  'integrations/claude_titan_plugin/.claude-plugin/icon.png',
   'integrations/claude_titan_plugin/.mcp.json',
+  'integrations/claude_titan_plugin/scripts/titan_claude_launcher.py',
+  'integrations/claude_titan_plugin/scripts/titan_runtime.py',
   'integrations/hermes_titan_plugin/__init__.py',
+  'integrations/hermes_titan_plugin/titan_runtime.py',
   'integrations/hermes_titan_plugin/plugin.yaml',
   'integrations/hermes_titan_plugin/README.md',
+  'integrations/opencode_titan_plugin/package.json',
+  'integrations/opencode_titan_plugin/dist/server.js',
+  'integrations/opencode_titan_plugin/dist/titan_v2_spool_plugin.ts',
+  'integrations/opencode_titan_plugin/scripts/titan_runtime.py',
   'tools/cli/titan.py',
 ];
 const allowedSuffixes = new Set([
@@ -123,6 +139,7 @@ for (const file of runtimeFiles) {
   if (!allowedExtensionlessFiles.has(file.relative)
     && !allowedOnboardingAssets.has(file.relative)
     && !allowedVendorLicenses.has(file.relative)
+    && !engineBundles.has(file.relative)
     && file.relative !== 'config/.env.example'
     && suffix !== '' && !allowedSuffixes.has(suffix)) {
     violations.push(`${file.relative}: unexpected artifact file type`);

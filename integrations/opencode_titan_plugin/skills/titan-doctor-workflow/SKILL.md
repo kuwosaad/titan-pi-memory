@@ -16,7 +16,7 @@ Diagnose from observed state before changing configuration.
 3. Check `agent_name`, `agent_namespace`, `trace_dir`, `trace_dir_exists`,
    `trace_file_count`, and recent trace filenames. Confirm the namespace is
    `opencode` unless the user deliberately configured another agent name.
-4. Check `provider_keys.missing_envs` before blaming retrieval or extraction.
+4. Check `provider_keys.missing_envs` before diagnosing retrieval or extraction. On OpenCode 2.x, the user can open the private provider form with `/titan-setup`. On classic 1.x, when the user asks to set up providers, read the launcher path from the configured `titan-memory` MCP command. Launch that same Python interpreter and script with `configure --agent opencode` as a background process. Send stdout and stderr to the null device so the form token stays out of chat. Ask the user to select and validate providers in the opened browser, then reconnect MCP.
 5. If the tool surface is missing, run `bun run setup`, then restart OpenCode and
    call `titan-memory_doctor` again. Report the exact missing tool names.
 6. If traces are missing, inspect the configured plugin path, file permissions, and

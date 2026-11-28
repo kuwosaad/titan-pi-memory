@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-DEFAULT_AGENT_NAME = "grok"
+from titan_grok_env import agent_home
 SOURCE = "grok"
 TEXT_LIMIT = 2000
 TOOL_LIMIT = 1000
@@ -105,22 +105,6 @@ def _nested(payload: dict[str, Any], *path: str) -> Any:
             return None
         current = current.get(key)
     return current
-
-
-def resolve_agent_name(env: dict[str, str] | None = None) -> str:
-    env = env or os.environ
-    for key in ("TITAN_AGENT_NAME", "GROK_PLUGIN_OPTION_agent_name"):
-        value = env.get(key, "").strip()
-        if value:
-            return value
-    return DEFAULT_AGENT_NAME
-
-
-def resolve_trace_dir(agent_name: str, env: dict[str, str] | None = None) -> Path:
-    env = env or os.environ
-    if env.get("TITAN_SPOOL_DIR"):
-        return Path(env["TITAN_SPOOL_DIR"]).expanduser()
-    return Path.home() / ".titan" / "agents" / agent_name / "traces"
 
 
 def resolve_session_id(payload: dict[str, Any]) -> str:
@@ -367,9 +351,7 @@ def read_stdin_payload(stdin: Any = sys.stdin) -> dict[str, Any]:
 def main(stdin: Any = sys.stdin, stdout: Any = sys.stdout) -> int:
     try:
         payload = read_stdin_payload(stdin)
-        agent_name = resolve_agent_name()
-        trace_dir = resolve_trace_dir(agent_name)
-        append_trace_events(build_trace_events(payload), trace_dir)
+        append_trace_events(build_trace_events(payload), agent_home() / "traces")
     except Exception:
         pass
     try:

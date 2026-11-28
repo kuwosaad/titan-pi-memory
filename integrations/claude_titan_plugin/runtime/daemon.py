@@ -156,6 +156,7 @@ class RuntimeGateway:
                     "pid": os.getpid(),
                     "owner_nonce": self.owner_nonce,
                     "started_at": self.started_at,
+                    "config_revision": os.environ.get("TITAN_CLAUDE_CONFIG_REVISION", ""),
                 },
             )
             return

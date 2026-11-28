@@ -5,12 +5,4 @@ description: Inspect Titan learned patterns for Grok. Use when the user runs /ti
 
 # Titan Patterns
 
-Pi tool: `titan_patterns`. Grok equivalent:
-
-```bash
-titan-grok patterns status
-titan-grok patterns list
-titan-grok patterns get --pattern-id <id>
-```
-
-Never auto-accept a pattern. For create/accept/reject, follow `titan-patterns-workflow` and use MCP pattern tools if connected.
+Use `titan-memory__patterns_status` or `titan-memory__patterns_list` to inspect patterns. Use `titan-memory__pattern_get` for a specific ID. Follow `titan-patterns-workflow` when the user wants to review, create or accept a pattern.

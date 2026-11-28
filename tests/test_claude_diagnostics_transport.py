@@ -30,10 +30,10 @@ class ClaudeDiagnosticsTransportTests(unittest.TestCase):
                 agent=CLAUDE_AGENT_NAME,
             )
 
-        self.assertEqual(contract["command"], "node")
+        self.assertEqual(contract["command"], "python3")
         self.assertEqual(
             [Path(item) for item in contract["args"]],
-            [PLUGIN_ROOT.resolve() / "scripts" / "titan_claude_mcp.js"],
+            [PLUGIN_ROOT.resolve() / "scripts" / "titan_claude_launcher.py"],
         )
         self.assertEqual(contract["env"]["TITAN_CLAUDE_DATA"], str(data.resolve()))
         self.assertEqual(contract["env"]["TITAN_AGENT_NAME"], CLAUDE_AGENT_NAME)

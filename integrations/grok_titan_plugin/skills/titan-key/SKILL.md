@@ -5,8 +5,4 @@ description: Set the Titan extraction API key for Grok. Use when the user runs /
 
 # Titan Key
 
-Pi walks this interactively. In Grok, write the key into `~/.titan/agents/grok/.env` without echoing the secret.
-
-Supported names: `OPENCODE_GO_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`.
-
-After writing, run `titan-grok doctor` and confirm the key name exists (not the value).
+Follow the `titan-setup` skill to open the local provider form. Have the user enter their key there. Check `titan-memory__doctor` for missing key names after Grok restarts.
