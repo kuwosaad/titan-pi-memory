@@ -1,6 +1,6 @@
 {
   "name": "titan-memory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Persistent memory, recall, and passive trace capture for Codex.",
   "author": {
     "name": "Titan Memory",
@@ -26,7 +26,7 @@
     "defaultPrompt": [
       "Use Titan Memory to recover prior decisions about this project.",
       "Use Titan Memory to remember the outcome of this work.",
-      "Check Titan health and memory context before making risky changes."
+      "Set up Titan Memory for Codex."
     ],
     "brandColor": "#d4687a",
     "composerIcon": "./assets/icon.png",

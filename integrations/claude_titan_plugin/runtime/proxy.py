@@ -54,7 +54,10 @@ def _identity(state: RuntimeState) -> dict | None:
 
 
 def _healthy(state: RuntimeState) -> bool:
-    return state.version == RUNTIME_VERSION and _identity(state) is not None
+    if state.version != RUNTIME_VERSION:
+        return False
+    identity = _identity(state)
+    return identity is not None and identity.get("config_revision", "") == os.getenv("TITAN_CLAUDE_CONFIG_REVISION", "")
 
 
 def _wait_owner_stopped(state: RuntimeState, timeout: float) -> bool:

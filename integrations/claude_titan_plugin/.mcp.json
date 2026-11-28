@@ -1,11 +1,14 @@
 {
   "mcpServers": {
     "titan-memory": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_mcp.js"],
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_launcher.py"
+      ],
       "env": {
         "TITAN_AGENT_NAME": "${user_config.agent_name}",
-        "TITAN_CLAUDE_DATA": "${CLAUDE_PLUGIN_DATA}"
+        "TITAN_CLAUDE_DATA": "${CLAUDE_PLUGIN_DATA}",
+        "TITAN_CLAUDE_EXTRACTION_KEY": "${user_config.opencode_go_api_key}"
       }
     }
   }

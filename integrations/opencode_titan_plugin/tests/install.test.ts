@@ -53,7 +53,8 @@ describe("installOpenCodePlugin", () => {
     expect(config).toContain("// Keep this MCP comment")
     expect(config).toContain('"theme": "dark"')
     expect(config).toContain('"titan-memory"')
-    expect(config).toContain('"command": ["titan", "mcp", "--agent", "opencode"]')
+    expect(config).toContain('"command": ["python3",')
+    expect(config).toContain('titan_runtime.py", "mcp", "--agent", "opencode"]')
     expect(result.configPath).toBe(configPath)
     expect(result.backups).toEqual([`${configPath}.bak`])
 
@@ -95,7 +96,7 @@ describe("installOpenCodePlugin", () => {
     expect(await readdir(join(root, ".config", "opencode", "plugins"))).toContain("titan_v2_spool_plugin.ts.bak")
   })
 
-  test("accepts a classic OpenCode 1.x runner and rejects newer majors", async () => {
+  test("detects classic and modern hosts and rejects unknown majors", async () => {
     const { root, source, skills } = await fixture()
     const configPath = join(root, "opencode.jsonc")
     const runner = async () => ({ stdout: "1.18.26\n", stderr: "", exitCode: 0 })
@@ -108,13 +109,20 @@ describe("installOpenCodePlugin", () => {
     })
     expect(result.opencodeVersion).toBe("1.18.26")
 
+    const modern = await installOpenCodePlugin({
+      homeDir: root, pluginSource: source, skillSourceDir: skills,
+      commandRunner: async () => ({ stdout: "opencode v2.4.2\n", exitCode: 0 }),
+    })
+    expect(modern.opencodeVersion).toBe("2.4.2")
+    expect(await readFile(modern.pluginPath, "utf8")).toContain("/dist/server.js")
+
     await expect(installOpenCodePlugin({
       homeDir: root,
       configPath: join(root, "new.json"),
       pluginSource: source,
       skillSourceDir: skills,
-      commandRunner: async () => ({ stdout: "2.0.0\n", stderr: "", exitCode: 0 }),
-    })).rejects.toThrow("OpenCode 1.x is required")
+      commandRunner: async () => ({ stdout: "3.0.0\n", stderr: "", exitCode: 0 }),
+    })).rejects.toThrow("OpenCode 1.x or 2.x is required")
   })
 
   test("repairs an invalid mcp value without creating a duplicate JSON key", async () => {

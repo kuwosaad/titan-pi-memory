@@ -5,34 +5,9 @@ description: Create or verify Titan Memory setup for Grok. Use when the user run
 
 # Titan Setup
 
-Prepare and verify Titan Memory for the Grok agent.
+Run the plugin’s provider setup when the user requests setup or a provider change.
 
-## Steps
-
-1. Create/verify the agent home:
-
-```text
-~/.titan/agents/grok/
-  .env
-  config/
-  traces/
-  out/memories/memory_store.db
-```
-
-You may run:
-
-```bash
-python3 integrations/grok_titan_plugin/scripts/titan_first_run.py --prepare
-```
-
-2. Ensure a provider key exists in `~/.titan/agents/grok/.env` (for example `GEMINI_API_KEY` or another supported key). Never print secret values.
-3. Confirm the `titan-memory` plugin is installed under `~/.grok/plugins/titan-memory` (or loaded via plugin path) and listed in `[plugins].enabled` if needed.
-4. Confirm MCP: `/mcps` should show `titan-memory` connected. Plugin servers under `~/.grok/plugins/` are trusted automatically.
-5. Confirm health with `/titan-status` or by calling `doctor`.
-
-## First prompts after setup
-
-- Recall prior work with `/titan-query`
-- Save a decision with `/titan-save`
-- Show recent memories with `/titan-recent`
-- Check doctor with `/titan-status`
+1. Resolve `../../scripts/titan_mcp_launcher.py` relative to this skill's directory. Run `python3 "<resolved script path>" configure` to open Titan's local provider form. This command also works while the MCP server is disconnected.
+2. Have the user select an extraction provider and embedding model and enter any required keys in that form. For Ollama embeddings, the selected model must already be available locally.
+3. After the settings are saved, restart the Titan server from `/mcps` or restart Grok. Call `titan-memory__doctor` and check the active namespace and missing provider keys.
+4. To verify persistence, save an agreed test fact with `store_trace_packet`, check `stored`, then recall the fact from a fresh Grok session.

@@ -54,6 +54,14 @@ from tools.cli.titan import (
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
+def _isolated_env(home, **values):
+    """A cleared environment that still lets Path.home() and subprocesses work on Windows."""
+    env = {key: os.environ[key] for key in ("SYSTEMROOT", "TEMP", "TMP") if key in os.environ}
+    env.update(HOME=str(home), USERPROFILE=str(home))
+    env.update(values)
+    return env
+
+
 class TitanCliTests(unittest.TestCase):
     def setUp(self):
         # The CLI captures TITAN_HOME when it is imported.  Give every test a
@@ -427,10 +435,10 @@ class TitanCliTests(unittest.TestCase):
         ):
             exit_code = run_graph(agent="opencode", session_id="ses_123", open_browser=True, port=8010)
         self.assertEqual(exit_code, 0)
-        open_mock.assert_called_once_with("http://127.0.0.1:8010/graph?session_id=ses_123")
+        open_mock.assert_called_once_with("http://127.0.0.1:8010/graph?session_id=ses_123&agent=opencode")
         uvicorn_mock.assert_called_once_with("entrypoints.main:app", host="127.0.0.1", port=8010, reload=False)
         output = stdout.getvalue()
-        self.assertIn("Graph URL: http://127.0.0.1:8010/graph?session_id=ses_123", output)
+        self.assertIn("Graph URL: http://127.0.0.1:8010/graph?session_id=ses_123&agent=opencode", output)
         self.assertIn("Memory count: 1", output)
 
     def test_run_graph_reports_port_fallback(self):
@@ -814,6 +822,52 @@ class TitanCliTests(unittest.TestCase):
         self.assertEqual(env_updates["TITAN_EMBEDDING_CONFIG_PATH"], str(embedding_path))
         self.assertIn("TITAN_EXTRACTION_CONFIG_PATH=", agent_env)
         self.assertIn("TITAN_EMBEDDING_CONFIG_PATH=", agent_env)
+
+    def test_noninteractive_codex_setup_stops_at_missing_credentials_and_resumes(self):
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "tools.cli.titan.TITAN_HOME", Path(tmp_dir) / "titan-home"
+        ), patch.dict(os.environ, _isolated_env(tmp_dir), clear=True), patch(
+            "tools.cli.titan.CODEX_MARKETPLACE_DIR", Path(tmp_dir) / "codex-marketplace"
+        ), patch("sys.stderr", new_callable=io.StringIO) as errors:
+            config_path = Path(tmp_dir) / "codex.toml"
+            self.assertEqual(run_setup_codex(config_path=config_path, skip_plugin_install=True, non_interactive=True), 1)
+            self.assertIn("titan key set OPENCODE_GO_API_KEY --agent codex", errors.getvalue())
+            self.assertFalse(config_path.exists())
+
+            agent_config = Path(tmp_dir) / "titan-home" / "agents" / "codex" / "config"
+            extraction = agent_config / "extraction_models.yaml"
+            embedding = agent_config / "embedding_models.yaml"
+            extraction.write_text("current: ollama\nollama: {model: custom-chat, base_url: 'http://127.0.0.1:8765'}\n")
+            embedding.write_text("current: ollama\nollama: {model: custom-embed, base_url: 'http://127.0.0.1:8765'}\n")
+            choices = (extraction.read_bytes(), embedding.read_bytes())
+            self.assertEqual(run_setup_codex(config_path=config_path, skip_plugin_install=True, non_interactive=True), 0)
+            self.assertEqual((extraction.read_bytes(), embedding.read_bytes()), choices)
+
+    def test_codex_verify_accepts_default_tools_with_hook_approval_pending(self):
+        stdout = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            marketplace_root = tmp_path / "codex-marketplace"
+            ok, detail = ensure_codex_marketplace_snapshot(target=marketplace_root)
+            self.assertTrue(ok, detail)
+            config_path = tmp_path / "config.toml"
+            config_path.write_text(generate_codex_mcp_enable_block(), encoding="utf-8")
+            traces = tmp_path / "traces"
+            traces.mkdir()
+            with patch.dict(os.environ, _isolated_env(tmp_path, OPENCODE_GO_API_KEY="unused-test-key"), clear=True), patch(
+                "sys.stdout", stdout
+            ), patch("tools.cli.titan.TITAN_HOME", tmp_path), patch(
+                "tools.cli.titan.CODEX_MARKETPLACE_DIR", marketplace_root
+            ), patch("tools.cli.titan.shutil.which", return_value="/usr/local/bin/codex"), patch(
+                "tools.cli.titan._codex_plugin_registration_status", return_value=(True, "installed")
+            ), patch("tools.cli.titan.resolve_effective_spool_dir", return_value=traces), patch(
+                "tools.cli.titan.codex_mcp_stdio_handshake",
+                return_value=(True, ["query_memories", "store_trace_packet", "get_scene_context", "doctor"], "ok"),
+            ):
+                self.assertEqual(run_codex_verify(config_path=config_path), 0, stdout.getvalue())
+        self.assertIn("run /hooks", stdout.getvalue())
+        self.assertIn("4 tools exported", stdout.getvalue())
+        self.assertNotIn("[missing]", stdout.getvalue())
 
     def test_run_setup_codex_patches_config_without_mcp_introspection(self):
         stdout = io.StringIO()

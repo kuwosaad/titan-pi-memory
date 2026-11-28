@@ -8,17 +8,18 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 import yaml
 from mcp.server import FastMCP
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 _default_home = ROOT_DIR if (ROOT_DIR / ".git").exists() else (Path.home() / ".titan-memory")
 sys.path.insert(0, str(ROOT_DIR))
 
 from app.runtime.context import get_runtime_context, hydrate_process_environment
+from app.runtime.mcp_tools import CORE_MCP_TOOLS
 
 _RUNTIME_CONTEXT = get_runtime_context(root_dir=ROOT_DIR, default_home=_default_home)
 hydrate_process_environment(_RUNTIME_CONTEXT)
@@ -40,6 +41,7 @@ from app.save_pipeline.pipeline import (
 )
 from app.storage.memories import get_memory_count, get_recent_memories as load_recent_memories, get_memory_repository
 from app.storage.models import TraceEvent, TracePacketRequest, TraceToolCall
+from app.storage.traces import sanitize_trace_value
 from app.save_pipeline.auto_ingest import _auto_ingest_loop
 from integrations.codex_titan_plugin.pending_recovery import (
     inspect_codex_stop_hook,
@@ -121,7 +123,12 @@ async def store_trace_packet(
     save_intent: Optional[bool] = None,
     intent_phrase: Optional[str] = None,
     context: Optional[dict] = None,
+    max_text_chars: Annotated[Optional[int], Field(ge=1, le=12_000)] = None,
 ) -> dict:
+    """Save a trace. When provided, cap goal and outcome after redacting secrets."""
+    if max_text_chars is not None:
+        goal = sanitize_trace_value(goal).strip()[:max_text_chars].rstrip()
+        outcome = sanitize_trace_value(outcome).strip()[:max_text_chars].rstrip()
     req = TracePacketRequest(
         goal=goal,
         thoughts=thoughts,
@@ -704,9 +711,6 @@ async def get_scene_context(scene_id: str, source_agent: Optional[str] = None) -
 server.tool()(get_scene_context)
 
 
-_CORE_TOOLS = frozenset({"query_memories", "store_trace_packet", "get_scene_context", "doctor"})
-
-
 def _apply_tool_profile() -> None:
     """Apply TITAN_MCP_TOOL_PROFILE (core by default, or full for all tools)."""
     profile = os.getenv("TITAN_MCP_TOOL_PROFILE", "core").strip().lower()
@@ -719,7 +723,7 @@ def _apply_tool_profile() -> None:
     with ThreadPoolExecutor(max_workers=1) as executor:
         tools = executor.submit(lambda: asyncio.run(server.list_tools())).result()
     for tool in tools:
-        if tool.name not in _CORE_TOOLS:
+        if tool.name not in CORE_MCP_TOOLS:
             server.remove_tool(tool.name)
 
 

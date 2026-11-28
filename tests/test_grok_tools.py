@@ -15,7 +15,8 @@ CLI = ROOT / "integrations" / "grok_titan_plugin" / "scripts" / "titan_grok_tool
 _tools_spec = importlib.util.spec_from_file_location("titan_grok_tools", CLI)
 assert _tools_spec and _tools_spec.loader
 _titan_grok_tools = importlib.util.module_from_spec(_tools_spec)
-_tools_spec.loader.exec_module(_titan_grok_tools)
+with patch.object(sys, "path", [str(CLI.parent), *sys.path]):
+    _tools_spec.loader.exec_module(_titan_grok_tools)
 
 
 class GrokToolsCliTests(unittest.TestCase):
@@ -26,7 +27,7 @@ class GrokToolsCliTests(unittest.TestCase):
 
     def test_tools_help_lists_pi_parity_commands(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            env = {**os.environ, "GROK_TITAN_HOME": str(Path(tmp_dir) / "grok")}
+            env = {**os.environ, "PYTHONPATH": str(ROOT), "GROK_TITAN_HOME": str(Path(tmp_dir) / "grok")}
             result = subprocess.run(
                 [sys.executable, str(CLI), "tools"],
                 check=False,
@@ -41,7 +42,7 @@ class GrokToolsCliTests(unittest.TestCase):
     def test_doctor_json_uses_grok_namespace(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             expected_home = Path(tmp_dir) / "grok"
-            env = {**os.environ, "GROK_TITAN_HOME": str(expected_home)}
+            env = {**os.environ, "PYTHONPATH": str(ROOT), "GROK_TITAN_HOME": str(expected_home)}
             result = subprocess.run(
                 [sys.executable, str(CLI), "--json", "doctor"],
                 check=False,
@@ -79,6 +80,7 @@ class GrokToolsCliTests(unittest.TestCase):
             explicit_home = Path(tmp_dir) / "grok-home"
             env = {
                 **os.environ,
+                "PYTHONPATH": str(ROOT),
                 "TITAN_HOME": str(Path(tmp_dir) / "shared-agent-home"),
                 "GROK_TITAN_HOME": str(explicit_home),
                 "TITAN_AGENT_NAME": "grok",
@@ -93,6 +95,18 @@ class GrokToolsCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["workspace"], str(explicit_home))
+
+    def test_foreign_scene_round_trip_keeps_its_owner(self):
+        from app.storage.models import Memory
+        row = Memory(id="r:1:0", text="example", ts="2026-11-26T00:00:00Z", session_id="r",
+                     turn=1, idx=0, scene_id="scene", source_agent="pi", provenance={})
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GROK_TITAN_HOME": tmp}):
+            with patch("app.storage.memories.get_recent_memories", return_value=[row]), patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(_titan_grok_tools.main(["--json", "recent"]), 0)
+            memory = json.loads(out.getvalue())["memories"][0]
+            with patch("app.save_pipeline.pipeline.get_scene_context", return_value={"scene": {}}) as fetch, patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(_titan_grok_tools.main(["scene", memory["scene_id"], "--source-agent", memory["source_agent"]]), 0)
+                fetch.assert_called_once_with("scene", source_agent="pi")
 
 
 if __name__ == "__main__":

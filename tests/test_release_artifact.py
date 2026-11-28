@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import os
@@ -10,8 +11,12 @@ import tarfile
 import tempfile
 import textwrap
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 from scripts import verify_packed_artifact as verifier
 
@@ -47,7 +52,7 @@ def prepare_candidate(state: Path) -> Path:
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "node_modules", ".venv"),
         )
     for relative in (
-        "config/.env.example", "config/embedding_models.yaml", "config/extraction_models.yaml",
+        "config/__init__.py", "config/.env.example", "config/embedding_models.yaml", "config/extraction_models.yaml",
         "config/settings.yaml", "config/visual_config.yaml", "tools/__init__.py",
         "tools/opencode/__init__.py", "tools/opencode/install_plugin.py", "requirements.txt",
         "LICENSE", "package.json", "scripts/package_gate.py", "scripts/verify_packed_artifact.py",
@@ -122,6 +127,21 @@ class ReleaseArtifactTests(unittest.TestCase):
             self.assertFalse(any(name.endswith("_agents.md") for name in names))
             for asset in ("FONT-SOURCE.txt", "source-serif-regular.ttf", "titan-logo.svg"):
                 self.assertIn(f"package/runtime/tools/cli/onboarding_ui/{asset}", names)
+
+            # Native hosts execute the nested engine, so the release gate must
+            # inspect changes inside those ZIPs even when the outer list matches.
+            engine = package_root / "runtime/integrations/hermes_titan_plugin/titan_engine.zip"
+            with zipfile.ZipFile(engine, "a") as modified:
+                modified.writestr("extra.py", "pass\n")
+            checked = run([sys.executable, str(GATE), "--pack", "--root", str(candidate)], cwd=ROOT)
+            self.assertNotEqual(checked.returncode, 0)
+            self.assertIn("plugins must ship identical engine archives", checked.stderr)
+            for other in (package_root / "runtime/integrations").rglob("titan_engine.zip"):
+                if other != engine:
+                    shutil.copyfile(engine, other)
+            checked = run([sys.executable, str(GATE), "--pack", "--root", str(candidate)], cwd=ROOT)
+            self.assertNotEqual(checked.returncode, 0)
+            self.assertIn("engine member differs: extra.py", checked.stderr)
 
             # The onboarding exceptions are exact paths, not blanket type allowances.
             unexpected = package_root / "runtime" / "tools" / "cli" / "onboarding_ui" / "other.svg"
@@ -199,7 +219,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                 [NPM, "install", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", str(install), str(malformed)],
                 cwd=state,
                 env=env,
-                timeout=90,
+                timeout=verifier.NPM_INSTALL_TIMEOUT_SEC,
             )
             self.assertEqual(installed.returncode, 0, installed.stderr)
             cli = install / "node_modules" / "titan-memory-cli" / "bin" / "titan.js"
@@ -211,50 +231,20 @@ class ReleaseArtifactTests(unittest.TestCase):
             self.assertNotIn("PYTHONPATH", env)
             self.assertNotIn("PYTHONHOME", env)
 
-            requests = [
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "clientInfo": {"name": "artifact-isolation-test", "version": "1"},
-                    },
-                },
-                {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
-                {
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {"name": "analyze_clusters", "arguments": {"cluster_ids": "1"}},
-                },
-            ]
-            invoked = subprocess.run(
-                ["node", str(cli), "mcp"],
-                cwd=isolated_cwd,
-                env=env,
-                input="\n".join(json.dumps(request) for request in requests) + "\n",
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=TIMEOUT,
+            params = StdioServerParameters(
+                command="node", args=[str(cli), "mcp"], cwd=isolated_cwd, env=env
             )
-            responses = []
-            for line in invoked.stdout.splitlines():
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if message.get("id") == 2:
-                    responses.append(message)
-            self.assertEqual(len(responses), 1, invoked.stderr or invoked.stdout)
-            call_response = responses[0]
-            self.assertTrue(
-                "error" in call_response or call_response.get("result", {}).get("isError"),
-                call_response,
-            )
-            diagnostics = f"{json.dumps(call_response)}\n{invoked.stderr}"
+            with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr:
+                async def call_analyze_clusters():
+                    async with stdio_client(params, errlog=stderr) as (read, write):
+                        async with ClientSession(read, write) as session:
+                            await session.initialize()
+                            return await session.call_tool("analyze_clusters", {"cluster_ids": "1"})
+
+                response = asyncio.run(asyncio.wait_for(call_analyze_clusters(), timeout=TIMEOUT))
+                stderr.seek(0)
+                diagnostics = f"{response.model_dump_json()}\n{stderr.read()}"
+            self.assertTrue(response.isError, diagnostics)
             self.assertIn("cortex_analysis", diagnostics)
             self.assertNotIn(str(ROOT), diagnostics)
 
@@ -387,7 +377,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                 cwd=isolated_cwd,
                 env=env,
                 # Allow the bounded cold install plus npm and warm protocol checks.
-                timeout=verifier.COLD_BOOTSTRAP_TIMEOUT_SEC + 3 * TIMEOUT,
+                timeout=verifier.NPM_INSTALL_TIMEOUT_SEC + verifier.COLD_BOOTSTRAP_TIMEOUT_SEC + 3 * TIMEOUT,
             )
             self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
             self.assertFalse(marker.exists(), "verifier allowed inherited PYTHON to run the artifact")

@@ -1,36 +1,47 @@
+/* Graph colours, shared by the canvas, the legend swatches and the correction
+   accents in the details panel. graph.tsx reads them at mount (hex only), so
+   what is drawn and what the legend shows cannot drift apart. The stage stays
+   a dark viewport in every host theme so the agent palette keeps its contrast. */
+.titan-explorer,
 .titan-graph-shell {
-  --titan-node-a: #d77f95;
-  --titan-node-b: #b09ac5;
-  --titan-node-c: #96b5a8;
-  --titan-node-d: #c5a27e;
-  --titan-node-e: #9daec3;
+  --titan-graph-stage: #171a1f;
+  --titan-edge-correction: #e8b072;
+  --titan-edge-correction-dim: #4a3d2e;
+  --titan-edge-similarity: #b8b0b2;
+  --titan-edge-similarity-focus: #e4dedf;
+  --titan-edge-dim: #3a3738;
+  --titan-edge-opacity: 0.6;
+  --titan-graph-selection: #f06a8b;
+}
+
+.titan-graph-shell {
   min-width: 0;
-  padding: 8px 10px 4px;
+  padding: 8px 12px 4px;
 }
 
 .titan-graph-toolbar {
   display: flex;
-  min-height: 26px;
+  min-height: 28px;
   justify-content: flex-end;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
-.titan-graph-controls { display: inline-flex; gap: 4px; }
+.titan-graph-controls { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .titan-graph-fit,
 .titan-graph-control {
-  min-width: 38px;
-  height: 25px;
-  padding: 0 9px;
+  min-width: 40px;
+  height: 28px;
+  padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 6px;
   color: var(--muted-foreground);
   background: color-mix(in srgb, var(--card) 86%, transparent);
   font: inherit;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
 }
-.titan-graph-fit:hover,
+.titan-graph-fit:hover:not(:disabled),
 .titan-graph-fit:focus-visible,
 .titan-graph-control:hover,
 .titan-graph-control:focus-visible {
@@ -39,6 +50,8 @@
   outline: none;
   box-shadow: 0 0 0 2px var(--state-hover);
 }
+.titan-graph-fit:disabled,
+.titan-graph-filter select:disabled { cursor: not-allowed; opacity: 0.5; }
 
 .titan-graph3d-stage {
   position: relative;
@@ -46,10 +59,14 @@
   height: clamp(340px, 48vh, 560px);
   overflow: hidden;
   border-radius: calc(var(--radius) - 3px);
-  background:
-    radial-gradient(circle at 48% 44%, rgba(106, 52, 84, 0.28), transparent 68%),
-    radial-gradient(circle at 70% 76%, rgba(62, 76, 91, 0.13), transparent 45%),
-    #100d18;
+  background: var(--titan-graph-stage);
+}
+/* Without WebGL there is nothing to draw: collapse to a short notice
+   instead of a tall empty slab. */
+.titan-graph3d-stage--unavailable {
+  height: auto;
+  min-height: 72px;
+  background: var(--surface-recessed);
 }
 
 .titan-graph3d-host {
@@ -74,42 +91,54 @@
   display: grid;
   max-width: min(280px, calc(100% - 24px));
   gap: 4px;
-  padding: 9px 11px;
-  border: 1px solid rgba(214, 138, 155, 0.24);
-  border-radius: 9px;
-  color: #f2e5e8;
-  background: rgba(17, 13, 19, 0.86);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--card);
+  box-shadow: var(--shadow-md);
   pointer-events: none;
-  font-size: 11px;
+  font-size: 12px;
 }
-.titan-graph-hover span { color: #d7899c; font-size: 11px; }
+.titan-graph-hover span { overflow: hidden; color: var(--muted-foreground); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .titan-graph-hover strong {
   display: -webkit-box;
   overflow: hidden;
-  color: #f4e8ea;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 500;
   line-height: 1.38;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
 
 .titan-graph-loading,
-.titan-graph-load-error {
+.titan-graph-load-error,
+.titan-graph-note {
   position: absolute;
   inset: 50% auto auto 50%;
   z-index: 3;
   max-width: calc(100% - 32px);
   transform: translate(-50%, -50%);
-  padding: 8px 11px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: #d9c5cb;
-  background: rgba(14, 11, 17, 0.72);
-  font-size: 11px;
+  color: var(--muted-foreground);
+  background: var(--card);
+  font-size: 12px;
   pointer-events: none;
 }
-.titan-graph-load-error { color: #f0a8b6; }
+.titan-graph-note { inset: auto auto 12px 50%; transform: translateX(-50%); }
+.titan-graph3d-stage--unavailable .titan-graph-load-error {
+  position: static;
+  margin: 16px;
+  transform: none;
+  border: 0;
+  background: transparent;
+  text-align: center;
+}
 
 .titan-graph-accessible-note {
   position: absolute;
@@ -129,16 +158,45 @@
   min-height: 28px;
   padding: 6px 2px 2px;
   color: var(--subtle-foreground);
-  font-size: 11px;
+  font-size: 12px;
 }
-.titan-graph-footer span { display: inline-flex; align-items: center; gap: 4px; }
-.titan-graph-swatch { width: 7px; height: 7px; border-radius: 50%; background: #d77f95; }
+.titan-graph-footer span { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+
+.titan-agent-legend { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0 4px; }
+.titan-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 180px;
+  min-height: 24px;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.titan-agent-chip bdi { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.titan-agent-chip:hover:not(:disabled),
+.titan-agent-chip:focus-visible { border-color: var(--ring); color: var(--ink); outline: none; box-shadow: 0 0 0 2px var(--state-hover); }
+.titan-agent-chip--active { border-color: var(--ring); color: var(--ink); background: var(--surface-selected); }
+.titan-agent-chip:disabled { cursor: default; }
+.titan-agent-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 999px; }
 
 @container titan-panel (max-width: 520px) {
-  .titan-graph3d-stage { height: 380px; }
+  .titan-graph3d-stage:not(.titan-graph3d-stage--unavailable) { height: 380px; }
   .titan-graph-footer span:last-child { flex-basis: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .titan-graph3d-host canvas { scroll-behavior: auto; }
 }
+
+.titan-graph-filter { display: inline-flex; align-items: center; gap: 8px; color: var(--muted-foreground); font-size: 12px; }
+.titan-graph-filter select { max-width: 150px; min-height: 28px; padding: 4px; border: 1px solid var(--border); border-radius: 6px; color: var(--ink); background: var(--card); font: inherit; }
+/* Legend samples use the same colours and opacity as the drawn links. */
+.titan-graph-line { position: relative; display: inline-block; width: 20px; height: 2px; color: var(--titan-edge-similarity); background: currentColor; opacity: var(--titan-edge-opacity); }
+.titan-graph-line--correction { color: var(--titan-edge-correction); }
+.titan-graph-line--correction::after { position: absolute; inset: -3px 0 auto auto; content: ""; border-block: 4px solid transparent; border-left: 6px solid currentColor; }

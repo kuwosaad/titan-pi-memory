@@ -3,10 +3,10 @@ import { join } from "node:path"
 
 export const BUNDLE_FILENAME = "titan_v2_spool_plugin.ts"
 
-export async function buildBundle(): Promise<string> {
+async function buildFile(source: string, filename: string): Promise<string> {
   const root = join(import.meta.dir, "..")
-  const entrypoint = join(root, "src", "index.ts")
-  const outfile = join(root, "dist", BUNDLE_FILENAME)
+  const entrypoint = join(root, "src", source)
+  const outfile = join(root, "dist", filename)
   await mkdir(join(root, "dist"), { recursive: true })
   const result = await Bun.build({
     entrypoints: [entrypoint],
@@ -24,6 +24,11 @@ export async function buildBundle(): Promise<string> {
   // Write it explicitly so the installer always consumes the generated bundle.
   await Bun.write(outfile, result.outputs[0])
   return outfile
+}
+
+export async function buildBundle(): Promise<string> {
+  await buildFile("server.ts", "server.js")
+  return buildFile("index.ts", BUNDLE_FILENAME)
 }
 
 if (import.meta.main) {

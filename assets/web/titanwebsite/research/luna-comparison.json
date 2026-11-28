@@ -1,0 +1,283 @@
+{
+  "source": "Corrected R5 comparison; earlier comparison superseded",
+  "reader": "GPT-6 Luna xhigh",
+  "judge": "GPT-6.1 Terra high",
+  "arms": {
+    "baseline": {
+      "cases": 500,
+      "correct": 461,
+      "accuracy": 0.922,
+      "grade_accounting_records": 500,
+      "actual_terra_verdicts": 498,
+      "reader_errors": 2,
+      "reader_wall_seconds": {
+        "mean": 19.540107806717984,
+        "median": 16.06962027050031,
+        "p95_linear": 39.797970993749914
+      },
+      "tokens_total": {
+        "input_tokens": 66622925,
+        "cached_input_tokens": 7970944,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 267036,
+        "reasoning_output_tokens": 202724,
+        "uncached_input_tokens": 58651981
+      },
+      "tokens_per_question": {
+        "input_tokens": 133245.85,
+        "cached_input_tokens": 15941.888,
+        "cache_write_input_tokens": 0.0,
+        "output_tokens": 534.072,
+        "reasoning_output_tokens": 405.448,
+        "uncached_input_tokens": 117303.962
+      },
+      "wrapper_actions": {},
+      "by_type": {
+        "single-session-user": {
+          "answered": 70,
+          "correct": 69
+        },
+        "multi-session": {
+          "answered": 133,
+          "correct": 113
+        },
+        "single-session-preference": {
+          "answered": 30,
+          "correct": 24
+        },
+        "temporal-reasoning": {
+          "answered": 133,
+          "correct": 126
+        },
+        "knowledge-update": {
+          "answered": 78,
+          "correct": 73
+        },
+        "single-session-assistant": {
+          "answered": 56,
+          "correct": 56
+        }
+      },
+      "strict_original_attempt_correct": 456,
+      "strict_original_attempt_accuracy": 0.912,
+      "titan_actions_excluding_instructions": 0,
+      "titan_actions_excluding_instructions_per_question": 0.0,
+      "timed_wrapper_actions": null
+    },
+    "no_scene": {
+      "cases": 500,
+      "correct": 446,
+      "accuracy": 0.892,
+      "grade_accounting_records": 500,
+      "actual_terra_verdicts": 497,
+      "reader_errors": 3,
+      "reader_wall_seconds": {
+        "mean": 92.21255696500596,
+        "median": 84.15982291699993,
+        "p95_linear": 160.68738154374904
+      },
+      "tokens_total": {
+        "input_tokens": 95040469,
+        "cached_input_tokens": 76063616,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2043414,
+        "reasoning_output_tokens": 1530267,
+        "uncached_input_tokens": 18976853
+      },
+      "tokens_per_question": {
+        "input_tokens": 190080.938,
+        "cached_input_tokens": 152127.232,
+        "cache_write_input_tokens": 0.0,
+        "output_tokens": 4086.828,
+        "reasoning_output_tokens": 3060.534,
+        "uncached_input_tokens": 37953.706
+      },
+      "wrapper_actions": {
+        "instructions": 557,
+        "recent": 579,
+        "search": 4728
+      },
+      "by_type": {
+        "single-session-user": {
+          "answered": 70,
+          "correct": 67
+        },
+        "multi-session": {
+          "answered": 133,
+          "correct": 111
+        },
+        "single-session-preference": {
+          "answered": 30,
+          "correct": 23
+        },
+        "temporal-reasoning": {
+          "answered": 133,
+          "correct": 118
+        },
+        "knowledge-update": {
+          "answered": 78,
+          "correct": 75
+        },
+        "single-session-assistant": {
+          "answered": 56,
+          "correct": 52
+        }
+      },
+      "strict_original_attempt_correct": 423,
+      "strict_original_attempt_accuracy": 0.846,
+      "titan_actions_excluding_instructions": 5307,
+      "titan_actions_excluding_instructions_per_question": 10.614,
+      "timed_wrapper_actions": {
+        "coverage": 5307,
+        "per_action_type": {
+          "recent": {
+            "count": 579,
+            "mean_ms": 5.57952702420718,
+            "median_ms": 2.545500000451284,
+            "p95_ms_linear": 18.355887798497864
+          },
+          "search": {
+            "count": 4728,
+            "mean_ms": 80.80711780541213,
+            "median_ms": 51.50254150021283,
+            "p95_ms_linear": 177.36201600009733
+          }
+        },
+        "sum_ms": 385286.59913100454,
+        "mean_summed_ms_per_question": 770.5731982620091,
+        "ratio_of_summed_action_ms_to_summed_client_wall_ms": 0.008356488786602419
+      }
+    },
+    "full": {
+      "cases": 500,
+      "correct": 465,
+      "accuracy": 0.93,
+      "grade_accounting_records": 500,
+      "actual_terra_verdicts": 500,
+      "reader_errors": 0,
+      "reader_wall_seconds": {
+        "mean": 86.04623313469001,
+        "median": 77.14033547900044,
+        "p95_linear": 169.3573772461496
+      },
+      "tokens_total": {
+        "input_tokens": 104045148,
+        "cached_input_tokens": 84589696,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1852439,
+        "reasoning_output_tokens": 1364505,
+        "uncached_input_tokens": 19455452
+      },
+      "tokens_per_question": {
+        "input_tokens": 208090.296,
+        "cached_input_tokens": 169179.392,
+        "cache_write_input_tokens": 0.0,
+        "output_tokens": 3704.878,
+        "reasoning_output_tokens": 2729.01,
+        "uncached_input_tokens": 38910.904
+      },
+      "wrapper_actions": {
+        "instructions": 527,
+        "search": 3561,
+        "scene": 1451,
+        "recent": 403
+      },
+      "by_type": {
+        "single-session-user": {
+          "answered": 70,
+          "correct": 70
+        },
+        "multi-session": {
+          "answered": 133,
+          "correct": 114
+        },
+        "single-session-preference": {
+          "answered": 30,
+          "correct": 26
+        },
+        "temporal-reasoning": {
+          "answered": 133,
+          "correct": 122
+        },
+        "knowledge-update": {
+          "answered": 78,
+          "correct": 77
+        },
+        "single-session-assistant": {
+          "answered": 56,
+          "correct": 56
+        }
+      },
+      "strict_original_attempt_correct": 446,
+      "strict_original_attempt_accuracy": 0.892,
+      "titan_actions_excluding_instructions": 5415,
+      "titan_actions_excluding_instructions_per_question": 10.83,
+      "timed_wrapper_actions": {
+        "coverage": 5415,
+        "per_action_type": {
+          "recent": {
+            "count": 403,
+            "mean_ms": 4.843185171215123,
+            "median_ms": 2.5945839997802977,
+            "p95_ms_linear": 16.838549699605203
+          },
+          "scene": {
+            "count": 1451,
+            "mean_ms": 3.2784147835783113,
+            "median_ms": 2.7595829997153487,
+            "p95_ms_linear": 7.14595850013211
+          },
+          "search": {
+            "count": 3561,
+            "mean_ms": 93.90146615164234,
+            "median_ms": 119.9049169990758,
+            "p95_ms_linear": 187.5575829999434
+          }
+        },
+        "sum_ms": 341091.9044409702,
+        "mean_summed_ms_per_question": 682.1838088819404,
+        "ratio_of_summed_action_ms_to_summed_client_wall_ms": 0.007928107762882582
+      }
+    }
+  },
+  "paired": {
+    "baseline_to_full": {
+      "pairs": 500,
+      "wrong_to_right": 14,
+      "right_to_wrong": 10,
+      "net_correct": 4,
+      "percentage_point_change": 0.8,
+      "both_correct": 451,
+      "both_incorrect": 25
+    },
+    "no_scene_to_full": {
+      "pairs": 500,
+      "wrong_to_right": 28,
+      "right_to_wrong": 9,
+      "net_correct": 19,
+      "percentage_point_change": 3.8,
+      "both_correct": 437,
+      "both_incorrect": 26
+    },
+    "baseline_to_no_scene": {
+      "pairs": 500,
+      "wrong_to_right": 14,
+      "right_to_wrong": 29,
+      "net_correct": -15,
+      "percentage_point_change": -3.0,
+      "both_correct": 432,
+      "both_incorrect": 25
+    }
+  },
+  "method_notes": [
+    "Within-run observations on repeatedly inspected cases; not held out and not a general superiority claim.",
+    "Baseline receives original full histories. No-scene retains source passages in search but disables scene opening and neighbor navigation. Full enables search, recent, and scene navigation.",
+    "500 grade-accounting records per arm include administrative zeros for reader failures; actual Terra verdict counts exclude these.",
+    "Strict original-attempt sensitivity counts cases with interrupted unfinished original attempts as zero; no captured valid answer was regenerated.",
+    "Reader wall time includes client startup, excludes ingestion and judging; not directly comparable to the earlier Sol native reader-turn timing. P95 uses linear interpolation at (n-1)*0.95.",
+    "Token input includes cached repeated prefixes, system, harness and tool content; it is neither unique corpus read nor actual billing. Reasoning output is a subset of output.",
+    "Titan action totals count recorded wrapper actions excluding instructions, as defined by the run\u2019s tool_count function; wrapper_actions separately includes instruction fetches. Native model-issued tool-call totals were not established. Baseline also made two empty catalog probes, neither returned evidence.",
+    "No source-credit audit was performed for this comparison. R5 source run: rubric 477/500 and source credit 410/500; legacy R2 card: rubric 477/500 and source credit 408/500.",
+    "Wrapper action timers include prompt checks, retrieval or reading, and serialization after the case lock; they exclude startup, transport, model execution and other work. Every logged search, recent and scene action is included, including errors. Baseline has no memory action timer. The action-time to complete client wall-time figure is a ratio of sums, not model generation timing; remaining wall time includes other work. P95 uses linear interpolation at (n-1)*0.95."
+  ]
+}

@@ -64,7 +64,7 @@ class ClaudePluginUxTests(unittest.TestCase):
                     self.assertEqual(hook["type"], "command")
                     self.assertEqual(
                         hook["command"],
-                        'node "${CLAUDE_PLUGIN_ROOT}/scripts/titan_claude_hook.js"',
+                        "python3",
                     )
                     self.assertLessEqual(hook["timeout"], 5)
         self.assertLessEqual(hooks["SessionEnd"][0]["hooks"][0]["timeout"], 2)

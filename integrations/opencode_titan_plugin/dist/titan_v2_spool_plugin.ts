@@ -1,13 +1,32 @@
 // @bun
+// src/namespace.ts
+import { homedir } from "os";
+import { basename, dirname, join, resolve } from "path";
+function namespaceEnvironment() {
+  const env = process.env;
+  const inherited = env.TITAN_HOME?.trim() || "";
+  const namedAgent = env.TITAN_AGENT_NAME?.trim();
+  const inAgents = Boolean(inherited) && basename(dirname(inherited)) === "agents";
+  const foreign = namedAgent && namedAgent !== "opencode" || inAgents && basename(inherited) !== "opencode";
+  const shared = env.TITAN_SHARED_HOME || (inAgents ? dirname(dirname(inherited)) : join(homedir(), ".titan"));
+  const home = resolve(inherited && !foreign ? inherited : join(shared, "agents", "opencode"));
+  const spool = !foreign && env.TITAN_SPOOL_DIR?.trim();
+  return {
+    TITAN_AGENT_NAME: "opencode",
+    TITAN_HOME: home,
+    TITAN_BASE_DIR: home,
+    TITAN_SPOOL_DIR: resolve(spool || join(home, "traces"))
+  };
+}
+
 // src/capture.ts
 import { chmodSync, closeSync, mkdirSync, openSync, renameSync, unlinkSync, writeSync } from "fs";
 import { createHash, randomUUID } from "crypto";
-import { join } from "path";
+import { join as join2 } from "path";
 var SOURCE = "opencode";
 var MAX_OUTPUT_CHARS = 1200;
 var MAX_ERROR_CHARS = 600;
 var MAX_ARGS_SERIALIZED_CHARS = 4000;
-var MAX_DEDUPE_IDS_PER_SESSION = 4096;
 var MAX_DEDUPE_SESSIONS = 64;
 var MAX_SYNC_ATTEMPTS = 3;
 var batchSequence = 0;
@@ -83,7 +102,7 @@ function isSensitiveKey(key) {
   return lowered === "key" || SECRET_KEY_MARKERS.some((marker) => lowered.includes(marker));
 }
 function retryDelay(attempt) {
-  return new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+  return new Promise((resolve2) => setTimeout(resolve2, 25 * attempt));
 }
 function redactString(value) {
   return SECRET_PATTERNS.reduce((current, pattern) => current.replace(pattern, "[REDACTED]"), value);
@@ -249,29 +268,18 @@ function idleEvent(sessionId, records) {
     anchor_message_id: anchor
   });
 }
-function spoolDir() {
-  const explicit = process.env.TITAN_SPOOL_DIR?.trim();
-  if (explicit)
-    return explicit;
-  const titanHome = process.env.TITAN_HOME?.trim();
-  if (titanHome)
-    return join(titanHome, "traces");
-  const sharedHome = join(process.env.HOME || ".", ".titan");
-  const agent = process.env.TITAN_AGENT_NAME?.trim() || "opencode";
-  return join(sharedHome, "agents", agent, "traces");
-}
 function writeBatch(sessionId, events) {
   if (events.length === 0)
     return;
-  const directory = spoolDir();
+  const directory = namespaceEnvironment().TITAN_SPOOL_DIR;
   mkdirSync(directory, { recursive: true, mode: 448 });
   chmodSync(directory, 448);
   const sessionHash = createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
   batchSequence = (batchSequence + 1) % 1e6;
   const createdAt = String(Date.now()).padStart(13, "0");
   const sequence = String(batchSequence).padStart(6, "0");
-  const target = join(directory, `opencode-${sessionHash}-${createdAt}-${sequence}-${randomUUID()}.jsonl`);
-  const temporary = join(directory, `.opencode-${sessionHash}-${randomUUID()}.tmp`);
+  const target = join2(directory, `opencode-${sessionHash}-${createdAt}-${sequence}-${randomUUID()}.jsonl`);
+  const temporary = join2(directory, `.opencode-${sessionHash}-${randomUUID()}.tmp`);
   const contents = events.map((event) => `${JSON.stringify(redact(event))}
 `).join("");
   let fd;
@@ -379,23 +387,14 @@ class CaptureCoordinator {
       if (idle)
         candidates.push(idle);
     }
-    const emitted = this.emitted.get(sessionId) || new Map;
+    const emitted = this.emitted.get(sessionId) || new Set;
     const fresh = candidates.filter((event) => {
       const id = String(event.event_id || "");
       return Boolean(id) && !emitted.has(id);
     });
     writeBatch(sessionId, fresh);
-    for (const event of fresh) {
-      const id = String(event.event_id);
-      emitted.delete(id);
-      emitted.set(id, true);
-      while (emitted.size > MAX_DEDUPE_IDS_PER_SESSION) {
-        const oldest = emitted.keys().next().value;
-        if (oldest === undefined)
-          break;
-        emitted.delete(oldest);
-      }
-    }
+    for (const event of fresh)
+      emitted.add(String(event.event_id));
     this.emitted.delete(sessionId);
     this.emitted.set(sessionId, emitted);
     while (this.emitted.size > MAX_DEDUPE_SESSIONS) {

@@ -1,0 +1,70 @@
+{
+  "system": "Titan Memory + GPT-6.1 Sol/high investigator",
+  "benchmark": "LongMemEval-S",
+  "evaluation_date": "2026-11-12",
+  "questions": 500,
+  "rubric": {
+    "correct": 477,
+    "percentage": 95.4,
+    "judge": "GPT-6 Astra/high",
+    "protocol": "frozen LongMemEval rubric with replacement model judge"
+  },
+  "source_audit": {
+    "credited": 408,
+    "percentage": 81.6,
+    "statuses": {
+      "supported_success": 406,
+      "supported_with_quote_error": 2,
+      "supported_conditional": 54,
+      "source_underspecified": 33,
+      "retrieval_miss": 3,
+      "incorrect_event_resolution": 1,
+      "partial_stale_estimate": 1
+    },
+    "credit_definition": [
+      "supported_success",
+      "supported_with_quote_error"
+    ]
+  },
+  "quotations": {
+    "supplied": 997,
+    "exact_original_saved_and_opened": 996
+  },
+  "scope": "Development-set result, not held-out generalization; measures the configured memory-plus-reader system, not isolated retrieval recall. Descriptive reader-turn and timed-action measurements are included for this same frozen run; no matched external baseline or speedup claim.",
+  "sources": [
+    "https://github.com/xiaowu0162/LongMemEval",
+    "https://arxiv.org/abs/2410.10813"
+  ],
+  "categories": {
+    "knowledge-update": {
+      "questions": 78,
+      "rubric_correct": 75,
+      "source_credit": 66
+    },
+    "multi-session": {
+      "questions": 133,
+      "rubric_correct": 121,
+      "source_credit": 90
+    },
+    "single-session-assistant": {
+      "questions": 56,
+      "rubric_correct": 56,
+      "source_credit": 55
+    },
+    "single-session-preference": {
+      "questions": 30,
+      "rubric_correct": 29,
+      "source_credit": 27
+    },
+    "single-session-user": {
+      "questions": 70,
+      "rubric_correct": 69,
+      "source_credit": 63
+    },
+    "temporal-reasoning": {
+      "questions": 133,
+      "rubric_correct": 127,
+      "source_credit": 107
+    }
+  }
+}

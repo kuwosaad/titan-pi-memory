@@ -1,16 +1,13 @@
+import { REQUIRED_SKILLS } from "../src/skills"
+import { namespaceEnvironment } from "../src/namespace"
 import { chmod, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join, basename } from "node:path"
+import { pathToFileURL } from "node:url"
 import { randomUUID } from "node:crypto"
 
 export const PLUGIN_FILENAME = "titan_v2_spool_plugin.ts"
-export const REQUIRED_SKILLS = [
-  "titan-memory-workflow",
-  "titan-doctor-workflow",
-  "titan-cluster-graph-workflow",
-  "titan-patterns-workflow",
-  "memory-sync",
-] as const
+export { REQUIRED_SKILLS } from "../src/skills"
 
 export type CommandResult = { stdout: string; stderr?: string; exitCode?: number }
 
@@ -201,7 +198,8 @@ function hasCommaAfter(text: string, position: number, objectEnd: number): boole
 
 function entryText(indent: string): string {
   const child = `${indent}  `
-  return `"titan-memory": {\n${child}"type": "local",\n${child}"command": ["titan", "mcp", "--agent", "opencode"],\n${child}"enabled": true\n${indent}}`
+  const launcher = join(import.meta.dir, "titan_runtime.py")
+  return `"titan-memory": {\n${child}"type": "local",\n${child}"command": ["python3", ${JSON.stringify(launcher)}, "mcp", "--agent", "opencode"],\n${child}"environment": ${JSON.stringify(namespaceEnvironment())},\n${child}"timeout": 180000,\n${child}"enabled": true\n${indent}}`
 }
 
 function mcpText(indent: string): string {
@@ -332,16 +330,16 @@ function commandPath(name: string): string | undefined {
 
 async function verifyCommands(options: InstallOptions): Promise<string> {
   const runner = options.commandRunner ?? runCommand
-  for (const command of ["titan", "opencode"]) {
+  for (const command of ["python3", "opencode"]) {
     if (!options.commandRunner && !commandPath(command)) throw new Error(`${command} is required but was not found on PATH`)
   }
   const versionResult = await runner("opencode", ["--version"])
   if (versionResult.exitCode && versionResult.exitCode !== 0) throw new Error(`Unable to determine OpenCode version: ${versionResult.stderr ?? ""}`.trim())
-  const match = versionResult.stdout.match(/(?:^|\s)(\d+)(?:\.\d+){0,2}(?:\s|$)/)
+  const match = versionResult.stdout.match(/(?:^|\s)v?(\d+(?:\.\d+){1,2})(?:\s|$)/)
   if (!match) throw new Error(`Unable to determine OpenCode version from: ${versionResult.stdout.trim()}`)
   const version = match[1]
-  if (version !== "1") throw new Error(`OpenCode 1.x is required; found ${version}`)
-  return versionResult.stdout.trim()
+  if (!/^[12]\./.test(version)) throw new Error(`OpenCode 1.x or 2.x is required; found ${version}`)
+  return version
 }
 
 function defaultConfigPath(homeDir: string): string {
@@ -375,13 +373,19 @@ export async function installOpenCodePlugin(options: InstallOptions = {}): Promi
   const pluginPath = join(pluginTargetDir, PLUGIN_FILENAME)
   await mkdir(pluginTargetDir, { recursive: true, mode: 0o700 })
   await chmod(pluginTargetDir, 0o700)
-  const incomingPlugin = await readFile(pluginSource)
+  const modern = opencodeVersion?.startsWith("2.")
+  const server = join(integrationDir, "dist", "server.js")
+  const incomingPlugin = modern
+    ? Buffer.from(`export { default } from ${JSON.stringify(pathToFileURL(server).href)}\n`)
+    : await readFile(pluginSource)
   if (await exists(pluginPath)) {
     const currentPlugin = await readFile(pluginPath)
     if (!currentPlugin.equals(incomingPlugin)) backups.push(await backup(pluginPath))
     else await chmod(pluginPath, 0o600)
   }
   if (!(await exists(pluginPath))) await atomicWrite(pluginPath, incomingPlugin)
+
+  if (modern) return { configPath, pluginPath, backups, skills: [...REQUIRED_SKILLS], opencodeVersion }
 
   const originalConfig = (await exists(configPath)) ? await readFile(configPath, "utf8") : "{}\n"
   const nextConfig = patchConfig(originalConfig)
@@ -405,5 +409,5 @@ export async function installOpenCodePlugin(options: InstallOptions = {}): Promi
 
 if (import.meta.main) {
   await installOpenCodePlugin()
-  console.log("Installed Titan Memory for OpenCode 1.x")
+  console.log("Installed Titan Memory for OpenCode")
 }

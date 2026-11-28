@@ -63,6 +63,41 @@ class OnboardingTests(unittest.TestCase):
         self.assertEqual(titan._load_yaml(home / 'config' / 'extraction_models.yaml')['current'], 'openai')
         self.assertNotIn('secret-example', json.dumps(onboarding._state('pi')))
 
+    def test_plugin_configure_key_takes_precedence_and_is_visible(self):
+        home = Path(self.temp.name) / 'agents' / 'claude-code'
+        home.mkdir(parents=True)
+        (home / '.env').write_text('OPENCODE_GO_API_KEY=old-saved-key\n')
+        (home / onboarding.MANAGED_KEYS_FILE).write_text(json.dumps({'OPENCODE_GO_API_KEY': '/plugin configure'}))
+        data = {'agent': 'claude-code', 'extraction': {'backend': 'opencode_go', 'model': 'deepseek-v4-flash'},
+                'embedding': {'backend': 'ollama', 'model': 'nomic-embed-text:v1.5'}, 'keys': {}}
+
+        state = onboarding._state('claude-code')
+        self.assertEqual(state['managed_keys'], {'OPENCODE_GO_API_KEY': '/plugin configure'})
+        self.assertNotIn('OPENCODE_GO_API_KEY', state['saved_keys'])
+        # No key is required here: the plugin field supplies it.
+        self.assertEqual(onboarding._validate(data), [])
+        # A replacement would be silently overridden, so it is refused with directions.
+        errors = onboarding._validate({**data, 'keys': {'OPENCODE_GO_API_KEY': 'new-key'}})
+        self.assertEqual(len(errors), 1)
+        self.assertIn('/plugin configure', errors[0])
+        self.assertIn('takes precedence', errors[0])
+        # The connection check does not probe a key it cannot see.
+        from tools.cli.onboarding_checks import check_configuration
+        with patch('tools.cli.onboarding_checks.requests') as requests:
+            requests.get.return_value.status_code = 200
+            requests.get.return_value.json.return_value = {'models': [{'name': 'nomic-embed-text:v1.5'}]}
+            result = check_configuration(data, configs={'extraction': {}, 'embedding': {}}, env={},
+                                         managed_keys=onboarding._managed_keys(home))
+            requests.post.assert_not_called()
+        self.assertTrue(result['ok'], result)
+        self.assertIn('/plugin configure', result['warnings'][0])
+
+        (home / onboarding.MANAGED_KEYS_FILE).unlink()
+        state = onboarding._state('claude-code')
+        self.assertEqual(state['managed_keys'], {})
+        self.assertIn('OPENCODE_GO_API_KEY', state['saved_keys'])
+        self.assertEqual(onboarding._validate({**data, 'keys': {'OPENCODE_GO_API_KEY': 'new-key'}}), [])
+
     def test_validation_and_body_limit(self):
         headers = {'X-Titan-Token': self.server.token, 'Content-Type': 'application/json'}
         status, body = self.request('POST', '/api/validate', '{}', headers)

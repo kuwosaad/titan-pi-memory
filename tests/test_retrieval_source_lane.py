@@ -145,3 +145,59 @@ def test_scene_diversity_is_source_qualified():
     hits = retriever._combine_source_hits(facts(),
         [passage('a', 'e1'), passage('a', 'e2'), passage('b', 'e1')], 8)
     assert [(hit['memory']['source_agent'], hit['memory']['source_event_ids'][0]) for hit in hits[-2:]] == [('a', 'e1'), ('b', 'e1')]
+
+
+def test_session_ties_reach_visible_slots_in_direct_and_federated_recall(tmp_path, monkeypatch):
+    repo = scenes(tmp_path, 'garden', [
+        ('first', '2026-04-04T00:00:00Z', 'a', 'amber lantern garden'),
+        ('first', '2026-04-03T00:00:00Z', 'b', 'amber lantern garden'),
+        ('second', '2026-04-02T00:00:00Z', 'c', 'amber lantern garden'),
+        ('third', '2026-04-01T00:00:00Z', 'd', 'amber lantern garden'),
+    ])
+    monkeypatch.setattr(retriever, '_retrieve_memories_impl', lambda *a, **kw: facts(12))
+    direct = retriever.retrieve_memories('amber lantern garden', repository=object(),
+                                       scene_repository=repo, source_agent='agent', top_k=12)
+    recall = FederatedRecall(active_agent='agent', memory_repositories={'agent': object()},
+                             scene_repositories={'agent': repo})
+    federated = recall.query_hits('amber lantern garden', sources=['agent'], limit=12)
+    for hits in (direct, federated):
+        sources = [h['memory'] for h in hits if h['memory'].get('result_kind') == 'source_passage']
+        assert [m['session_id'] for m in sources] == ['first', 'second', 'third']
+        assert [m['source_event_ids'] for m in sources] == [['a'], ['c'], ['d']]
+
+
+def test_federated_session_identity_includes_source_namespace(tmp_path, monkeypatch):
+    active = scenes(tmp_path, 'active', [
+        ('shared', '2026-04-04T00:00:00Z', 'a', 'amber lantern garden'),
+        ('shared', '2026-04-03T00:00:00Z', 'b', 'amber lantern garden'),
+    ])
+    foreign = scenes(tmp_path, 'foreign', [
+        ('shared', '2026-04-02T00:00:00Z', 'c', 'amber lantern garden'),
+    ])
+    monkeypatch.setattr(retriever, '_retrieve_memories_impl', lambda *a, **kw: facts(12))
+    recall = FederatedRecall(active_agent='active', memory_repositories={'active': object()},
+                             scene_repositories={'active': active, 'foreign': foreign})
+    hits = recall.query_hits('amber lantern garden', sources=['active', 'foreign'], limit=12)
+    sources = [h['memory'] for h in hits if h['memory'].get('result_kind') == 'source_passage']
+    assert [(m['source_agent'], m['source_event_ids'][0]) for m in sources] == [
+        ('active', 'a'), ('foreign', 'c'), ('active', 'b')]
+
+
+def test_federated_source_slots_preserve_scene_phases_and_score_priority(tmp_path, monkeypatch):
+    repo = JsonSceneRepository(tmp_path / 'phase.json')
+    repo.append_scenes([
+        {'scene_id': 'a', 'session_id': 'one', 'turn': 1, 'ts': '2026-04-03',
+         'messages': [{'role': 'user', 'event_id': 'a1', 'content': 'amber lantern garden'},
+                      {'role': 'user', 'event_id': 'a2', 'content': 'amber lantern garden'}]},
+        {'scene_id': 'b', 'session_id': 'one', 'turn': 2, 'ts': '2026-04-02',
+         'messages': [{'role': 'user', 'event_id': 'b1', 'content': 'amber lantern garden'}]},
+        {'scene_id': 'c', 'session_id': 'two', 'turn': 3, 'ts': '2026-04-01',
+         'messages': [{'role': 'user', 'event_id': 'c1', 'content': 'amber lantern'}]},
+    ])
+    monkeypatch.setattr(retriever, '_retrieve_memories_impl', lambda *a, **kw: facts(8))
+    recall = FederatedRecall(active_agent='agent', memory_repositories={'agent': object()},
+                             scene_repositories={'agent': repo})
+    hits = recall.query_hits('amber lantern garden', sources=['agent'], limit=12)
+    sources = [h['memory'] for h in hits if h['memory'].get('result_kind') == 'source_passage']
+    assert [(m['source_event_ids'][0], m['score']) for m in sources] == [
+        ('a1', 1), ('b1', 1), ('c1', 2/3), ('a2', 1)]

@@ -43,6 +43,8 @@ const requiredPiPayloads = [
   'tools/pi_extension/install.sh',
   'tools/pi_extension/README.md',
   'tools/pi_extension/server.py',
+  'tools/pi_extension/titan_runtime.py',
+  'tools/pi_extension/titan_engine.zip',
   'tools/pi_extension/titan_dashboard.py',
   'tools/pi_extension/prompts/memory-sync.md',
   'tools/pi_extension/skills/memory-sync/SKILL.md',

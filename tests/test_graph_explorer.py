@@ -1,4 +1,5 @@
 import base64
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -9,14 +10,21 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from app.graph.explorer import (
     MAX_DETAIL_TEXT,
     MAX_SNAPSHOT_BYTES,
     MAX_SNAPSHOT_NODES,
     ExplorerError,
+    ExplorerFilters,
+    WarningCollector,
+    correction_edges,
+    count_records,
     detail,
     handle_request,
+    newest_records,
+    resolve_agent,
 )
 
 
@@ -515,6 +523,92 @@ class GraphExplorerTests(ExplorerStoreMixin, unittest.TestCase):
         self.assertLess(elapsed, 5.0, f"bounded search took {elapsed:.3f}s")
         self.assertLess(page_elapsed, 5.0, f"direct page search took {page_elapsed:.3f}s")
 
+    def test_corrections_scene_patterns_and_namespace_isolation(self):
+        rows = [self.row("old", 1), self.row("new", 2, scene_id="scene-1"), self.row("third", 3)]
+        db = self.make_store(self.home, "pi", rows)
+        self.make_store(self.home, "other", [self.row("old", 1), self.row("new", 2)])
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.executescript("""
+                ALTER TABLE memories ADD COLUMN event_date TEXT;
+                ALTER TABLE memories ADD COLUMN event_start TEXT;
+                ALTER TABLE memories ADD COLUMN event_end TEXT;
+                CREATE TABLE memory_supersessions (source TEXT, old_id TEXT, new_id TEXT, evidence TEXT, created_at TEXT, PRIMARY KEY(source,old_id));
+                CREATE TABLE scenes (scene_id TEXT PRIMARY KEY, evidence_version INTEGER, evidence_status TEXT, extraction_user_text TEXT, extraction_assistant_text TEXT, source_event_ids_json TEXT);
+                CREATE TABLE patterns (id TEXT PRIMARY KEY, title TEXT, status TEXT);
+                CREATE TABLE pattern_evidence (pattern_id TEXT, memory_id TEXT, role TEXT);
+                CREATE INDEX evidence_memory ON pattern_evidence(memory_id);
+            """)
+            conn.execute("UPDATE memories SET event_date=?, event_start=?, event_end=? WHERE id='new'", ("2026-01", "2026-01-01", "2026-02-01"))
+            conn.executemany("INSERT INTO memory_supersessions VALUES (?,?,?,?,?)", [
+                ("pi", "old", "new", "x" * 1500, "2026-01-03"),
+                ("pi", "gone", "new", "removed old", "2026-01-04"),
+                ("other", "third", "new", "wrong source", "2026-01-05"),
+            ])
+            conn.execute("INSERT INTO scenes VALUES (?,?,?,?,?,?)", ("scene-1", 1, "complete", "u" * 3000, "assistant", json.dumps(["e" * 220] * 20)))
+            conn.execute("INSERT INTO patterns VALUES ('p1','Pattern','accepted')")
+            conn.execute("INSERT INTO pattern_evidence VALUES ('p1','new','support')")
+        snapshot = self.call("snapshot")
+        corrections = [edge for edge in snapshot["edges"] if edge["kind"] == "supersedes"]
+        self.assertEqual(corrections, [{"source": "pi::new", "target": "pi::old", "kind": "supersedes", "weight": 1}])
+        filtered = self.call("snapshot", filters={"agent": "other"})
+        self.assertFalse(any(edge["kind"] == "supersedes" for edge in filtered["edges"]))
+        response = self.call("detail", sourceAgent="pi", memoryId="new")
+        self.assertEqual(response["metadata"]["event_date"], "2026-01")
+        self.assertEqual(response["metadata"]["event_end"], "2026-02-01")
+        self.assertEqual({entry["memoryId"] for entry in response["corrections"]}, {"old", "gone"})
+        missing = next(entry for entry in response["corrections"] if entry["memoryId"] == "gone")
+        self.assertIsNone(missing["memory"])
+        self.assertEqual(response["scene"]["status"], "complete")
+        self.assertLessEqual(len(response["scene"]["userText"]), 2048)
+        self.assertEqual(len(response["scene"]["eventIds"]), 12)
+        self.assertLessEqual(len(response["scene"]["eventIds"][0]), 256)
+        self.assertEqual(response["patterns"], [{"id": "p1", "title": "Pattern", "status": "accepted", "role": "support"}])
+        old = self.call("detail", sourceAgent="pi", memoryId="old")
+        self.assertEqual(old["corrections"][0]["direction"], "replacedBy")
+        self.assertLessEqual(len(old["corrections"][0]["evidence"]), 1024)
+        self.assertEqual(self.call("detail", sourceAgent="other", memoryId="old")["corrections"], [])
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.execute("UPDATE scenes SET source_event_ids_json=?", (json.dumps(["e" * 220] * 40),))
+        response = self.call("detail", sourceAgent="pi", memoryId="new")
+        self.assertEqual(response["scene"]["status"], "complete")
+        self.assertTrue(any("preview limit" in warning for warning in response["warnings"]))
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.execute("UPDATE scenes SET evidence_version=0")
+        response = self.call("detail", sourceAgent="pi", memoryId="new")
+        self.assertEqual(response["scene"]["status"], "partial")
+
+    def test_legacy_corrections_scene_and_missing_old_schema(self):
+        path = self.make_store(self.home, "json", [
+            self.row("old", 1, source_event_ids=["old-event"], provenance={"user": "Original date"}),
+            self.row("new", 2, scene_id="s"),
+        ], json_only=True)
+        path.with_name("memories.json.relations.json").write_text(json.dumps([
+            {"source": "json", "old_id": "old", "new_id": "new", "evidence": "change", "created_at": "now"},
+            {"source": "other", "old_id": "old", "new_id": "new", "evidence": "bad", "created_at": "now"},
+        ]))
+        path.with_name("scenes.json").write_text(json.dumps([{"scene_id": "s", "evidence_status": "partial", "extraction_user_text": "source", "source_event_ids": ["event"]}]))
+        result = self.call("detail", sourceAgent="json", memoryId="new")
+        self.assertEqual(result["scene"]["userText"], "source")
+        self.assertEqual(result["scene"]["status"], "partial")
+        self.assertEqual(result["corrections"][0]["memory"]["memoryId"], "old")
+        self.assertEqual(len(result["corrections"]), 1)
+        self.assertEqual(len([e for e in self.call("snapshot")["edges"] if e["kind"] == "supersedes"]), 1)
+        original = self.call("detail", sourceAgent="json", memoryId="old")
+        self.assertIsNone(original["scene"])
+        self.assertEqual(original["memoryEvidence"], {"eventIds": ["old-event"], "userText": "Original date", "assistantText": ""})
+        db = self.make_store(self.home, "oldschema", [self.row("one", 1, scene_id="absent")])
+        old = self.call("detail", sourceAgent="oldschema", memoryId="one")
+        self.assertEqual(old["scene"]["status"], "missing")
+        self.assertEqual(old["corrections"], [])
+        self.assertEqual(old["patterns"], [])
+        self.assertIsNone(old["metadata"]["event_date"])
+
+    def test_snapshot_marks_exactly_one_over_limit_partial(self):
+        self.make_store(self.home, "pi", [self.row(f"m-{i}", i % 60) for i in range(151)])
+        result = self.call("snapshot")
+        self.assertEqual(len(result["nodes"]), 150)
+        self.assertTrue(result["partial"])
+
     def test_module_cli_emits_one_json_response_and_nonzero_errors(self):
         self.make_store(self.home, "pi", [self.row("one", 1)])
         command = [sys.executable, "-m", "app.graph.explorer", "--home", str(self.home)]
@@ -540,6 +634,215 @@ class GraphExplorerTests(ExplorerStoreMixin, unittest.TestCase):
         )
         self.assertNotEqual(failure.returncode, 0)
         self.assertEqual(json.loads(failure.stdout)["error"]["code"], "invalid_input")
+
+
+class ExplorerRobustnessTests(ExplorerStoreMixin, unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.home = Path(self.temp_dir.name) / ".titan"
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def call(self, method: str, **request):
+        return handle_request({"method": method, **request}, self.home)
+
+    def test_text_embedding_blob_degrades_to_no_vector(self):
+        self.make_store(self.home, "pi", [
+            self.row("good", 1),
+            self.row("text-blob", 2, embedding_blob="not a blob", embedding_dim=2, embedding_dtype="f32"),
+        ])
+        snapshot = self.call("snapshot")
+        by_id = {node["memoryId"]: node for node in snapshot["nodes"]}
+        self.assertEqual(set(by_id), {"good", "text-blob"})
+        self.assertFalse(by_id["text-blob"]["hasEmbedding"])
+
+    def test_lone_surrogates_do_not_break_snapshot_detail_or_cli(self):
+        path = self.make_store(self.home, "legacy", [], json_only=True)
+        # Written as raw JSON so the escaped lone surrogate reaches json.loads.
+        path.write_text(
+            '[{"id": "bad", "text": "bad \\ud800 surrogate", "type": "fact\\udfff", "ts": "2026-01-01T00:00:00+00:00"},'
+            ' {"id": "id\\ud800", "text": "unreadable id", "ts": "2026-01-01T00:00:01+00:00"}]',
+            encoding="utf-8",
+        )
+        snapshot = self.call("snapshot")
+        self.assertEqual([node["memoryId"] for node in snapshot["nodes"]], ["bad"])
+        self.assertEqual(snapshot["nodes"][0]["text"], "bad \ufffd surrogate")
+        self.assertEqual(self.call("detail", sourceAgent="legacy", memoryId="bad")["text"], "bad \ufffd surrogate")
+        self.assertEqual(self.call("catalog")["types"], ["fact\ufffd"])
+        result = subprocess.run(
+            [sys.executable, "-m", "app.graph.explorer", "--home", str(self.home)],
+            cwd=ROOT, input=json.dumps({"method": "snapshot"}), text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["nodes"][0]["memoryId"], "bad")
+
+    def test_embedded_nul_does_not_shorten_text(self):
+        text = "Null-ish \x00 byte and control \x07 chars"
+        self.make_store(self.home, "pi", [self.row("nul", 1, text=text)])
+        response = self.call("detail", sourceAgent="pi", memoryId="nul")
+        self.assertEqual(response["text"], text)
+        self.assertFalse(response["truncated"])
+        self.assertEqual(self.call("snapshot")["nodes"][0]["text"], text)
+
+    def test_detail_truncation_is_byte_bounded_for_multibyte_text(self):
+        self.make_store(self.home, "pi", [self.row("long", 1, text="é" * (MAX_DETAIL_TEXT + 10))])
+        response = self.call("detail", sourceAgent="pi", memoryId="long")
+        self.assertTrue(response["truncated"])
+        self.assertEqual(response["text"], "é" * (MAX_DETAIL_TEXT // 2))
+
+    def test_search_matches_non_ascii_letters_with_and_without_fts(self):
+        self.make_store(self.home, "fts", [self.row("cafe", 1, text="Team lunch at the café on Friday")])
+        like_db = self.make_store(self.home, "like", [self.row("naive", 1, text="A naïve CAFÉ plan")])
+        with closing(sqlite3.connect(like_db)) as conn, conn:
+            conn.execute("DROP TABLE memories_fts")
+        for query, expected in (
+            ("café", {"fts::cafe", "like::naive"}),
+            ("CAFÉ", {"fts::cafe", "like::naive"}),
+            ("naïve", {"like::naive"}),
+        ):
+            with self.subTest(query=query):
+                items = self.call("search", filters={"query": query})["items"]
+                self.assertEqual({item["nodeId"] for item in items}, expected)
+
+    def test_catalog_offers_only_complete_type_names(self):
+        long_type, exact_type = "t" * 300, "x" * 128
+        self.make_store(self.home, "pi", [self.row("long", 1, type=long_type), self.row("exact", 2, type=exact_type)])
+        catalog_response = self.call("catalog")
+        self.assertEqual(catalog_response["types"], [exact_type])
+        self.assertTrue(any("longer than 128" in warning for warning in catalog_response["warnings"]))
+        items = self.call("search", filters={"type": exact_type})["items"]
+        self.assertEqual([item["memoryId"] for item in items], ["exact"])
+
+    def test_namespace_cap_keeps_populated_namespaces_after_empty_directories(self):
+        for index in range(70):
+            (self.home / "agents" / f"a{index:02d}").mkdir(parents=True)
+        self.make_store(self.home, "zz-real", [self.row("kept", 1)])
+        snapshot = self.call("snapshot")
+        self.assertEqual([node["nodeId"] for node in snapshot["nodes"]], ["zz-real::kept"])
+        self.assertIn("zz-real", {agent["id"] for agent in self.call("catalog")["agents"]})
+
+    def test_snapshot_correction_limit_only_counts_visible_endpoints(self):
+        db = self.make_store(self.home, "pi", [self.row("old", 1), self.row("new", 2)])
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.execute(
+                "CREATE TABLE memory_supersessions (source TEXT, old_id TEXT, new_id TEXT, evidence TEXT, "
+                "created_at TEXT, PRIMARY KEY(source, old_id, new_id))"
+            )
+            conn.executemany("INSERT INTO memory_supersessions VALUES (?,?,?,?,?)", [
+                *(("pi", "old", f"hidden-{index}", "", "2026-02-01") for index in range(3)),
+                ("pi", "old", "new", "", "2026-01-01"),
+            ])
+        warnings = WarningCollector()
+        with patch("app.graph.explorer.MAX_SNAPSHOT_EDGES", 2):
+            edges = correction_edges(self.home, [("pi", "old"), ("pi", "new")], warnings)
+        self.assertEqual(edges, [{"source": "pi::new", "target": "pi::old", "kind": "supersedes", "weight": 1}])
+        self.assertEqual(warnings.as_list(), [])
+
+    def test_agent_names_resolve_to_the_canonical_namespace(self):
+        self.make_store(self.home, "codex", [self.row("one", 1)])
+        self.assertEqual(resolve_agent(self.home, "codex"), "codex")
+        self.assertEqual(resolve_agent(self.home, "CODEX"), "codex")
+        self.assertIsNone(resolve_agent(self.home, "nobody"))
+        with self.assertRaises(ExplorerError):
+            resolve_agent(self.home, "../x")
+        snapshot = self.call("snapshot", filters={"agent": "Codex"})
+        self.assertEqual([node["nodeId"] for node in snapshot["nodes"]], ["codex::one"])
+        self.assertEqual(self.call("detail", sourceAgent="CODEX", memoryId="one")["memory"]["sourceAgent"], "codex")
+
+    def test_configured_store_path_is_used_for_records_and_detail(self):
+        self.make_store(self.home, "codex", [self.row("default-store", 1)])
+        configured_db = self.make_store(Path(self.temp_dir.name) / "custom", "codex", [self.row("configured-store", 1)])
+        stores = {"codex": configured_db}
+        records, more = newest_records(self.home, ExplorerFilters(), 10, WarningCollector(), stores=stores)
+        self.assertEqual([record.memory_id for record in records], ["configured-store"])
+        self.assertFalse(more)
+        self.assertEqual(detail(self.home, "codex", "configured-store", stores=stores)["memory"]["memoryId"], "configured-store")
+        with self.assertRaises(ExplorerError):
+            detail(self.home, "codex", "default-store", stores=stores)
+
+    def test_session_filter_and_total_count(self):
+        self.make_store(self.home, "pi", [
+            self.row("a", 1, session_id="one"), self.row("b", 2, session_id="two"), self.row("c", 3, session_id="one"),
+        ])
+        filters = ExplorerFilters(session_id="one")
+        records, more = newest_records(self.home, filters, 1, WarningCollector())
+        self.assertEqual([record.memory_id for record in records], ["c"])
+        self.assertTrue(more)
+        self.assertEqual(count_records(self.home, filters, WarningCollector()), 2)
+
+    def test_invalid_ids_do_not_take_candidate_slots_or_counts(self):
+        # The two newest rows have ids that fail validation: a newline, and an
+        # embedded NUL that SQLite's length()/substr() would cut to "nul".
+        self.make_store(self.home, "pi", [
+            self.row("good-old", 0), self.row("good-new", 1),
+            self.row("bad\nid", 2), self.row("nul\x00tail", 3),
+        ])
+        warnings = WarningCollector()
+        records, more = newest_records(self.home, ExplorerFilters(), 2, warnings)
+        self.assertEqual([record.memory_id for record in records], ["good-new", "good-old"])
+        self.assertFalse(more)
+        self.assertIn("Skipped invalid id values in namespace pi", warnings.as_list())
+        self.assertEqual(count_records(self.home, ExplorerFilters(), WarningCollector()), 2)
+        snapshot = self.call("snapshot")
+        self.assertEqual([node["memoryId"] for node in snapshot["nodes"]], ["good-new", "good-old"])
+        for node in snapshot["nodes"]:
+            self.assertEqual(self.call("detail", sourceAgent="pi", memoryId=node["memoryId"])["memory"]["memoryId"], node["memoryId"])
+        with self.assertRaises(ExplorerError):
+            detail(self.home, "pi", "nul")
+
+    def test_infinite_and_oversized_numbers_drop_only_that_field(self):
+        db = self.make_store(self.home, "pi", [self.row("inf-turn", 1), self.row("fine", 0)])
+        with closing(sqlite3.connect(db)) as connection, connection:
+            connection.execute("UPDATE memories SET turn = 1e999, embedding_dim = 1e999 WHERE id = 'inf-turn'")
+        records, _ = newest_records(self.home, ExplorerFilters(), 10, WarningCollector())
+        by_id = {record.memory_id: record for record in records}
+        self.assertEqual(set(by_id), {"inf-turn", "fine"})
+        self.assertIsNone(by_id["inf-turn"].turn)
+        self.assertIsNone(by_id["inf-turn"].embedding)
+        self.assertIsNotNone(by_id["fine"].embedding)
+
+        self.make_store(self.home, "codex", [
+            self.row("json-inf", 1, turn=float("inf"), embedding=[10**400, 1.0]),
+            self.row(0, 0, turn=2, source_reliability=10**400),
+        ], json_only=True)
+        records, _ = newest_records(self.home, ExplorerFilters(agent="codex"), 10, WarningCollector())
+        by_id = {record.memory_id: record for record in records}
+        self.assertEqual(set(by_id), {"json-inf", "0"})
+        self.assertIsNone(by_id["json-inf"].turn)
+        self.assertIsNone(by_id["json-inf"].embedding)
+        self.assertIsNone(by_id["0"].source_reliability)
+        # A falsy legacy id keeps the same identity in the graph and in detail.
+        self.assertEqual(detail(self.home, "codex", "0")["memory"]["memoryId"], "0")
+
+    def test_utf16_store_text_and_ids_decode_correctly(self):
+        memory_dir = self.home / "agents" / "pi" / "out" / "memories"
+        memory_dir.mkdir(parents=True)
+        text = "héllo ✓ 😀 Arabic عربى\x00after-nul"
+        with closing(sqlite3.connect(memory_dir / "memory_store.db")) as connection, connection:
+            connection.execute("PRAGMA encoding = 'UTF-16le'")
+            connection.execute("CREATE TABLE memories (id TEXT PRIMARY KEY, text TEXT, ts TEXT)")
+            connection.executemany("INSERT INTO memories VALUES (?, ?, ?)", [
+                ("ünï-id", text, "2026-01-01T00:00:01+00:00"),
+                ("nul\x00id", "hidden", "2026-01-01T00:00:02+00:00"),
+            ])
+        snapshot = self.call("snapshot")
+        self.assertEqual([node["memoryId"] for node in snapshot["nodes"]], ["ünï-id"])
+        self.assertEqual(snapshot["nodes"][0]["text"], text)
+        payload = self.call("detail", sourceAgent="pi", memoryId="ünï-id")
+        self.assertEqual(payload["text"], text)
+        self.assertFalse(payload["truncated"])
+
+    def test_json_store_path_selects_json_over_a_stale_sqlite_file(self):
+        stale = self.make_store(self.home, "codex", [self.row("stale-sqlite", 1)])
+        json_path = self.make_store(self.home, "codex", [self.row("json-row", 1)], json_only=True)
+        self.assertEqual(stale.parent, json_path.parent)
+        stores = {"codex": json_path}
+        records, _ = newest_records(self.home, ExplorerFilters(), 10, WarningCollector(), stores=stores)
+        self.assertEqual([record.memory_id for record in records], ["json-row"])
+        self.assertEqual(detail(self.home, "codex", "json-row", stores=stores)["memory"]["memoryId"], "json-row")
+        with self.assertRaises(ExplorerError):
+            detail(self.home, "codex", "stale-sqlite", stores=stores)
 
 
 if __name__ == "__main__":

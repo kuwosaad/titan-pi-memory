@@ -19,6 +19,7 @@ from tools.cli.onboarding_checks import check_configuration
 
 UI_DIR = Path(__file__).parent / 'onboarding_ui'
 MAX_BODY = 32768
+MANAGED_KEYS_FILE = 'plugin_managed_keys.json'
 AGENTS = [{'id': 'opencode', 'label': 'OpenCode'}, {'id': 'codex', 'label': 'Codex'},
           {'id': 'claude-code', 'label': 'Claude Code'}, {'id': 'pi', 'label': 'Pi'}]
 MODELS = {
@@ -59,15 +60,34 @@ def _state(agent):
         if selected[kind]['model'] not in entry['models']:
             entry['models'].insert(0, selected[kind]['model'])
     keys = {item['key_env'] for catalog in catalogs.values() for item in catalog if item['key_env']}
-    return {'agents': AGENTS, **catalogs, 'selected': selected, 'saved_keys': sorted(key for key in keys if env.get(key))}
+    managed = {key: source for key, source in _managed_keys(home).items() if key in keys}
+    return {'agents': AGENTS, **catalogs, 'selected': selected,
+            'saved_keys': sorted(key for key in keys if env.get(key) and key not in managed),
+            'managed_keys': managed}
 
 
-def _validate(data):
+def _managed_keys(home):
+    """Credentials an agent host supplies itself, which take precedence over the .env.
+
+    The Claude Code launcher records the names (never the values) of keys set in
+    /plugin configure. A key saved here would be overridden by that value, so the
+    form shows where to change it instead of accepting a replacement.
+    """
+    try:
+        data = json.loads((home / MANAGED_KEYS_FILE).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str) and v}
+
+
+def _validate(data, *, agents=AGENTS):
     errors = []
     if not isinstance(data, dict):
         return ['Expected an object.']
     agent = data.get('agent')
-    if not isinstance(agent, str) or agent not in {a['id'] for a in AGENTS}:
+    if not isinstance(agent, str) or agent not in {a['id'] for a in agents}:
         errors.append('Choose a supported agent.')
         return errors
     keys = data.get('keys', {})
@@ -78,6 +98,11 @@ def _validate(data):
     allowed_keys = {x['key_env'] for kind in ('extraction', 'embedding') for x in _catalog(kind) if x['key_env']}
     if any(k not in allowed_keys or not isinstance(v, str) or len(v) > 4096 or '\n' in v or '\r' in v for k, v in keys.items()):
         return ['Invalid credential entry.']
+    managed = _managed_keys(home)
+    overridden = sorted(k for k, v in keys.items() if v.strip() and k in managed)
+    if overridden:
+        return [f'{k} is set in {managed[k]}, which takes precedence over a key saved here. '
+                f'Change it there, or clear that field and reload the plugin first.' for k in overridden]
     for kind in ('extraction', 'embedding'):
         value = data.get(kind)
         if not isinstance(value, dict):
@@ -90,7 +115,7 @@ def _validate(data):
             errors.append(f'Choose a valid {kind} provider and model.')
             continue
         key = entry['key_env']
-        if key and not (keys.get(key, '').strip() or env.get(key)):
+        if key and not (keys.get(key, '').strip() or env.get(key) or key in managed):
             errors.append(f'{key} is required.')
     if errors:
         return errors
@@ -114,7 +139,7 @@ def _validate(data):
     return errors
 
 
-def _install(data, scope, config_path):
+def _save_providers(data):
     agent = data['agent']
     home = titan.resolve_agent_titan_home(agent)
     home.mkdir(parents=True, exist_ok=True)
@@ -134,6 +159,12 @@ def _install(data, scope, config_path):
     updates = {'TITAN_EXTRACTION_CONFIG_PATH': str(extraction_path), 'TITAN_EMBEDDING_CONFIG_PATH': str(embedding_path)}
     updates.update({k: v.strip() for k, v in data.get('keys', {}).items() if v.strip()})
     titan.upsert_env_keys(home / '.env', updates)
+    return 0
+
+
+def _install(data, scope, config_path):
+    _save_providers(data)
+    agent = data['agent']
     if agent == 'pi':
         return 0
     if agent == 'opencode':
@@ -161,11 +192,17 @@ class OnboardingServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
 
-    def __init__(self, agent='opencode', scope='global', config_path=None):
+    def __init__(self, agent='opencode', scope='global', config_path=None, *, providers_only=False):
         super().__init__(('127.0.0.1', 0), Handler)
         self.token = secrets.token_urlsafe(32)
         self.agent, self.scope, self.config_path = agent, scope, config_path
-        self.locked_agent = agent if titan._explicit_titan_home else None
+        self.providers_only = providers_only
+        self.locked_agent = agent if providers_only or titan._explicit_titan_home else None
+        if providers_only:
+            label = next((item['label'] for item in AGENTS if item['id'] == agent), agent)
+            self.agents = [{'id': agent, 'label': label}]
+        else:
+            self.agents = AGENTS
         self.status = {'state': 'idle', 'message': '', 'exit_code': None}
         self.lock = threading.Lock()
         self.closed = threading.Event()
@@ -179,8 +216,12 @@ class OnboardingServer(ThreadingHTTPServer):
             self.status = {'state': 'running', 'message': 'Installing Titan…', 'exit_code': None}
         def work():
             try:
-                code = _install(data, self.scope, self.config_path if data['agent'] == self.agent else None)
-                message = (('Pi configuration saved and provider checks passed. Install or reload the Titan Pi extension separately.' if data['agent'] == 'pi' else ('Installation complete and provider checks passed. In Codex, run /hooks and trust the Titan hook, then restart.' if data['agent'] == 'codex' else 'Installation complete and provider checks passed. Restart your agent.')) if code == 0 else 'Installation failed. Check the terminal for details.')
+                if self.providers_only:
+                    code = _save_providers(data)
+                    message = 'Provider settings saved. Restart your agent to use them.'
+                else:
+                    code = _install(data, self.scope, self.config_path if data['agent'] == self.agent else None)
+                    message = (('Pi configuration saved and provider checks passed. Install or reload the Titan Pi extension separately.' if data['agent'] == 'pi' else ('Installation complete and provider checks passed. In Codex, run /hooks and trust the Titan hook, then restart.' if data['agent'] == 'codex' else 'Installation complete and provider checks passed. Restart your agent.')) if code == 0 else 'Installation failed. Check the terminal for details.')
             except RuntimeError as exc:
                 safe_errors = {'OpenCode configuration was not found. Install OpenCode first.', 'Could not safely update OpenCode configuration.', 'Codex marketplace or plugin files are unavailable.', 'Claude marketplace or plugin files are unavailable.'}
                 code, message = 1, str(exc) if str(exc) in safe_errors else 'Installation failed. Check your agent configuration and try again.'
@@ -231,12 +272,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {'error': 'Forbidden'})
         if path == '/api/state':
             agent = parse_qs(urlsplit(self.path).query).get('agent', [self.server.agent])[0]
-            if agent not in {a['id'] for a in AGENTS}:
+            if agent not in {a['id'] for a in self.server.agents}:
                 return self._send(400, {'error': 'Unsupported agent'})
             if self.server.locked_agent and agent != self.server.locked_agent:
                 return self._send(403, {'error': 'Agent is locked for this session'})
             state = _state(agent)
-            state['locked_agent'] = self.server.locked_agent
+            state.update(agents=self.server.agents, locked_agent=self.server.locked_agent, providers_only=self.server.providers_only)
             return self._send(200, state)
         if path == '/api/status':
             with self.server.lock:
@@ -290,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=pull, daemon=True).start()
             return self._send(200, {'ok': True})
         if path in ('/api/validate', '/api/install'):
-            errors = _validate(data)
+            errors = _validate(data, agents=self.server.agents)
             if self.server.locked_agent and (not isinstance(data, dict) or data.get('agent') != self.server.locked_agent):
                 errors.append('Agent is locked for this session.')
             if errors:
@@ -302,7 +343,8 @@ class Handler(BaseHTTPRequestHandler):
                     effective_env = titan._read_agent_effective_env(home, {})
                     config_path = Path(effective_env.get('TITAN_' + kind.upper() + '_CONFIG_PATH') or home / 'config' / (kind + '_models.yaml')).expanduser()
                     configs[kind] = titan._load_yaml(config_path if config_path.exists() else titan.ROOT_DIR / 'config' / (kind + '_models.yaml'))
-                result = check_configuration(data, configs=configs, env=titan._read_agent_effective_env(home, {}))
+                result = check_configuration(data, configs=configs, env=titan._read_agent_effective_env(home, {}),
+                                             managed_keys=_managed_keys(home))
                 self.server.validated = hmac.new(self.server.token.encode(), json.dumps(data, sort_keys=True).encode(), hashlib.sha256).digest() if result['ok'] else None
                 return self._send(200 if result['ok'] else 400, result)
             signature = hmac.new(self.server.token.encode(), json.dumps(data, sort_keys=True).encode(), hashlib.sha256).digest()
@@ -314,10 +356,12 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {'error': 'Not found'})
 
 
-def run_onboarding(agent='opencode', *, scope='global', config_path=None, open_browser=True):
-    if agent not in {a['id'] for a in AGENTS}:
+def run_onboarding(agent='opencode', *, scope='global', config_path=None, open_browser=True, providers_only=False):
+    if providers_only and titan._normalize_agent_name(agent) != agent:
+        raise ValueError('Use a lowercase agent name with letters, digits or hyphens')
+    if not providers_only and agent not in {a['id'] for a in AGENTS}:
         raise ValueError('Unsupported onboarding agent')
-    server = OnboardingServer(agent, scope, config_path)
+    server = OnboardingServer(agent, scope, config_path, providers_only=providers_only)
     url = f'http://127.0.0.1:{server.server_port}/#{server.token}'
     print(f'[titan] Open onboarding: {url}', flush=True)
     if open_browser:
@@ -341,7 +385,8 @@ def run_onboarding(agent='opencode', *, scope='global', config_path=None, open_b
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Open Titan browser onboarding')
-    parser.add_argument('--agent', default='opencode', choices=[a['id'] for a in AGENTS])
+    parser.add_argument('--agent', default='opencode')
     parser.add_argument('--no-browser', action='store_true')
+    parser.add_argument('--providers-only', action='store_true')
     args = parser.parse_args()
-    raise SystemExit(run_onboarding(args.agent, open_browser=not args.no_browser))
+    raise SystemExit(run_onboarding(args.agent, open_browser=not args.no_browser, providers_only=args.providers_only))

@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,12 +15,13 @@ HOOK_PATH = ROOT / "integrations" / "grok_titan_plugin" / "scripts" / "titan_gro
 spec = importlib.util.spec_from_file_location("titan_grok_hook", HOOK_PATH)
 titan_grok_hook = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
-spec.loader.exec_module(titan_grok_hook)
+with patch.object(sys, "path", [str(HOOK_PATH.parent), *sys.path]):
+    spec.loader.exec_module(titan_grok_hook)
 
 
 class GrokHookTests(unittest.TestCase):
     def _run_hook(self, tmp_dir: Path, payload: dict, extra_env: dict | None = None) -> tuple[list[dict], str, int]:
-        env = {"TITAN_SPOOL_DIR": str(tmp_dir)}
+        env = {"GROK_TITAN_HOME": str(tmp_dir)}
         if extra_env:
             env.update(extra_env)
         stdout = io.StringIO()
@@ -30,7 +32,7 @@ class GrokHookTests(unittest.TestCase):
             or payload.get("session_id")
             or "default"
         )
-        target = tmp_dir / f"{session_id}.jsonl"
+        target = tmp_dir / "traces" / f"{session_id}.jsonl"
         events = []
         if target.exists():
             events = [json.loads(line) for line in target.read_text(encoding="utf-8").splitlines()]
@@ -145,7 +147,7 @@ class GrokHookTests(unittest.TestCase):
         self.assertEqual(events[0]["session_id"], "claude-style")
         self.assertEqual(events[0]["payload"]["cwd"], "/repo")
 
-    def test_titan_spool_dir_is_honored(self):
+    def test_grok_home_contains_spool(self):
         with tempfile.TemporaryDirectory() as tmp:
             spool = Path(tmp) / "custom-spool"
             events, _, code = self._run_hook(
@@ -156,7 +158,7 @@ class GrokHookTests(unittest.TestCase):
                 },
             )
             self.assertEqual(code, 0)
-            self.assertTrue((spool / "spool-check.jsonl").exists())
+            self.assertTrue((spool / "traces" / "spool-check.jsonl").exists())
             self.assertEqual(events[0]["event_type"], "session_created")
 
     def test_stdout_is_continue_true(self):
@@ -254,18 +256,16 @@ class GrokHookTests(unittest.TestCase):
         self.assertEqual(events[0]["event_type"], "grok_hook_event")
         self.assertEqual(events[0]["payload"]["raw_type"], "WeirdNewThing")
 
-    def test_resolve_agent_name_prefers_env(self):
-        with patch.dict(os.environ, {"TITAN_AGENT_NAME": "custom-agent"}, clear=False):
-            self.assertEqual(titan_grok_hook.resolve_agent_name(), "custom-agent")
-        with patch.dict(
-            os.environ,
-            {"GROK_PLUGIN_OPTION_agent_name": "from-plugin"},
-            clear=False,
-        ):
-            # Clear TITAN_AGENT_NAME if present for isolation.
-            env = {"GROK_PLUGIN_OPTION_agent_name": "from-plugin"}
-            self.assertEqual(titan_grok_hook.resolve_agent_name(env), "from-plugin")
-        self.assertEqual(titan_grok_hook.resolve_agent_name({}), "grok")
+    def test_inherited_foreign_agent_and_spool_cannot_redirect_capture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            grok_home = Path(tmp) / "grok"
+            foreign = Path(tmp) / "codex"
+            events, _, _ = self._run_hook(
+                grok_home, {"hookEventName": "UserPromptSubmit", "sessionId": "mixed", "prompt": "sample"},
+                {"TITAN_AGENT_NAME": "codex", "TITAN_HOME": str(foreign), "TITAN_SPOOL_DIR": str(foreign)},
+            )
+            self.assertEqual(events[0]["payload"]["content"], "sample")
+            self.assertFalse(foreign.exists())
 
 
 if __name__ == "__main__":

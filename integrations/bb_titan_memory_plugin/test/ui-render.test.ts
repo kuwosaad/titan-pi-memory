@@ -65,7 +65,7 @@ function handlers(overrides: Record<string, (input: any) => any> = {}) {
 }
 
 function mount(rpc: any = handlers()) {
-  return renderSlot(action, { threadId: "thread-123", params: null }, { rpc, context: { threadId: "thread-123" } });
+  return renderSlot(action, { threadId: "thread-123", params: null, environment: null }, { rpc, context: { threadId: "thread-123" } });
 }
 
 function deferred<T>() {
@@ -82,6 +82,21 @@ test("registers native slot and performs no RPC before mount", () => {
   assert.equal(app.threadPanelActions.length, 1);
   assert.equal(action.title, "Titan Memory");
   assert.equal(action.layout, "flush");
+});
+
+test("switching threads in an open panel loads the new thread's records", async () => {
+  const { createElement } = await import("react");
+  const view = mount(handlers({ search: async ({ threadId }) => ({
+    items: [{ ...memory, text: threadId }], nextCursor: null, warnings: [],
+  }) }));
+  try {
+    await waitFor(() => assert.match(view.container.textContent || "", /thread-123/));
+    view.rerender(createElement(action.component, { threadId: "thread-456", params: null, environment: null }));
+    await waitFor(() => assert.match(view.container.textContent || "", /thread-456/));
+    assert.doesNotMatch(view.container.textContent || "", /thread-123/);
+  } finally {
+    view.unmount();
+  }
 });
 
 test("mount fetches snapshot then search and selection loads detail", async () => {

@@ -75,7 +75,7 @@ Keep stable preferences and constraints, accepted decisions, committed plans, ac
 
 Scan the whole exchange, including secondary clauses in mixed-topic messages, for independently useful explicit facts and identity or state updates. Preserve concrete amounts, ages, dates, counts, rates, and frequencies when useful for future questions, even when another topic dominates the exchange. Retain whether a value is exact or approximate and its subject and time context; do not turn an estimate into an exact value or infer missing details. Apply the same durability and privacy filters, and do not duplicate facts merely to cover these categories.
 
-Before selecting, check each topic and side clause for a distinct qualifying fact, including completed events and original values; do not let the main question or response obscure them.
+Before selecting, check each topic and side clause for distinct qualifying facts by named entity and attribute, including explicit user reports about other named people. Preserve the subject name and attribution, and the old and new state when explicit; do not turn another person's state into the speaker's personal state.
 
 Attribute each claim to the speaker who actually stated it; do not turn an assistant statement into a user fact. An assistant suggestion is not the user's decision unless the user accepts it. An assistant action report may support an action memory, but its confidence still comes from the source metadata.
 

@@ -14,10 +14,25 @@ export const MAX_NEIGHBORS = 8;
 export const MAX_PREVIEW_LENGTH = 240;
 export const MAX_WARNINGS = 64;
 
+export const MAX_PANEL_REQUESTS = 2;
+export const BUSY_RETRY_DELAYS_MS = [250, 600, 1200, 2400] as const;
+
+/**
+ * Categorical agent palette. It must equal the browser graph's --agent-1..8
+ * tokens (app/graph/ui/styles.css), assigned the same way (sorted agent
+ * name), so an agent has one colour on both surfaces. Entries never equal
+ * the selection or correction colours, which stay reserved.
+ */
+export const AGENT_PALETTE = ["#56B4E9", "#F0E442", "#3CC8A4", "#B49CFF", "#A6D96A", "#7F8CFF", "#A3ADBA", "#8BE9FD"] as const;
+export const SELECTION_COLOR = "#F06A8B";
+export const CORRECTION_COLOR = "#E8B072";
+export const LOCAL_AGENT = "local";
+
 export interface RequestGate {
   activate(request: string): string | null;
   isCurrent(request: string): boolean;
   close(): string | null;
+  reopen(): void;
 }
 
 export function createRequestGate(): RequestGate {
@@ -39,17 +54,99 @@ export function createRequestGate(): RequestGate {
       active = null;
       return previous;
     },
+    reopen() {
+      open = true;
+    },
   };
+}
+
+export class RequestSkippedError extends Error {
+  constructor() {
+    super("Titan explorer request was superseded");
+    this.name = "RequestSkippedError";
+  }
+}
+
+export function isBusyError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  if ((error as { code?: unknown }).code === "busy") return true;
+  return error instanceof Error && /too many Titan explorer requests/i.test(error.message);
+}
+
+export interface RequestScheduler {
+  run<T>(task: () => Promise<T>, wanted?: () => boolean): Promise<T>;
+}
+
+/**
+ * Limits one panel to a few in-flight backend calls and retries the shared
+ * backend's "busy" rejection with backoff, so a second panel or a quick
+ * detail click waits its turn instead of failing. Queued work that is no
+ * longer wanted (a newer request replaced it) is skipped before it is sent.
+ */
+export function createRequestScheduler(
+  limit = MAX_PANEL_REQUESTS,
+  delays: readonly number[] = BUSY_RETRY_DELAYS_MS,
+  wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+): RequestScheduler {
+  let active = 0;
+  const queue: Array<() => void> = [];
+  const acquire = () => {
+    if (active < limit) {
+      active += 1;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => queue.push(resolve));
+  };
+  const release = () => {
+    const next = queue.shift();
+    if (next) next();
+    else active -= 1;
+  };
+  return {
+    async run(task, wanted = () => true) {
+      for (let attempt = 0; ; attempt += 1) {
+        await acquire();
+        try {
+          if (!wanted()) throw new RequestSkippedError();
+          return await task();
+        } catch (error) {
+          if (!isBusyError(error) || attempt >= delays.length || !wanted()) throw error;
+        } finally {
+          release();
+        }
+        await wait(delays[attempt]);
+      }
+    },
+  };
+}
+
+/** Stable colour per agent: sorted order, so filters never reshuffle colours. */
+export function agentColors(agents: Iterable<string | null | undefined>): Map<string, string> {
+  const names = Array.from(new Set(Array.from(agents, (agent) => agent || LOCAL_AGENT)))
+    .sort((left, right) => left.localeCompare(right));
+  return new Map(names.map((name, index) => [name, AGENT_PALETTE[index % AGENT_PALETTE.length]]));
 }
 
 export function mergeWarnings(...groups: Array<readonly string[] | undefined>): string[] {
   return Array.from(new Set(groups.flatMap((group) => group || []))).slice(0, MAX_WARNINGS);
 }
 
+type GraphemeSegmenter = { segment(input: string): Iterable<{ segment: string }> };
+type GraphemeSegmenterConstructor = new (locale?: string, options?: { granularity: "grapheme" }) => GraphemeSegmenter;
+
+function graphemes(text: string): string[] {
+  const Segmenter = (Intl as unknown as { Segmenter?: GraphemeSegmenterConstructor }).Segmenter;
+  if (Segmenter) return Array.from(new Segmenter(undefined, { granularity: "grapheme" }).segment(text), (part) => part.segment);
+  return Array.from(text);
+}
+
+/** Collapses whitespace and truncates by grapheme so emoji are never split. */
 export function shortText(value: string, max = MAX_PREVIEW_LENGTH): string {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (text.length <= max) return text;
-  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+  const parts = graphemes(text);
+  if (parts.length <= max) return text;
+  return `${parts.slice(0, Math.max(0, max - 1)).join("").trimEnd()}…`;
 }
 
 export function requestId(prefix = "explorer"): string {
@@ -115,12 +212,39 @@ export function connectedMemories(
   const byId = new Map(memories.map((memory) => [memory.nodeId, memory]));
   const result: Array<{ memory: MemorySummary; weight: number }> = [];
   for (const edge of snapshot.edges) {
+    if (edge.kind !== "similarity") continue;
     const neighborId = edge.source === nodeId ? edge.target : edge.target === nodeId ? edge.source : null;
     if (!neighborId) continue;
     const memory = byId.get(neighborId);
     if (memory) result.push({ memory, weight: Number(edge.weight) });
   }
   return result.sort((left, right) => right.weight - left.weight).slice(0, MAX_NEIGHBORS);
+}
+
+/**
+ * Whether `nodeId` lies on a directed cycle of stored corrections
+ * (replacement -> replaced), of any length, within the given edges.
+ */
+export function inCorrectionCycle(
+  nodeId: string,
+  edges: ReadonlyArray<{ source: string; target: string }>,
+): boolean {
+  const next = new Map<string, string[]>();
+  for (const edge of edges) {
+    const targets = next.get(edge.source);
+    if (targets) targets.push(edge.target);
+    else next.set(edge.source, [edge.target]);
+  }
+  const seen = new Set<string>();
+  const stack = [...(next.get(nodeId) || [])];
+  while (stack.length) {
+    const current = stack.pop()!;
+    if (current === nodeId) return true;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    stack.push(...(next.get(current) || []));
+  }
+  return false;
 }
 
 export type PageToken = number | "…";

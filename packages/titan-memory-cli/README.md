@@ -22,6 +22,13 @@ open Codex
 approve Titan Memory
 ```
 
+## Install for Hermes Agent
+
+The package includes a native Hermes Agent plugin for automatic turn capture,
+MCP recall, and source scenes. After installing the CLI globally, find its setup
+guide at `$(npm root -g)/titan-memory-cli/runtime/integrations/hermes_titan_plugin/README.md`.
+Use `titan graph --agent hermes --open` to browse captured memories.
+
 ## Install the CLI globally
 
 Optional, if you want `titan` available on your PATH:

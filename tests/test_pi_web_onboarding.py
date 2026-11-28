@@ -16,9 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 class PiWebOnboardingTests(unittest.TestCase):
     def test_pi_waits_for_success_before_restarting_server(self):
         source = (ROOT / 'tools/pi_extension/index.ts').read_text(encoding='utf-8')
-        command = source[source.index('pi.registerCommand("titan-setup"'):source.index('pi.registerCommand("titan-key"')]
-        self.assertIn('await ensurePythonDependencies()', command)
-        self.assertIn('"-m", "tools.cli.onboarding", "--agent", "pi"', command)
+        command = source[source.index('const configureProviders ='):source.index('pi.registerCommand("titan-setup"')]
+        self.assertIn('await resolveTitanPython()', command)
+        self.assertIn('[RUNTIME_HELPER, "configure", "--agent", "pi"]', command)
         self.assertIn('TITAN_HOME', command)
         self.assertIn('onboardingInProgress', command)
         self.assertLess(command.index('if (result.code !== 0)'), command.index('await restartOwnedServer()'))

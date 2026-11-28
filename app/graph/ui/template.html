@@ -1,82 +1,119 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;0,8..60,600;0,8..60,700;1,8..60,400&display=swap" rel="stylesheet">
-    <script src="//cdn.jsdelivr.net/npm/3d-force-graph@1.79.0"></script>
-    <script src="//cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-    <style>{{CSS}}</style>
+    <title>Titan memory graph</title>
+    <link rel="icon" type="image/svg+xml" href="${brand_mark_url}">
+    <style>${styles}</style>
 </head>
 <body>
-    <canvas id="starfield"></canvas>
-    <div id="graph"></div>
-
-    <header class="dashboard-header">
-        <span class="dashboard-brand">titan memory</span>
-        <div class="dashboard-stats">
-            <span class="stat-chip"><span class="stat-dot memories"></span><span class="stat-num" data-count="${stat_memories}">0</span><span class="stat-label"> memories</span></span>
-            <span class="stat-chip"><span class="stat-dot connections"></span><span class="stat-num" data-count="${stat_connections}">0</span><span class="stat-label"> connections</span></span>
-            <span class="stat-chip"><span class="stat-dot clusters"></span><span class="stat-num" data-count="${stat_clusters}">0</span><span class="stat-label"> clusters</span></span>
+    <header class="masthead">
+        <button type="button" class="icon-button sidebar-toggle" id="sidebarToggle" aria-label="Toggle saved memories" aria-controls="memorySidebar" aria-expanded="true" title="Toggle saved memories"><span aria-hidden="true" class="sidebar-icon"></span></button>
+        <div class="brand">
+            <img class="brand-mark" src="${brand_mark_url}" alt="">
+            <span class="wordmark">titan</span>
         </div>
-        <span class="dashboard-scope">${scope_label}</span>
+        <h1>Memory graph</h1>
+        <span class="scope" id="scopeLabel" dir="auto">${scope_label}</span>
     </header>
-
-    <input type="checkbox" id="memorySidebarToggle" class="memory-toggle-checkbox" />
-    <label class="memory-toggle" for="memorySidebarToggle">
-        <span class="open-label">&#9776; memories</span>
-        <span class="close-label">&#10005; close</span>
-    </label>
-    <aside class="memory-sidebar" id="memorySidebar">
-        <div class="memory-sidebar-header">
-            <h2 class="memory-sidebar-title">saved memories</h2>
-            <div class="memory-sidebar-subtitle" id="memorySidebarSubtitle">${sidebar_subtitle}</div>
-            <div class="memory-sidebar-controls" id="memoryViewSwitch">
-                <button type="button" class="memory-view-pill active" data-view="recent">recent 24h</button>
-                <button type="button" class="memory-view-pill" data-view="all">all</button>
+    <main class="workspace" id="workspace">
+        <aside class="memory-sidebar" id="memorySidebar" aria-label="Saved memories">
+            <div class="sidebar-heading"><h2>Saved memories</h2><span id="sidebarCount" class="list-count"></span></div>
+            <p class="sidebar-notice" id="sidebarNotice" hidden></p>
+            <div class="memory-search">
+                <label for="sidebarSearch" class="visually-hidden">Search memories</label>
+                <input id="sidebarSearch" type="search" aria-label="Search memories" placeholder="Search memories" autocomplete="off">
+                <p class="search-hint" id="searchHint" hidden>Search covers the start of long memories.</p>
             </div>
-        </div>
-        <div class="sidebar-search">
-            <input type="text" id="sidebarSearch" placeholder="search memories..." autocomplete="off" />
-        </div>
-        <div class="sidebar-filters" id="sidebarFilters">
-            <span class="filter-pill active" data-filter="all">all</span>
-        </div>
-        <div class="memory-list" id="memoryList">${sidebar_cards_markup}</div>
-        ${recent_empty_markup}
-    </aside>
-
-    <div class="${hud_class}" id="nodeInspector">
-        <div class="inspector-header">
-            <span class="title">${hud_title_text}</span>
-            <button class="close-btn" id="inspectorClose" title="Deselect">&#10005;</button>
-        </div>
-        <div class="scope">${scope_label}</div>
-        <div class="stats">${stats_label}</div>
-        <div class="hint"><span class="pulse-dot"></span> click a node to inspect memory details</div>
-        <div class="node-details" id="nodeInfo"></div>
-    </div>
-
-    <div class="memory-preview-dim" id="memoryPreviewDim"></div>
-    <div class="node-hover-card" id="nodeHoverCard" aria-hidden="true">
-        <div class="node-hover-kicker" id="nodeHoverKicker">memory</div>
-        <div class="node-hover-text" id="nodeHoverText"></div>
-    </div>
-    <div class="memory-preview" id="memoryPreview" aria-hidden="true">
-        <div class="memory-preview-header">
-            <div>
-                <div class="memory-preview-kicker" id="memoryPreviewKicker">memory preview</div>
-                <div class="memory-preview-title" id="memoryPreviewTitle">selected memory</div>
+            <div class="memory-filters">
+                <div class="segmented" role="group" aria-label="Memory date range" id="memoryViewSwitch">
+                    <button type="button" data-view="recent" aria-pressed="true" title="Past 24 hours">Recent</button>
+                    <button type="button" data-view="all" aria-pressed="false">All</button>
+                </div>
+                <select id="typeFilter" aria-label="Filter by memory type"><option value="">All types</option></select>
             </div>
-            <button type="button" class="memory-preview-close" id="memoryPreviewClose" aria-label="Close preview">&#10005;</button>
-        </div>
-        <div class="memory-preview-body" id="memoryPreviewBody"></div>
-        <div class="memory-preview-meta" id="memoryPreviewMeta"></div>
-        <div class="memory-preview-connections" id="memoryPreviewConnections"></div>
-    </div>
-
-    <script>{{JS}}</script>
+            <a class="skip-link" id="skipToGraph" href="#graph">Skip to graph</a>
+            <div id="memoryList" class="memory-list" role="list" aria-label="Memories"></div>
+            <p id="sidebarEmpty" class="sidebar-empty" hidden></p>
+        </aside>
+        <div class="sidebar-scrim" id="sidebarScrim" aria-hidden="true" hidden></div>
+        <section class="graph-stage" id="graphStage" aria-label="Memory graph">
+            <canvas id="graph" tabindex="0" role="application" aria-roledescription="graph" aria-label="Memory graph" aria-describedby="graphDescription"></canvas>
+            <p class="visually-hidden" id="graphDescription"></p>
+            <div class="visually-hidden" id="graphAnnouncer" aria-live="polite"></div>
+            <div class="graph-toolbar" id="graphToolbar">
+                <div class="graph-summary">
+                    <span id="graphStats"></span>
+                    <div class="graph-legend" id="graphLegend" role="group" aria-label="Legend">
+                        <div class="agent-legend" id="agentLegend" role="group" aria-label="Agents"></div>
+                        <span class="link-keys">
+                            <span class="link-key" data-link-kind="similarity"><i class="legend-line" aria-hidden="true"></i>Similarity</span>
+                            <span class="link-key" data-link-kind="supersedes"><svg class="legend-arrow" viewBox="0 0 22 8" aria-hidden="true"><path d="M1 4H14"/><path d="M14 0.8 21 4 14 7.2Z"/></svg>Correction<span class="legend-hint">replacement → replaced</span></span>
+                        </span>
+                    </div>
+                    <p class="graph-note" id="capNotice" hidden></p>
+                    <p class="graph-note" id="physicsNotice" hidden>Static layout: the force simulation could not start in this browser.</p>
+                </div>
+                <div class="edge-filter"><select id="relationshipFilter" aria-label="Show links"><option value="all">All links</option><option value="similarity">Similarity links</option><option value="supersedes">Corrections</option></select></div>
+                <div class="focus-context" id="focusContext" hidden><span id="focusAnchor"></span><button type="button" class="focus-reset" id="clearFocus">Clear focus</button></div>
+            </div>
+            <div class="graph-empty" id="graphEmpty" hidden><strong id="emptyTitle">No memories yet</strong><span id="emptyDetail"></span><button type="button" class="empty-action" id="clearFilters" hidden>Clear filters</button><button type="button" class="empty-action" id="retryLoad" hidden>Retry</button></div>
+            <div class="graph-footer" id="graphFooter">
+                <details class="graph-layout" id="graphLayout">
+                    <summary>Layout</summary>
+                    <form class="graph-layout-panel" id="graphLayoutForm" aria-label="Graph layout">
+                        <fieldset id="graphForces">
+                            <legend>Forces</legend>
+                            <label>Center force <input name="centerStrength" type="range" min="0" max="1" step="0.01" value="0.1"></label>
+                            <label>Repel force <input name="repelStrength" type="range" min="0" max="20" step="0.1" value="10"></label>
+                            <label>Link force <input name="linkStrength" type="range" min="0" max="1" step="0.01" value="1"></label>
+                            <label>Link distance <input name="linkDistance" type="range" min="30" max="500" value="250"></label>
+                        </fieldset>
+                        <fieldset id="graphDisplay">
+                            <legend>Display</legend>
+                            <label>Node size <input name="nodeSize" type="range" min="0.5" max="2.5" step="0.1" value="1"></label>
+                            <label>Link width <input name="linkWidth" type="range" min="0.5" max="3" step="0.1" value="1"></label>
+                        </fieldset>
+                        <label id="localDepthField" hidden>Neighborhood depth <input name="localDepth" type="range" min="1" max="5" value="1"></label>
+                        <div class="graph-layout-actions">
+                            <button type="button" id="reheatGraph">Rebalance</button>
+                            <button type="button" id="resetLayout">Reset</button>
+                        </div>
+                    </form>
+                </details>
+                <div class="camera-controls" id="cameraControls" role="group" aria-label="Graph camera controls">
+                    <button type="button" class="icon-button" id="zoomOut" aria-label="Zoom out" title="Zoom out">−</button>
+                    <span id="zoomValue" title="Zoom relative to the fitted view">100%</span>
+                    <button type="button" class="icon-button" id="zoomIn" aria-label="Zoom in" title="Zoom in">+</button>
+                    <button type="button" class="fit-button" id="fitGraph">Fit</button>
+                </div>
+            </div>
+            <dialog class="memory-preview" id="memoryPreview" aria-labelledby="memoryPreviewTitle">
+                <header class="preview-header">
+                    <h2 id="memoryPreviewTitle" class="preview-type" tabindex="-1" dir="auto">Memory</h2>
+                    <span class="preview-load-status" id="previewLoadStatus" role="status"></span>
+                    <button class="icon-button" id="memoryPreviewClose" type="button" aria-label="Close details" title="Close (Esc)">×</button>
+                </header>
+                <div class="preview-scroll" id="previewScroll">
+                    <div id="previewContent">
+                        <p class="preview-text" id="memoryPreviewBody" dir="auto"></p>
+                        <dl class="preview-meta" id="memoryPreviewMeta"></dl>
+                        <details class="preview-identifiers"><summary>Memory identifiers</summary><div id="memoryIdentifiers"></div></details>
+                        <p class="preview-note" id="previewScope" hidden>Outside the current graph and list</p>
+                        <p class="preview-note" id="correctionCycle" hidden>These corrections form a loop: memories in it replace each other, so the replacement order is ambiguous.</p>
+                        <div id="memoryPreviewEvidence" hidden></div>
+                        <section id="memoryPreviewConnections" class="preview-section" hidden>
+                            <h3>Similar memories</h3><div id="similarMemories" class="preview-links"></div>
+                        </section>
+                    </div>
+                </div>
+                <footer class="preview-actions" id="previewActions" hidden><span class="focus-note" id="focusNote" hidden>No linked memories in this view</span><button type="button" id="focusMemory">Focus neighborhood</button></footer>
+            </dialog>
+        </section>
+    </main>
+    <script id="graphPhysics" type="application/json">${physics_script}</script>
+    <script>${canvas_script}</script>
+    <script>${client_script}</script>
 </body>
 </html>

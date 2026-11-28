@@ -14,9 +14,9 @@ Use this skill when the user says Titan is missing, `/mcp` does not show expecte
 ## Workflow
 
 1. Call `doctor` first.
-2. Check `mcp_tool_count` and `mcp_tools`. A healthy phase-3 Codex surface should include memory, doctor, cluster, analysis, pattern CRUD, evidence, mark-processed, import, and export tools.
+2. Check `mcp_tool_count` and `mcp_tools`. The default profile exports `query_memories`, `get_scene_context`, `store_trace_packet`, and `doctor`. Graph and pattern tools require the full profile.
 3. Check `agent_name`, `agent_namespace`, `trace_dir`, `trace_dir_exists`, `trace_file_count`, and recent trace file names.
-4. Check `provider_keys.missing_envs` before blaming retrieval or extraction logic.
+4. Check `provider_keys.missing_envs`. Use the titan-setup skill when the user needs to select or configure providers.
 5. If MCP tools are missing, ask the user to reinstall or refresh the local Codex plugin, then re-check `/mcp`.
 6. If traces are missing, inspect hook trust/config before assuming ingestion failed.
 7. If memories are stale, compare `trace_file_count`, `memory_count`, and recent trace files, then run a targeted query with `query_memories`.

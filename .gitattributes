@@ -2,3 +2,23 @@
 /tests/fixtures/lean_memory_cases.json text eol=lf
 /tests/fixtures/native_step2_cases.json text eol=lf
 /tests/fixtures/scene_context_cases.json text eol=lf
+
+# Native plugin runtime archives and their Python entrypoints use stable bytes.
+/LICENSE text eol=lf
+/requirements.txt text eol=lf
+/app/**/*.py text eol=lf
+/app/graph/ui/** text eol=lf
+/config/** text eol=lf
+/entrypoints/*.py text eol=lf
+/tools/*.py text eol=lf
+/tools/cli/*.py text eol=lf
+/tools/cli/onboarding_ui/** text eol=lf
+/tools/cli/onboarding_ui/*.ttf binary
+/tools/opencode/*.py text eol=lf
+/tools/plugin_runtime/*.py text eol=lf
+/tools/pi_extension/titan_runtime.py text eol=lf
+/integrations/*.py text eol=lf
+/integrations/codex_titan_plugin/*.py text eol=lf
+/integrations/**/titan_runtime.py text eol=lf
+/integrations/**/titan_plugin_runtime.py text eol=lf
+titan_engine.zip binary

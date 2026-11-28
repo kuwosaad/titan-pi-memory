@@ -29,17 +29,20 @@ import re
 import sqlite3
 import struct
 import sys
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 
 _AGENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_FTS_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./-]*")
+# Unicode-aware so accented and non-Latin words survive tokenization; the FTS
+# table's unicode61 tokenizer handles case and diacritics.
+_FTS_TOKEN_RE = re.compile(r"[^\W_][\w./-]*")
+_SURROGATE_RE = re.compile("[\ud800-\udfff]")
 
 MAX_SOURCES = 64
 MAX_CATALOG_TYPES = 256
 MAX_SNAPSHOT_NODES = 150
 MAX_SNAPSHOT_EDGES = 450
-MAX_SNAPSHOT_BYTES = 512 * 1024
+MAX_SNAPSHOT_BYTES = 480 * 1024
 MAX_NODE_TEXT = 240
 MAX_DETAIL_TEXT = 16 * 1024
 MAX_SEARCH_PAGE = 50
@@ -53,6 +56,8 @@ MAX_STREAM = 64
 MAX_TIMESTAMP = 128
 MAX_NODE_ID = 512
 MAX_VECTOR_DIM = 4096
+MAX_LINKED_EVIDENCE = 12
+MAX_ANCILLARY_BYTES = 32 * 1024 * 1024
 SQLITE_TIMEOUT_SECONDS = 2.0
 MAX_STDIN_BYTES = 1024 * 1024
 TOP_K = 2
@@ -98,6 +103,15 @@ class ExplorerFilters:
     date_to: Optional[str] = None
     date_to_exclusive: bool = False
     query: Optional[str] = None
+    # Used by the browser graph only; the BB request contract has no session filter.
+    session_id: Optional[str] = None
+
+
+# Explicit store paths that override ``<home>/agents/<agent>/out/memories``
+# discovery (the runtime-resolved active store). A ``.json`` path selects the
+# legacy JSON backend only; any other path is a SQLite store, with a sibling
+# memories.json read only when that database does not exist.
+StorePaths = Optional[Mapping[str, Path]]
 
 
 @dataclass
@@ -118,6 +132,9 @@ class MemoryRecord:
     speaker_focus: Optional[str]
     memory_kind: Optional[str]
     embedding: Optional[tuple[float, ...]]
+    event_date: Optional[str] = None
+    event_start: Optional[str] = None
+    event_end: Optional[str] = None
 
     @property
     def has_embedding(self) -> bool:
@@ -147,8 +164,19 @@ class StorageCandidate:
     record: Optional[MemoryRecord] = None
 
 
+def _clean_text(value: Any) -> str:
+    """Decode stored bytes leniently and replace lone surrogates.
+
+    Legacy rows can hold invalid UTF-8 or JSON-escaped lone surrogates; either
+    would otherwise fail when the response is encoded.
+    """
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return _SURROGATE_RE.sub("\ufffd", str(value))
+
+
 def _bounded_text(value: Any, limit: int) -> str:
-    text = str(value or "")
+    text = _clean_text(value or "")
     if len(text) <= limit:
         return text
     if limit <= 1:
@@ -166,13 +194,30 @@ def _truncate_utf8(text: str, max_bytes: int) -> tuple[str, bool]:
 def _optional_string(value: Any) -> Optional[str]:
     if value is None:
         return None
-    text = str(value)
+    text = _clean_text(value)
     return text if text else None
 
 
 def _bounded_metadata(value: Any, limit: int) -> Optional[str]:
     text = _optional_string(value)
     return _bounded_text(text, limit) if text is not None else None
+
+
+def _identifier(value: Any, limit: int = MAX_MEMORY_ID) -> Optional[str]:
+    if (
+        isinstance(value, str)
+        and 0 < len(value) <= limit
+        and not any(char in value for char in "\r\n\x00")
+        and not _SURROGATE_RE.search(value)
+    ):
+        return value
+    return None
+
+
+def _evidence_event_ids(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value[:MAX_LINKED_EVIDENCE] if _identifier(item)]
 
 
 def _timestamp_value(value: Any) -> Optional[int]:
@@ -197,7 +242,8 @@ def _optional_int(value: Any) -> Optional[int]:
         return None
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: a legacy infinite value (SQLite REAL Inf, JSON Infinity).
         return None
 
 
@@ -206,7 +252,7 @@ def _optional_float(value: Any) -> Optional[float]:
         return None
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) else None
 
@@ -246,7 +292,8 @@ def _valid_vector(values: Any) -> Optional[tuple[float, ...]]:
             if not math.isfinite(number):
                 return None
             result.append(number)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: a JSON integer component too large for a float.
         return None
     if not result or not any(number != 0.0 for number in result):
         return None
@@ -266,9 +313,11 @@ def _decode_sqlite_vector(row: Any) -> Optional[tuple[float, ...]]:
         return None
     try:
         dimension = int(dim_value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if dimension <= 0 or dimension > MAX_VECTOR_DIM:
+        return None
+    if not isinstance(blob, (bytes, bytearray, memoryview)):
         return None
     raw = bytes(blob)
     expected = dimension * 4
@@ -288,14 +337,10 @@ def _record_from_row(
     text_limit: int = MAX_DETAIL_TEXT,
     warnings: Optional[WarningCollector] = None,
 ) -> Optional[MemoryRecord]:
-    memory_id = _optional_string(_row_value(row, "id"))
+    memory_id = _identifier(_row_value(row, "id"))
     if not memory_id:
         if warnings:
-            warnings.add(f"Skipped a {source_agent} memory with an empty id")
-        return None
-    if len(memory_id) > MAX_MEMORY_ID:
-        if warnings:
-            warnings.add(f"Skipped a {source_agent} memory with an oversized id")
+            warnings.add(f"Skipped a {source_agent} memory with an invalid id")
         return None
     timestamp = _optional_string(_row_value(row, "ts"))
     if timestamp is not None and len(timestamp) > MAX_TIMESTAMP:
@@ -317,7 +362,7 @@ def _record_from_row(
         timestamp=timestamp,
         session_id=_bounded_metadata(_row_value(row, "session_id"), MAX_SESSION_ID),
         turn=_optional_int(_row_value(row, "turn")),
-        scene_id=_bounded_metadata(_row_value(row, "scene_id"), MAX_FILTER_VALUE),
+        scene_id=_identifier(_row_value(row, "scene_id"), MAX_FILTER_VALUE),
         source_type=_bounded_metadata(_row_value(row, "source_type"), MAX_FILTER_VALUE),
         source_reliability=_optional_float(_row_value(row, "source_reliability")),
         verification_status=_bounded_metadata(_row_value(row, "verification_status"), MAX_FILTER_VALUE),
@@ -325,6 +370,7 @@ def _record_from_row(
         speaker_focus=_bounded_metadata(_row_value(row, "speaker_focus"), MAX_FILTER_VALUE),
         memory_kind=_bounded_metadata(_row_value(row, "memory_kind"), MAX_FILTER_VALUE),
         embedding=embedding,
+        **{key: _bounded_metadata(_row_value(row, key), MAX_TIMESTAMP) for key in ("event_date", "event_start", "event_end")},
     )
 
 
@@ -337,14 +383,11 @@ def _record_from_json(
 ) -> Optional[MemoryRecord]:
     if not isinstance(raw, dict):
         return None
-    memory_id = _optional_string(raw.get("id"))
+    # Validate the raw id (not a cleaned copy) so every node id can be looked up again.
+    memory_id = _identifier(str(raw["id"]) if raw.get("id") is not None else None)
     if not memory_id:
         if warnings:
-            warnings.add(f"Skipped a {source_agent} memory with an empty id")
-        return None
-    if len(memory_id) > MAX_MEMORY_ID:
-        if warnings:
-            warnings.add(f"Skipped a {source_agent} memory with an oversized id")
+            warnings.add(f"Skipped a {source_agent} memory with an invalid id")
         return None
     timestamp = _optional_string(raw.get("ts"))
     if timestamp is not None and len(timestamp) > MAX_TIMESTAMP:
@@ -360,7 +403,7 @@ def _record_from_json(
         timestamp=timestamp,
         session_id=_bounded_metadata(raw.get("session_id"), MAX_SESSION_ID),
         turn=_optional_int(raw.get("turn")),
-        scene_id=_bounded_metadata(raw.get("scene_id"), MAX_FILTER_VALUE),
+        scene_id=_identifier(raw.get("scene_id"), MAX_FILTER_VALUE),
         source_type=_bounded_metadata(raw.get("source_type"), MAX_FILTER_VALUE),
         source_reliability=_optional_float(raw.get("source_reliability")),
         verification_status=_bounded_metadata(raw.get("verification_status"), MAX_FILTER_VALUE),
@@ -368,6 +411,7 @@ def _record_from_json(
         speaker_focus=_bounded_metadata(raw.get("speaker_focus"), MAX_FILTER_VALUE),
         memory_kind=_bounded_metadata(raw.get("memory_kind"), MAX_FILTER_VALUE),
         embedding=_valid_vector(raw.get("embedding")),
+        **{key: _bounded_metadata(raw.get(key), MAX_TIMESTAMP) for key in ("event_date", "event_start", "event_end")},
     )
 
 
@@ -413,6 +457,9 @@ def _detail_metadata(record: MemoryRecord) -> dict[str, str | int | float | bool
         "verification_status": record.verification_status,
         "fallback_generated": record.fallback_generated,
         "speaker_focus": record.speaker_focus,
+        "event_date": record.event_date,
+        "event_start": record.event_start,
+        "event_end": record.event_end,
     }
 
 
@@ -510,29 +557,86 @@ def _safe_store_path(directory: Path, filename: str) -> Optional[Path]:
     return resolved
 
 
-def discover_agent_names(home: Path, agent: Optional[str], warnings: WarningCollector) -> list[str]:
+def _namespace_names(home: Path, warnings: WarningCollector, stores: StorePaths = None) -> list[str]:
+    names = set(stores or ())
     agents_root = home / "agents"
-    if agent is not None:
-        return [agent]
-    names: list[str] = []
     if agents_root.is_dir():
         try:
-            for entry in sorted(agents_root.iterdir(), key=lambda path: path.name):
+            for entry in agents_root.iterdir():
                 if not entry.is_dir() or not _AGENT_NAME_RE.fullmatch(entry.name):
                     continue
                 if _safe_agent_dir(home, entry.name) is None:
                     warnings.add(f"Skipped unsafe namespace {entry.name}")
                     continue
-                names.append(entry.name)
+                names.add(entry.name)
         except OSError as exc:
             warnings.add(f"Could not inspect Titan namespaces: {exc}")
+    return sorted(names)
+
+
+def resolve_agent(home: Path, agent: Any, stores: StorePaths = None) -> Optional[str]:
+    """Return the canonical namespace name for ``agent``, or None if unknown.
+
+    An exact match wins; otherwise a single case-insensitive match is used, so
+    ``Codex`` and ``codex`` label nodes and correction edges identically even
+    on case-insensitive filesystems. Raises ``invalid_input`` for bad names.
+    """
+    name = _validate_agent(agent)
+    if name is None:
+        return None
+    names = _namespace_names(home, WarningCollector(), stores)
+    if name in names:
+        return name
+    folded = [candidate for candidate in names if candidate.casefold() == name.casefold()]
+    return folded[0] if len(folded) == 1 else None
+
+
+def known_agents(home: Path, stores: StorePaths = None) -> list[str]:
+    """Namespaces that have a readable memory store."""
+    warnings = WarningCollector()
+    return [name for name in _namespace_names(home, warnings, stores) if _has_store(home, name, stores)]
+
+
+def _has_store(home: Path, name: str, stores: StorePaths = None) -> bool:
+    try:
+        return _source_for_agent(home, name, WarningCollector(), stores=stores) is not None
+    except ExplorerError:
+        return False
+
+
+def discover_agent_names(
+    home: Path, agent: Optional[str], warnings: WarningCollector, *, stores: StorePaths = None,
+) -> list[str]:
+    if agent is not None:
+        return [resolve_agent(home, agent, stores) or agent]
+    names = _namespace_names(home, warnings, stores)
     if len(names) > MAX_SOURCES:
         warnings.add(f"Namespace list limited to {MAX_SOURCES} sources")
-        names = names[:MAX_SOURCES]
+        # Apply the cap after preferring namespaces with a store, so empty or
+        # stale directories earlier in the alphabet cannot hide a real agent.
+        names = sorted(sorted(names, key=lambda name: not _has_store(home, name, stores))[:MAX_SOURCES])
     return names
 
 
-def _source_for_agent(home: Path, name: str, warnings: WarningCollector) -> Optional[Source]:
+def _source_for_agent(
+    home: Path, name: str, warnings: WarningCollector, *, stores: StorePaths = None,
+) -> Optional[Source]:
+    configured = (stores or {}).get(name)
+    if configured is not None:
+        configured = Path(configured)
+        missing = configured.parent / ".missing-memory-store"
+        if configured.suffix.lower() == ".json":
+            # JSON backend selected: never prefer a stale SQLite file beside it.
+            if not configured.is_file():
+                warnings.add(f"Namespace {name} has no readable memory store")
+                return None
+            return Source(name, missing, configured)
+        db_path = configured
+        json_path = db_path.with_name("memories.json")
+        if not db_path.is_file() and not json_path.is_file():
+            warnings.add(f"Namespace {name} has no readable memory store")
+            return None
+        return Source(name, db_path if db_path.is_file() else missing, json_path if json_path.is_file() else missing)
     directory = _safe_agent_dir(home, name)
     if directory is None:
         raise ExplorerError("invalid_input", "agent namespace escaped Titan home")
@@ -548,13 +652,19 @@ def _source_for_agent(home: Path, name: str, warnings: WarningCollector) -> Opti
     return Source(name, db_path, json_path)
 
 
-def discover_sources(home: Path, agent: Optional[str], warnings: WarningCollector) -> list[Source]:
+def discover_sources(
+    home: Path, agent: Optional[str], warnings: WarningCollector, *, stores: StorePaths = None,
+) -> list[Source]:
     sources: list[Source] = []
-    for name in discover_agent_names(home, agent, warnings):
-        source = _source_for_agent(home, name, warnings)
+    for name in discover_agent_names(home, agent, warnings, stores=stores):
+        source = _source_for_agent(home, name, warnings, stores=stores)
         if source is not None:
             sources.append(source)
     return sources
+
+
+def _casefold(value: Any) -> Any:
+    return value.casefold() if isinstance(value, str) else value
 
 
 def _open_read_only(path: Path) -> sqlite3.Connection:
@@ -569,12 +679,39 @@ def _open_read_only(path: Path) -> sqlite3.Connection:
             raise ExplorerError("database_busy", "memory store is busy") from exc
         raise ExplorerError("read_error", "could not open memory store") from exc
     connection.row_factory = sqlite3.Row
+    # One undecodable legacy value must not fail the whole namespace query.
+    # SQLite hands TEXT to Python as UTF-8 whatever the database encoding.
+    connection.text_factory = _clean_text
+    connection.execute("PRAGMA busy_timeout = 2000")
+    connection.execute("PRAGMA query_only = ON")
+    try:
+        encoding = str(connection.execute("PRAGMA encoding").fetchone()[0])
+    except (sqlite3.DatabaseError, TypeError, IndexError) as exc:
+        connection.close()
+        message = str(exc).lower()
+        if "locked" in message or "busy" in message:
+            raise ExplorerError("database_busy", "memory store is busy") from exc
+        raise ExplorerError("read_error", "could not open memory store") from exc
+    codec = {"utf-16le": "utf-16-le", "utf-16be": "utf-16-be"}.get(encoding.casefold(), "utf-8")
+
+    def valid_id(raw: Any) -> int:
+        # Receives the id's raw bytes (in the database encoding), so an
+        # embedded NUL, a newline or undecodable bytes are seen before any
+        # LIMIT: a graph node id is always one detail lookup can find.
+        if not isinstance(raw, bytes) or len(raw) > 4 * MAX_MEMORY_ID:
+            return 0
+        try:
+            return int(_identifier(raw.decode(codec)) is not None)
+        except UnicodeDecodeError:
+            return 0
+
+    connection.create_function("titan_valid_id", 1, valid_id, deterministic=True)
     # SQLite's julianday/strftime paths round fractional seconds. This
     # deterministic scalar gives SQL the same exact UTC-microsecond key used
     # by Python ordering, without schema/index mutations.
     connection.create_function("titan_ts_us", 1, _timestamp_value, deterministic=True)
-    connection.execute("PRAGMA busy_timeout = 2000")
-    connection.execute("PRAGMA query_only = ON")
+    # SQLite's LOWER() only folds ASCII; match Python's casefold() instead.
+    connection.create_function("titan_casefold", 1, _casefold, deterministic=True)
     return connection
 
 
@@ -588,9 +725,15 @@ def _sqlite_columns(connection: sqlite3.Connection) -> set[str]:
 def _sqlite_projection(columns: set[str], *, text_limit: int = MAX_DETAIL_TEXT) -> str:
     # Bound untrusted text before it reaches Python. The extra byte lets the
     # detail response detect truncation without loading a giant source field.
+    # Text is cut as bytes because SQLite's text substr() stops at an embedded
+    # NUL; 4 bytes per character always covers ``text_limit`` characters in
+    # UTF-8 or UTF-16, and any partial character lands past that limit (see
+    # _clean_text). Casting the cut bytes back to TEXT makes SQLite convert
+    # them from the database encoding, so UTF-16 stores reach Python as UTF-8.
+    # Ids need no byte cut: titan_valid_id already excluded embedded NULs.
     fields = [
         f"substr(id, 1, {MAX_MEMORY_ID + 1}) AS id",
-        f"substr(text, 1, {text_limit}) AS text",
+        f"CAST(substr(CAST(text AS BLOB), 1, {4 * text_limit}) AS TEXT) AS text",
     ]
     bounded_fields = {
         "type": MAX_MEMORY_TYPE + 1,
@@ -602,6 +745,9 @@ def _sqlite_projection(columns: set[str], *, text_limit: int = MAX_DETAIL_TEXT) 
         "verification_status": MAX_FILTER_VALUE + 1,
         "speaker_focus": MAX_FILTER_VALUE + 1,
         "memory_kind": MAX_FILTER_VALUE + 1,
+        "event_date": MAX_TIMESTAMP + 1,
+        "event_start": MAX_TIMESTAMP + 1,
+        "event_end": MAX_TIMESTAMP + 1,
     }
     for name, limit in bounded_fields.items():
         if name in columns:
@@ -659,14 +805,28 @@ def _sqlite_filter_parts(
     if "id" not in columns or "text" not in columns:
         raise ExplorerError("read_error", "memory table is missing required columns")
 
-    clauses: list[str] = [f"length(COALESCE(id, '')) BETWEEN 1 AND {MAX_MEMORY_ID}"]
+    # Validate the whole id before ORDER BY/LIMIT so rejected ids cannot take
+    # candidate slots or counts. length() and substr() stop at an embedded NUL,
+    # so the full bytes go to titan_valid_id (the same _identifier rule used
+    # for every node, detail and cursor id). A non-text id would never match
+    # the detail lookup's ``id = ?``.
+    clauses: list[str] = [
+        f"typeof(id) = 'text' AND length(id) BETWEEN 1 AND {MAX_MEMORY_ID}",
+        f"titan_valid_id(substr(CAST(id AS BLOB), 1, {4 * MAX_MEMORY_ID + 1}))",
+    ]
     params: list[Any] = []
     if filters.type is not None:
         if "type" not in columns:
             clauses.append("0 = 1")
         else:
-            clauses.append("LOWER(COALESCE(type, '')) = LOWER(?)")
+            clauses.append("titan_casefold(COALESCE(type, '')) = titan_casefold(?)")
             params.append(filters.type)
+    if filters.session_id is not None:
+        if "session_id" not in columns:
+            clauses.append("0 = 1")
+        else:
+            clauses.append("session_id = ?")
+            params.append(filters.session_id)
     if "ts" in columns:
         clauses.append(f"length(COALESCE(ts, '')) <= {MAX_TIMESTAMP}")
     if filters.date_from is not None:
@@ -715,10 +875,17 @@ def _sqlite_filter_parts(
             .replace("%", "\\%")
             .replace("_", "\\_")
         )
-        clauses.append("LOWER(COALESCE(text, '')) LIKE ? ESCAPE '\\'")
+        clauses.append("titan_casefold(COALESCE(text, '')) LIKE ? ESCAPE '\\'")
         params.append(f"%{escaped_query}%")
 
     where = " AND ".join(clauses)
+    # Ordering is by parsed UTC instant, so this scans and sorts every
+    # matching row even under a 150-row LIMIT. ``ts`` is the only timestamp
+    # column and idx_memories_ts orders its raw text, which disagrees with the
+    # instant for legacy rows with other offsets, ``Z`` or naive values
+    # (01:00+01:00 sorts after 00:30Z). An index-ordered fast path would need
+    # a normalized timestamp column, i.e. a schema migration, so it is
+    # deliberately not done in this read-only bridge.
     order_by = "titan_ts_us(ts) DESC, id DESC" if "ts" in columns else "rowid DESC"
     return columns, where, params, expression, query_mode, order_by
 
@@ -726,6 +893,17 @@ def _sqlite_filter_parts(
 def _warn_like(source: Source, expression: Optional[str], query_mode: str, warnings: WarningCollector) -> None:
     if expression is not None and query_mode == "like":
         warnings.add(f"Namespace {source.agent} has no FTS index; used bounded text search")
+
+
+def _warn_oversized_ids(connection: sqlite3.Connection, source: Source, warnings: WarningCollector) -> None:
+    if connection.execute(f"SELECT 1 FROM memories WHERE length(id) > {MAX_MEMORY_ID} LIMIT 1").fetchone():
+        warnings.add(f"Skipped oversized id values in namespace {source.agent}")
+    invalid = (
+        f"SELECT 1 FROM memories WHERE length(id) BETWEEN 1 AND {MAX_MEMORY_ID} AND NOT "
+        f"(typeof(id) = 'text' AND titan_valid_id(substr(CAST(id AS BLOB), 1, {4 * MAX_MEMORY_ID + 1}))) LIMIT 1"
+    )
+    if connection.execute(invalid).fetchone():
+        warnings.add(f"Skipped invalid id values in namespace {source.agent}")
 
 
 def _query_sqlite(
@@ -742,23 +920,20 @@ def _query_sqlite(
         columns, where, params, expression, query_mode, order_by = _sqlite_filter_parts(
             connection, source, filters, cursor, warnings, force_like=force_like
         )
-        projection = _sqlite_projection(columns)
+        # Search pages only return summaries, so load no more text than they show.
+        projection = _sqlite_projection(columns, text_limit=MAX_NODE_TEXT)
         candidate_sql = f"SELECT rowid FROM memories m WHERE {where} ORDER BY {order_by} LIMIT ?"
         sql = f"SELECT {projection} FROM memories WHERE rowid IN ({candidate_sql})"
         rows = connection.execute(sql, [*params, limit + 1]).fetchall()
         _warn_like(source, expression, query_mode, warnings)
         records: list[MemoryRecord] = []
         for row in rows:
-            record = _record_from_row(source.agent, row, warnings=warnings)
+            record = _record_from_row(source.agent, row, text_limit=MAX_NODE_TEXT, warnings=warnings)
             if record is not None:
                 records.append(record)
         records.sort(key=_record_key, reverse=True)
         if len(records) < limit + 1:
-            oversized = connection.execute(
-                f"SELECT 1 FROM memories WHERE length(id) > {MAX_MEMORY_ID} LIMIT 1"
-            ).fetchone()
-            if oversized:
-                warnings.add(f"Skipped oversized id values in namespace {source.agent}")
+            _warn_oversized_ids(connection, source, warnings)
         return records[:limit], len(records) > limit
     except ExplorerError:
         raise
@@ -822,6 +997,8 @@ def _sqlite_candidates(
         sql = f"SELECT rowid, substr(id, 1, 257), {ts_expression} FROM memories m WHERE {where} ORDER BY {order_by} LIMIT ?"
         rows = connection.execute(sql, [*params, limit]).fetchall()
         _warn_like(source, expression, query_mode, warnings)
+        if len(rows) < limit:
+            _warn_oversized_ids(connection, source, warnings)
         return [StorageCandidate(source.agent, str(row[1]), row[2], int(row[0])) for row in rows]
     except sqlite3.OperationalError as exc:
         message = str(exc).lower()
@@ -841,13 +1018,15 @@ def _fetch_sqlite_records(
     source: Source,
     rowids: list[int],
     warnings: WarningCollector,
+    *,
+    text_limit: int = MAX_DETAIL_TEXT,
 ) -> list[MemoryRecord]:
     if not rowids:
         return []
     connection = _open_read_only(source.db_path)
     try:
         columns = _sqlite_columns(connection)
-        projection = _sqlite_projection(columns)
+        projection = _sqlite_projection(columns, text_limit=text_limit)
         placeholders = ", ".join("?" for _ in rowids)
         rows = connection.execute(
             f"SELECT {projection} FROM memories WHERE rowid IN ({placeholders})",
@@ -855,7 +1034,7 @@ def _fetch_sqlite_records(
         ).fetchall()
         records: list[MemoryRecord] = []
         for row in rows:
-            record = _record_from_row(source.agent, row, warnings=warnings)
+            record = _record_from_row(source.agent, row, text_limit=text_limit, warnings=warnings)
             if record is not None:
                 records.append(record)
         records.sort(key=_record_key, reverse=True)
@@ -866,11 +1045,16 @@ def _fetch_sqlite_records(
         connection.close()
 
 
-def _load_json(path: Path) -> list[dict[str, Any]]:
+def _load_json(path: Path, *, max_bytes: int | None = None) -> list[dict[str, Any]]:
     try:
-        if path.stat().st_size > 32 * 1024 * 1024:
-            raise ExplorerError("store_too_large", "legacy JSON memory store exceeds the read limit")
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        if max_bytes is None:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            with path.open("rb") as stream:
+                data = stream.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise ExplorerError("store_too_large", "legacy JSON evidence exceeds the read limit")
+            payload = json.loads(data)
     except ExplorerError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -882,6 +1066,8 @@ def _load_json(path: Path) -> list[dict[str, Any]]:
 
 def _record_matches(record: MemoryRecord, filters: ExplorerFilters) -> bool:
     if filters.type is not None and (record.memory_type or "").casefold() != filters.type.casefold():
+        return False
+    if filters.session_id is not None and record.session_id != filters.session_id:
         return False
     timestamp = _timestamp_value(record.timestamp)
     if filters.date_from is not None:
@@ -970,10 +1156,14 @@ def _catalog_sqlite(source: Source, warnings: WarningCollector) -> tuple[int, se
         if table is None:
             return 0, set()
         count_row = connection.execute("SELECT COUNT(*) FROM memories").fetchone()
+        # Offer only complete type names: a cropped name would be a filter
+        # value that matches nothing.
         type_rows = connection.execute(
-            f"SELECT DISTINCT substr(type, 1, {MAX_MEMORY_TYPE}) FROM memories "
-            "WHERE type IS NOT NULL AND type != ''"
+            "SELECT DISTINCT type FROM memories WHERE type IS NOT NULL AND type != '' AND length(type) <= ?",
+            (MAX_MEMORY_TYPE,),
         ).fetchall()
+        if connection.execute("SELECT 1 FROM memories WHERE length(type) > ? LIMIT 1", (MAX_MEMORY_TYPE,)).fetchone():
+            warnings.add(f"Type names longer than {MAX_MEMORY_TYPE} characters are not offered as filters")
         types = {str(row[0]) for row in type_rows if row[0]}
         return int(count_row[0] if count_row else 0), types
     except sqlite3.DatabaseError as exc:
@@ -998,13 +1188,10 @@ def catalog(home: Path) -> dict[str, Any]:
             else:
                 records = _load_json(source.json_path)
                 count = sum(1 for record in records if isinstance(record, dict))
-                source_types = {
-                    bounded
-                    for record in records
-                    if isinstance(record, dict)
-                    for bounded in [_bounded_metadata(record.get("type"), MAX_MEMORY_TYPE)]
-                    if bounded
-                }
+                names = {_optional_string(record.get("type")) for record in records if isinstance(record, dict)}
+                source_types = {name for name in names if name and len(name) <= MAX_MEMORY_TYPE}
+                if any(name and len(name) > MAX_MEMORY_TYPE for name in names):
+                    warnings.add(f"Type names longer than {MAX_MEMORY_TYPE} characters are not offered as filters")
             agents.append({"id": name, "count": count})
             types.update(source_types)
         except ExplorerError as exc:
@@ -1023,23 +1210,92 @@ def _validate_page(value: Any) -> int:
     return value
 
 
+def _source_counts(sources: list[Source], filters: ExplorerFilters, warnings: WarningCollector) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for source in sources:
+        try:
+            if source.db_path.is_file():
+                counts[source.agent] = _sqlite_count(source, filters, warnings)
+            else:
+                counts[source.agent] = len(_filtered_json_records(source, filters, warnings))
+        except ExplorerError as exc:
+            warnings.add(f"Skipped namespace {source.agent}: {exc.message}")
+            counts[source.agent] = 0
+    return counts
+
+
+def count_records(
+    home: Path, filters: ExplorerFilters, warnings: WarningCollector, *, stores: StorePaths = None,
+) -> int:
+    """Total memories matching ``filters`` across namespaces."""
+    return sum(_source_counts(discover_sources(home, filters.agent, warnings, stores=stores), filters, warnings).values())
+
+
+def _candidate_records(
+    sources: list[Source],
+    selected: list[StorageCandidate],
+    warnings: WarningCollector,
+    *,
+    text_limit: int = MAX_DETAIL_TEXT,
+) -> list[MemoryRecord]:
+    """Load full records for already-selected candidates, keeping their order."""
+    selected_rowids: dict[str, list[int]] = {}
+    for candidate in selected:
+        if candidate.rowid is not None:
+            selected_rowids.setdefault(candidate.source_agent, []).append(candidate.rowid)
+    fetched: dict[tuple[str, str], MemoryRecord] = {}
+    for source in sources:
+        rowids = selected_rowids.get(source.agent, [])
+        if not rowids:
+            continue
+        try:
+            for record in _fetch_sqlite_records(source, rowids, warnings, text_limit=text_limit):
+                fetched[(record.source_agent, record.memory_id)] = record
+        except ExplorerError as exc:
+            warnings.add(f"Skipped namespace {source.agent}: {exc.message}")
+    records: list[MemoryRecord] = []
+    for candidate in selected:
+        record = candidate.record or fetched.get((candidate.source_agent, candidate.memory_id))
+        if record is not None:
+            records.append(record)
+    return records
+
+
+def newest_records(
+    home: Path,
+    filters: ExplorerFilters,
+    limit: int,
+    warnings: WarningCollector,
+    *,
+    stores: StorePaths = None,
+    text_limit: int = MAX_DETAIL_TEXT,
+) -> tuple[list[MemoryRecord], bool]:
+    """Return the newest ``limit`` records across namespaces and whether more exist.
+
+    Only lightweight (timestamp, id, rowid) keys are merged across namespaces;
+    text and vectors are loaded for the winners alone.
+    """
+    sources = discover_sources(home, filters.agent, warnings, stores=stores)
+    candidates: list[StorageCandidate] = []
+    for source in sources:
+        try:
+            if source.db_path.is_file():
+                candidates.extend(_sqlite_candidates(source, filters, limit + 1, warnings))
+            else:
+                candidates.extend(_json_page_candidates(source, filters, limit + 1, warnings)[1])
+        except ExplorerError as exc:
+            warnings.add(f"Skipped namespace {source.agent}: {exc.message}")
+    candidates.sort(key=_candidate_key, reverse=True)
+    records = _candidate_records(sources, candidates[:limit], warnings, text_limit=text_limit)
+    return records, len(candidates) > limit
+
+
 def search_page(home: Path, filters: ExplorerFilters, page_value: Any) -> dict[str, Any]:
     page = _validate_page(page_value)
     warnings = WarningCollector()
     sources = discover_sources(home, filters.agent, warnings)
-    counts: dict[str, int] = {}
-    total = 0
-    for source in sources:
-        try:
-            if source.db_path.is_file():
-                count = _sqlite_count(source, filters, warnings)
-            else:
-                count = len(_filtered_json_records(source, filters, warnings))
-            counts[source.agent] = count
-            total += count
-        except ExplorerError as exc:
-            warnings.add(f"Skipped namespace {source.agent}: {exc.message}")
-            counts[source.agent] = 0
+    counts = _source_counts(sources, filters, warnings)
+    total = sum(counts.values())
 
     total_pages = (total + MAX_SEARCH_PAGE - 1) // MAX_SEARCH_PAGE
     if total == 0 or page > total_pages:
@@ -1068,29 +1324,9 @@ def search_page(home: Path, filters: ExplorerFilters, page_value: Any) -> dict[s
             warnings.add(f"Skipped namespace {source.agent}: {exc.message}")
     candidates.sort(key=_candidate_key, reverse=True)
     selected = candidates[offset : offset + MAX_SEARCH_PAGE]
-
-    selected_rowids: dict[str, list[int]] = {}
-    for candidate in selected:
-        if candidate.rowid is not None:
-            selected_rowids.setdefault(candidate.source_agent, []).append(candidate.rowid)
-    fetched: dict[tuple[str, str], MemoryRecord] = {}
-    for source in sources:
-        rowids = selected_rowids.get(source.agent, [])
-        if not rowids:
-            continue
-        try:
-            for record in _fetch_sqlite_records(source, rowids, warnings):
-                fetched[(record.source_agent, record.memory_id)] = record
-        except ExplorerError as exc:
-            warnings.add(f"Skipped namespace {source.agent}: {exc.message}")
-
-    items: list[dict[str, Any]] = []
-    for candidate in selected:
-        record = candidate.record or fetched.get((candidate.source_agent, candidate.memory_id))
-        if record is not None:
-            items.append(_summary(record))
+    records = _candidate_records(sources, selected, warnings, text_limit=MAX_NODE_TEXT)
     return {
-        "items": items,
+        "items": [_summary(record) for record in records],
         "nextCursor": None,
         "warnings": warnings.as_list(),
         "page": page,
@@ -1238,13 +1474,217 @@ def _fit_snapshot_payload(payload: dict[str, Any], warnings: WarningCollector) -
     return payload
 
 
+def _ancillary_path(source: Source, filename: str) -> Path:
+    directory = source.json_path.parent if source.json_path.is_file() else source.db_path.parent
+    path = (directory / filename).resolve()
+    if path.parent != directory.resolve():
+        raise ExplorerError("read_error", "unsafe ancillary store path")
+    return path
+
+
+def _read_relations(source: Source, ids: list[str], warnings: WarningCollector, *, detail: bool) -> tuple[list[dict[str, Any]], bool]:
+    if not ids:
+        return [], False
+    try:
+        if source.db_path.is_file():
+            conn = _open_read_only(source.db_path)
+            try:
+                # Cap virtual-machine work as well as result count, including on old
+                # databases that lack a reverse (new_id) index.
+                steps = 0
+                def progress() -> int:
+                    nonlocal steps
+                    steps += 1
+                    return int(steps > 2000)
+                conn.set_progress_handler(progress, 1000)
+                if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_supersessions'").fetchone():
+                    return [], False
+                marks = ",".join("?" for _ in ids)
+                # Graph edges need both endpoints visible; filtering only one
+                # end let out-of-view links consume the limit.
+                joiner = "OR" if detail else "AND"
+                condition = f"(old_id IN ({marks}) {joiner} new_id IN ({marks}))"
+                params = [source.agent, *ids, *ids, ids[0]] if detail else [source.agent, *ids, *ids]
+                ordering = "ORDER BY old_id != ?, created_at DESC, old_id" if detail else "ORDER BY created_at DESC, old_id, new_id"
+                limit = MAX_LINKED_EVIDENCE if detail else MAX_SNAPSHOT_EDGES
+                rows = conn.execute(
+                    f"SELECT substr(old_id,1,257) old_id, substr(new_id,1,257) new_id, "
+                    f"substr(evidence,1,1025) evidence, substr(created_at,1,129) created_at "
+                    f"FROM memory_supersessions WHERE source = ? AND {condition} {ordering} LIMIT ?",
+                    (*params, limit + 1),
+                ).fetchall()
+                return [dict(row) for row in rows[:limit]], len(rows) > limit
+            finally:
+                conn.close()
+        path = _ancillary_path(source, "memories.json.relations.json")
+        if not path.is_file():
+            return [], False
+        rows = _load_json(path, max_bytes=MAX_ANCILLARY_BYTES)
+        wanted = set(ids)
+        matches = []
+        for r in rows:
+            # _identifier also keeps malformed (e.g. unhashable) ids out of the set lookup.
+            old, new = _identifier(r.get("old_id")) in wanted, _identifier(r.get("new_id")) in wanted
+            if r.get("source") == source.agent and ((old or new) if detail else (old and new)):
+                matches.append(r)
+        if detail:
+            matches.sort(key=lambda link: (link.get("old_id") == ids[0], str(link.get("created_at") or "")), reverse=True)
+        else:
+            matches.sort(key=lambda link: (str(link.get("old_id")), str(link.get("new_id"))))
+            matches.sort(key=lambda link: str(link.get("created_at") or ""), reverse=True)
+        limit = MAX_LINKED_EVIDENCE if detail else MAX_SNAPSHOT_EDGES
+        return matches[:limit], len(matches) > limit
+    except (ExplorerError, OSError, sqlite3.DatabaseError) as exc:
+        warnings.add(f"Correction evidence unavailable for {source.agent}: {exc}")
+        return [], True
+
+
+def correction_edges(
+    home: Path, memory_keys: Iterable[tuple[str, str]], warnings: WarningCollector, *, stores: StorePaths = None,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, set[str]] = {}
+    for agent, memory_id in memory_keys:
+        if _AGENT_NAME_RE.fullmatch(agent) and _identifier(memory_id):
+            grouped.setdefault(agent, set()).add(memory_id)
+    edges: list[dict[str, Any]] = []
+    for agent, ids in sorted(grouped.items()):
+        try:
+            source = _source_for_agent(home, agent, warnings, stores=stores)
+        except ExplorerError as exc:
+            warnings.add(f"Skipped namespace {agent}: {exc.message}")
+            continue
+        if source is None:
+            continue
+        links, partial = _read_relations(source, sorted(ids), warnings, detail=False)
+        if partial:
+            warnings.add(f"Correction links limited for {agent}")
+        for link in links:
+            old, new = _identifier(link.get("old_id")), _identifier(link.get("new_id"))
+            if old in ids and new in ids and old != new:
+                edges.append({"source": f"{agent}::{new}", "target": f"{agent}::{old}", "kind": "supersedes", "weight": 1})
+    edges.sort(key=lambda edge: (edge["source"], edge["target"]))
+    return edges
+
+
+def _detail_corrections(
+    source: Source, memory_id: str, warnings: WarningCollector, json_records: list[dict[str, Any]] | None,
+) -> tuple[list[dict[str, Any]], bool]:
+    links, partial = _read_relations(source, [memory_id], warnings, detail=True)
+    result = []
+    for link in links:
+        direction = "replaces" if link.get("new_id") == memory_id else "replacedBy"
+        other = _identifier(link.get("old_id") if direction == "replaces" else link.get("new_id"))
+        if not other or other == memory_id:
+            partial = True
+            continue
+        try:
+            found, _, _ = (_detail_from_sqlite(source, other) if json_records is None else _detail_from_json(source, other, json_records))
+            summary = _summary(found)
+        except ExplorerError as exc:
+            summary = None
+            if exc.code != "not_found":
+                partial = True
+                warnings.add(f"Linked memory unavailable for {source.agent}: {exc.message}")
+        result.append({"direction": direction, "memory": summary, "memoryId": other,
+                       "evidence": _bounded_text(link.get("evidence"), 1024),
+                       "timestamp": _bounded_metadata(link.get("created_at"), MAX_TIMESTAMP)})
+    return result, partial
+
+
+def _scene_detail(source: Source, scene_id: Optional[str], warnings: WarningCollector) -> Optional[dict[str, Any]]:
+    if not scene_id:
+        return None
+    result: dict[str, Any] = {"id": scene_id, "status": "missing", "userText": "", "assistantText": "", "eventIds": []}
+    try:
+        if source.db_path.is_file():
+            conn = _open_read_only(source.db_path)
+            try:
+                if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scenes'").fetchone():
+                    return result
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(scenes)")}
+                names = {"evidence_status": 32, "evidence_version": 16, "extraction_user_text": 2049,
+                         "extraction_assistant_text": 2049, "source_event_ids_json": 8193}
+                projection = ", ".join(f"substr({name},1,{limit}) AS {name}" for name, limit in names.items() if name in columns)
+                row = conn.execute(f"SELECT {projection or 'scene_id'} FROM scenes WHERE scene_id = ? LIMIT 1", (scene_id,)).fetchone()
+                raw = dict(row) if row else None
+                if raw is not None:
+                    event_json = raw.get("source_event_ids_json") or "[]"
+                    try:
+                        if len(event_json) > 8192:
+                            warnings.add("Source scene event IDs exceed the preview limit")
+                        else:
+                            raw["source_event_ids"] = json.loads(event_json)
+                    except (ValueError, TypeError):
+                        raw["evidence_status"] = "partial"
+            finally:
+                conn.close()
+        else:
+            path = _ancillary_path(source, "scenes.json")
+            raw = next((row for row in _load_json(path, max_bytes=MAX_ANCILLARY_BYTES) if row.get("scene_id") == scene_id), None) if path.is_file() else None
+        if raw is None:
+            return result
+        if raw.get("evidence_status") == "complete" and _optional_int(raw.get("evidence_version")) == 1:
+            result["status"] = "complete"
+        else:
+            result["status"] = "partial"
+        result["userText"] = _bounded_text(raw.get("extraction_user_text"), 2048)
+        result["assistantText"] = _bounded_text(raw.get("extraction_assistant_text"), 2048)
+        event_ids = raw.get("source_event_ids")
+        result["eventIds"] = _evidence_event_ids(event_ids)
+        if isinstance(event_ids, list):
+            if len(result["eventIds"]) < len(event_ids):
+                warnings.add("Some source scene event IDs are outside the preview limits")
+        return result
+    except (ExplorerError, OSError, sqlite3.DatabaseError) as exc:
+        warnings.add(f"Scene evidence unavailable for {source.agent}: {exc}")
+        result["status"] = "unavailable"
+        return result
+
+
+def _pattern_detail(source: Source, memory_id: str, warnings: WarningCollector) -> list[dict[str, str]]:
+    if not source.db_path.is_file():
+        return []
+    try:
+        conn = _open_read_only(source.db_path)
+        try:
+            steps = 0
+            def progress() -> int:
+                nonlocal steps
+                steps += 1
+                return int(steps > 2000)
+            conn.set_progress_handler(progress, 1000)
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('patterns','pattern_evidence')")}
+            if len(tables) < 2:
+                return []
+            rows = conn.execute(
+                "SELECT substr(p.id,1,257), substr(p.title,1,241), substr(p.status,1,65), substr(e.role,1,65) "
+                "FROM pattern_evidence e JOIN patterns p ON p.id=e.pattern_id WHERE e.memory_id=? LIMIT ?",
+                (memory_id, MAX_LINKED_EVIDENCE + 1),
+            ).fetchall()
+            if len(rows) > MAX_LINKED_EVIDENCE:
+                warnings.add(f"Pattern evidence limited for {source.agent}")
+            return [
+                {"id": pattern_id, "title": _bounded_text(title, 240), "status": _bounded_text(status, 64), "role": _bounded_text(role, 64)}
+                for raw_id, title, status, role in rows[:MAX_LINKED_EVIDENCE]
+                if (pattern_id := _identifier(raw_id)) is not None
+            ]
+        finally:
+            conn.close()
+    except (ExplorerError, sqlite3.DatabaseError) as exc:
+        warnings.add(f"Pattern evidence unavailable for {source.agent}: {exc}")
+        return []
+
+
 def snapshot(home: Path, filters: ExplorerFilters) -> dict[str, Any]:
     warnings = WarningCollector()
-    records, more = _read_page(home, filters, None, MAX_SNAPSHOT_NODES + 1, warnings)
-    records = records[:MAX_SNAPSHOT_NODES]
+    records, more = newest_records(home, filters, MAX_SNAPSHOT_NODES, warnings, text_limit=MAX_NODE_TEXT)
     if more:
         warnings.add(f"Graph limited to {MAX_SNAPSHOT_NODES} memories")
-    edges = _similarity_edges(records, warnings)
+    stored_edges = correction_edges(home, ((record.source_agent, record.memory_id) for record in records), warnings)
+    edges = stored_edges + _similarity_edges(records, warnings)
+    if len(edges) > MAX_SNAPSHOT_EDGES:
+        warnings.add(f"Graph edges limited to {MAX_SNAPSHOT_EDGES}")
+        edges = edges[:MAX_SNAPSHOT_EDGES]
     payload: dict[str, Any] = {
         "nodes": [_summary(record) for record in records],
         "edges": edges,
@@ -1272,11 +1712,23 @@ def search(home: Path, filters: ExplorerFilters, cursor_value: Any, page_value: 
     }
 
 
-def _detail_from_sqlite(source: Source, memory_id: str) -> tuple[MemoryRecord, str]:
+def _memory_evidence(event_ids: Any, user_text: Any, assistant_text: Any) -> dict[str, Any] | None:
+    evidence = {
+        "eventIds": _evidence_event_ids(event_ids),
+        "userText": _bounded_text(user_text, 2048),
+        "assistantText": _bounded_text(assistant_text, 2048),
+    }
+    return evidence if any(evidence.values()) else None
+
+
+def _detail_from_sqlite(source: Source, memory_id: str) -> tuple[MemoryRecord, str, dict[str, Any] | None]:
     connection = _open_read_only(source.db_path)
     try:
         columns = _sqlite_columns(connection)
         projection = _sqlite_projection(columns, text_limit=MAX_DETAIL_TEXT + 1)
+        for name, limit in (("source_event_ids_json", 8192), ("provenance_user", 2049), ("provenance_assistant", 2049)):
+            if name in columns:
+                projection += f", substr({name}, 1, {limit}) AS {name}"
         row = connection.execute(
             f"SELECT {projection} FROM memories WHERE id = ? LIMIT 1",
             (memory_id,),
@@ -1287,7 +1739,12 @@ def _detail_from_sqlite(source: Source, memory_id: str) -> tuple[MemoryRecord, s
         if record is None:
             raise ExplorerError("read_error", "memory record is invalid")
         raw_text = _row_value(row, "text", "")
-        return record, str(raw_text or "")
+        try:
+            event_ids = json.loads(_row_value(row, "source_event_ids_json") or "[]")
+        except (TypeError, ValueError):
+            event_ids = []
+        evidence = _memory_evidence(event_ids, _row_value(row, "provenance_user"), _row_value(row, "provenance_assistant"))
+        return record, _clean_text(raw_text or ""), evidence
     except ExplorerError:
         raise
     except sqlite3.OperationalError as exc:
@@ -1301,36 +1758,51 @@ def _detail_from_sqlite(source: Source, memory_id: str) -> tuple[MemoryRecord, s
         connection.close()
 
 
-def _detail_from_json(source: Source, memory_id: str) -> tuple[MemoryRecord, str]:
-    for raw in _load_json(source.json_path):
-        if str(raw.get("id") or "") != memory_id:
+def _detail_from_json(source: Source, memory_id: str, records: list[dict[str, Any]]) -> tuple[MemoryRecord, str, dict[str, Any] | None]:
+    for raw in records:
+        # Same identity as _record_from_json, so an id such as 0 still matches.
+        if raw.get("id") is None or str(raw["id"]) != memory_id:
             continue
         record = _record_from_json(source.agent, raw)
         if record is None:
             raise ExplorerError("read_error", "memory record is invalid")
-        return record, str(raw.get("text") or "")
+        provenance = raw.get("provenance")
+        provenance = provenance if isinstance(provenance, dict) else {}
+        evidence = _memory_evidence(raw.get("source_event_ids"), provenance.get("user"), provenance.get("assistant"))
+        return record, _clean_text(raw.get("text") or ""), evidence
     raise ExplorerError("not_found", "memory not found")
 
 
-def detail(home: Path, source_agent: Any, memory_id: Any) -> dict[str, Any]:
+def detail(home: Path, source_agent: Any, memory_id: Any, *, stores: StorePaths = None) -> dict[str, Any]:
     agent = _validate_agent(source_agent)
     if agent is None:
         raise ExplorerError("invalid_input", "sourceAgent is required")
-    if not isinstance(memory_id, str) or not memory_id or len(memory_id) > MAX_MEMORY_ID or "\x00" in memory_id:
+    if not _identifier(memory_id):
         raise ExplorerError("invalid_input", "memoryId is invalid")
     warnings = WarningCollector()
-    sources = discover_sources(home, agent, warnings)
+    sources = discover_sources(home, agent, warnings, stores=stores)
     if not sources:
         raise ExplorerError("not_found", "memory namespace not found")
     source = sources[0]
+    json_records = None
     if source.db_path.is_file():
-        record, full_text = _detail_from_sqlite(source, memory_id)
+        record, full_text, evidence = _detail_from_sqlite(source, memory_id)
     elif source.json_path.is_file():
-        record, full_text = _detail_from_json(source, memory_id)
+        json_records = _load_json(source.json_path)
+        record, full_text, evidence = _detail_from_json(source, memory_id, json_records)
     else:
         raise ExplorerError("not_found", "memory namespace not found")
     bounded_text, truncated = _truncate_utf8(full_text, MAX_DETAIL_TEXT)
+    corrections, partial = _detail_corrections(source, memory_id, warnings, json_records)
+    scene = _scene_detail(source, record.scene_id, warnings)
+    patterns = _pattern_detail(source, memory_id, warnings)
     return {
+        "corrections": corrections,
+        "correctionsPartial": partial,
+        "scene": scene,
+        "memoryEvidence": evidence,
+        "patterns": patterns,
+        "warnings": warnings.as_list(),
         "memory": _summary(record),
         "text": bounded_text,
         "metadata": _detail_metadata(record),
@@ -1362,6 +1834,17 @@ def _error_payload(exc: ExplorerError) -> dict[str, Any]:
     return {"error": {"code": exc.code, "message": exc.message}}
 
 
+def _emit(payload: dict, *, allow_nan: bool = True) -> None:
+    """Write one JSON line as UTF-8 bytes.
+
+    Text-mode stdout uses the locale encoding, which on Windows pipes is a
+    legacy code page that cannot encode most memory text.
+    """
+    line = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=allow_nan) + "\n"
+    sys.stdout.buffer.write(line.encode("utf-8"))
+    sys.stdout.flush()
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only Titan BB explorer data bridge")
     parser.add_argument(
@@ -1375,22 +1858,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             raise ExplorerError("invalid_input", "request exceeds the input limit")
         request = json.loads(raw.decode("utf-8"))
         result = handle_request(request, resolve_home(args.home))
-        sys.stdout.write(json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
-        sys.stdout.write("\n")
+        _emit(result, allow_nan=False)
         return 0
     except ExplorerError as exc:
-        sys.stdout.write(json.dumps(_error_payload(exc), ensure_ascii=False, separators=(",", ":")))
-        sys.stdout.write("\n")
+        _emit(_error_payload(exc))
         return 1
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        error = _error_payload(ExplorerError("invalid_input", "stdin is not valid JSON"))
-        sys.stdout.write(json.dumps(error, ensure_ascii=False, separators=(",", ":")))
-        sys.stdout.write("\n")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        _emit(_error_payload(ExplorerError("invalid_input", "stdin is not valid JSON")))
         return 1
     except Exception:
-        error = _error_payload(ExplorerError("internal_error", "unexpected explorer failure"))
-        sys.stdout.write(json.dumps(error, ensure_ascii=False, separators=(",", ":")))
-        sys.stdout.write("\n")
+        _emit(_error_payload(ExplorerError("internal_error", "unexpected explorer failure")))
         return 1
 
 

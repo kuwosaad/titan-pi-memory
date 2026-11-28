@@ -48,8 +48,19 @@ def build_memory_notes(
 
     # Direct brief callers share the same conservative evidence grouping as
     # retrieval, while distinct named sources keep their labels here.
-    from .retriever import _group_display_hits
+    from .retriever import _combine_source_hits, _group_display_hits
     filtered = _group_display_hits(filtered, source_isolation=True)
+
+    # Preserve the leading fact, then consider reserved passages before the
+    # remaining facts can exhaust the brief's item or character budget.
+    passages = [hit for hit in filtered if (hit.get("memory") or {}).get("result_kind") == "source_passage"]
+    facts = [hit for hit in filtered if (hit.get("memory") or {}).get("result_kind") != "source_passage"]
+    if facts and passages:
+        reserved = _combine_source_hits(facts, passages, max_items)
+        reserved = [hit for hit in reserved if (hit.get("memory") or {}).get("result_kind") == "source_passage"]
+        prioritized = [facts[0], *reserved]
+        selected = {id(hit) for hit in prioritized}
+        filtered = prioritized + [hit for hit in filtered if id(hit) not in selected]
 
     if cluster_mode and any(h.get("cluster_id") is not None for h in filtered):
         return _build_clustered_notes(filtered, max_items, max_chars, included_hits)

@@ -81,7 +81,7 @@ class GrokPluginFileTests(unittest.TestCase):
         joined = " ".join(args)
         self.assertIn("titan_mcp_launcher.py", joined)
         self.assertIn("GROK_PLUGIN_ROOT", joined)
-        self.assertEqual(server["env"]["TITAN_AGENT_NAME"], "grok")
+        self.assertEqual(server["env"]["TITAN_MCP_TOOL_PROFILE"], "full")
 
     def test_hooks_point_at_titan_grok_hook_script(self):
         hooks_path = PLUGIN_ROOT / "hooks" / "hooks.json"
@@ -148,13 +148,8 @@ class GrokPluginFileTests(unittest.TestCase):
         self.assertTrue(installer.exists())
         self.assertIn("titan-grok", installer.read_text(encoding="utf-8"))
 
-        launcher_text = launcher.read_text(encoding="utf-8")
-        self.assertIn('DEFAULT_AGENT = "grok"', launcher_text)
-        self.assertIn("Grok", launcher_text)
-
-        first_run_text = first_run.read_text(encoding="utf-8")
-        self.assertIn('DEFAULT_AGENT = "grok"', first_run_text)
-        self.assertIn("Grok", first_run_text)
+        self.assertIn("titan_plugin_runtime.py", launcher.read_text(encoding="utf-8"))
+        self.assertIn("titan_plugin_runtime.py", cli.read_text(encoding="utf-8"))
 
     def test_hook_script_path_expected(self):
         expected = PLUGIN_ROOT / "scripts" / "titan_grok_hook.py"
