@@ -116,8 +116,9 @@ def test_reclaims_old_digests_only_when_unshipped_and_idle(plugin, tmp_path):
     shipped_archive.write_bytes(b"engine v1")
     shipped = make_runtime(plugin.cache, plugin.key[:-64] + hashlib.sha256(b"engine v1").hexdigest(),
                            owners=[shipped_archive], idle=old)
-    # Same archive, but built by a Python that has since been removed (e.g. 3.13 -> 3.14).
-    broken = make_runtime(plugin.cache, f"cpython-313-{sysconfig.get_platform()}-{hashlib.sha256(b'engine v1').hexdigest()}",
+    # Same archive, but built by a Python that has since been removed. Use a
+    # version that is never the running one, or this collides with `shipped`.
+    broken = make_runtime(plugin.cache, f"cpython-30-{sysconfig.get_platform()}-{hashlib.sha256(b'engine v1').hexdigest()}",
                           runs=False, owners=[shipped_archive], idle=old)
     replaced = make_runtime(plugin.cache, plugin.key, "replaced", publish=False, owners=[], idle=old)
     current = make_runtime(plugin.cache, plugin.key, "current1", owners=[], idle=old)
