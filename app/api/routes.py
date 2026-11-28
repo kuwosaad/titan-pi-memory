@@ -1,4 +1,6 @@
+from html import escape as html_escape
 from typing import Optional
+from urllib.parse import quote
 
 import os
 import time as _time
@@ -18,8 +20,13 @@ from app.save_pipeline.pipeline import (
 )
 from app.save_pipeline.extraction.extractor import is_hidden_metadata_memory
 from app.retrieval_pipeline.federated import _source_list, _validate_agent_name
-from app.graph.adapter import build_graph, inspect_memory_clusters, analyze_memory_clusters
-from app.graph.explorer import ExplorerError, detail as read_graph_memory
+from app.graph.adapter import build_graph, graph_store_paths, inspect_memory_clusters, analyze_memory_clusters
+from app.graph.explorer import (
+    ExplorerError,
+    detail as read_graph_memory,
+    known_agents as known_graph_agents,
+    resolve_agent as resolve_graph_agent,
+)
 from app.runtime.context import get_runtime_context
 from app.storage.memories import get_memory_count, get_recent_memories
 from app.storage.models import TraceEvent, TracePacketRequest
@@ -112,16 +119,43 @@ def runtime() -> dict:
     }
 
 
+def _graph_notice(title: str, body: str, status_code: int) -> HTMLResponse:
+    page = (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Titan memory graph</title></head>"
+        f"<body><h1>{title}</h1><p>{body}</p><p><a href=\"/graph\">Show all agents</a></p></body></html>"
+    )
+    return HTMLResponse(content=page, status_code=status_code)
+
+
 @router.get("/graph")
 def graph(session_id: Optional[str] = None, agent: Optional[str] = None) -> HTMLResponse:
-    html_content = build_graph(session_id=session_id, agent=agent) if agent else build_graph(session_id=session_id)
-    return HTMLResponse(content=html_content)
+    if agent:
+        context = get_runtime_context()
+        stores = graph_store_paths(context)
+        try:
+            canonical = resolve_graph_agent(context.shared_home, agent, stores)
+        except ExplorerError:
+            return _graph_notice(
+                "Invalid agent name",
+                "Agent names start with a letter or digit and use only letters, digits, '.', '_' and '-' "
+                "(up to 64 characters).",
+                400,
+            )
+        if canonical is None:
+            known = known_graph_agents(context.shared_home, stores)
+            listing = ", ".join(
+                f'<a href="/graph?agent={quote(name)}">{html_escape(name)}</a>' for name in known
+            ) or "none yet"
+            return _graph_notice(f"No Titan agent named {html_escape(agent)}", f"Known agents: {listing}.", 404)
+        return HTMLResponse(content=build_graph(session_id=session_id, agent=canonical))
+    return HTMLResponse(content=build_graph(session_id=session_id))
 
 
 @router.get("/api/graph/memory")
 def graph_memory(source_agent: str, memory_id: str) -> JSONResponse:
+    context = get_runtime_context()
     try:
-        payload = read_graph_memory(get_runtime_context().shared_home, source_agent, memory_id)
+        payload = read_graph_memory(context.shared_home, source_agent, memory_id, stores=graph_store_paths(context))
     except ExplorerError as exc:
         status = {"invalid_input": 400, "not_found": 404}.get(exc.code, 503)
         raise HTTPException(status_code=status, detail=exc.message) from exc

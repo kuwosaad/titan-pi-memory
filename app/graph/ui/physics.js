@@ -7,16 +7,33 @@ const defaultForces = {
     linkStrength: 1,
     linkDistance: 250,
 };
+// d3's default decay settles in about 300 ticks; filter changes use a faster
+// decay so a gentle reheat settles in about a second and a half.
+const defaultDecay = 1 - Math.pow(0.001, 1 / 300);
+const settleDecay = 0.045;
+// Ticks run before the first reply so the initial layout appears mostly settled.
+const presettleTicks = 100;
 function bounded(value, min, max, fallback) {
     return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 }
+function hashText(text) {
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+        hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
+    }
+    return hash >>> 0;
+}
+function normalizeForces(settings) {
+    return {
+        centerStrength: bounded(settings.centerStrength, 0, 1, defaultForces.centerStrength),
+        repelStrength: bounded(settings.repelStrength, 0, 20, defaultForces.repelStrength),
+        linkStrength: bounded(settings.linkStrength, 0, 1, defaultForces.linkStrength),
+        linkDistance: bounded(settings.linkDistance, 30, 500, defaultForces.linkDistance),
+    };
+}
 // Give each ID a stable starting point, regardless of the order of the input.
 function initialPosition(id) {
-    let hash = 2166136261;
-    for (let index = 0; index < id.length; index += 1) {
-        hash = Math.imul(hash ^ id.charCodeAt(index), 16777619);
-    }
-    const unsigned = hash >>> 0;
+    const unsigned = hashText(id);
     const angle = (unsigned / 0x100000000) * Math.PI * 2;
     const radius = 30 + ((unsigned >>> 16) % 200);
     return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
@@ -29,6 +46,7 @@ function createPhysics(onPositions) {
     let edgeCounts = new Map();
     let hasData = false;
     let reducedMotion = false;
+    let rebalances = 0;
     const pinned = new Set();
     let forces = { ...defaultForces };
     let degrees = new Map();
@@ -50,7 +68,7 @@ function createPhysics(onPositions) {
         return nodes.map((node) => ({ id: node.id, x: node.x ?? 0, y: node.y ?? 0 }));
     }
     function emit() {
-        onPositions(positions());
+        onPositions(positions(), simulation.alpha());
     }
     function applyForces() {
         links.strength((link) => {
@@ -63,11 +81,19 @@ function createPhysics(onPositions) {
         xCenter.strength(forces.centerStrength);
         yCenter.strength(forces.centerStrength);
     }
-    function restart(alpha) {
+    function unpinAll() {
+        for (const node of savedNodes.values()) {
+            node.fx = null;
+            node.fy = null;
+        }
+        pinned.clear();
+    }
+    function restart(alpha, decay = defaultDecay) {
         if (nodes.length === 0) {
             simulation.stop();
             return;
         }
+        simulation.alphaDecay(decay);
         simulation.alpha(Math.max(simulation.alpha(), alpha)).alphaTarget(pinned.size && !reducedMotion ? 0.3 : 0);
         if (reducedMotion) {
             simulation.stop();
@@ -81,7 +107,7 @@ function createPhysics(onPositions) {
     }
     applyForces();
     simulation.on('tick', emit).on('end', emit);
-    return {
+    const api = {
         setData(data) {
             const seeds = new Map(data.nodes.map(node => [node.id, node]));
             const ids = [...seeds.keys()];
@@ -96,8 +122,12 @@ function createPhysics(onPositions) {
             const sameTopology = hasData && ids.length === nodes.length &&
                 nodes.every((node) => seeds.has(node.id)) && nextEdgeCounts.size === edgeCounts.size &&
                 [...nextEdgeCounts].every(([key, count]) => edgeCounts.get(key) === count);
-            if (sameTopology)
+            // Acknowledge every revision, even when nothing moves, so the client
+            // never waits on a stale one.
+            if (sameTopology) {
+                emit();
                 return;
+            }
             for (const node of nodes) {
                 if (!seeds.has(node.id)) {
                     node.fx = null;
@@ -107,6 +137,7 @@ function createPhysics(onPositions) {
                     pinned.delete(node.id);
                 }
             }
+            const fresh = ids.some((id) => !savedNodes.has(id));
             nodes = ids.map((id) => {
                 let node = savedNodes.get(id);
                 if (!node) {
@@ -130,17 +161,26 @@ function createPhysics(onPositions) {
             links.links([]);
             simulation.nodes(nodes);
             links.links(nextLinks);
-            if (!reducedMotion || !nodes.length) emit();
-            restart(hasData ? 0.3 : 1);
+            const firstLayout = !hasData;
             hasData = true;
+            if (!nodes.length || reducedMotion) {
+                if (!nodes.length) emit();
+                restart(firstLayout ? 1 : 0.3);
+                return;
+            }
+            if (firstLayout || fresh) {
+                // Lay out new nodes before showing them, then let the rest settle.
+                simulation.alpha(firstLayout ? 1 : 0.5).alphaDecay(defaultDecay);
+                simulation.tick(firstLayout ? presettleTicks : presettleTicks / 2);
+            }
+            else {
+                simulation.alpha(Math.max(simulation.alpha(), 0.12));
+            }
+            emit();
+            restart(0, firstLayout ? defaultDecay : settleDecay);
         },
         setSettings(settings) {
-            const next = {
-                centerStrength: bounded(settings.centerStrength, 0, 1, defaultForces.centerStrength),
-                repelStrength: bounded(settings.repelStrength, 0, 20, defaultForces.repelStrength),
-                linkStrength: bounded(settings.linkStrength, 0, 1, defaultForces.linkStrength),
-                linkDistance: bounded(settings.linkDistance, 30, 500, defaultForces.linkDistance),
-            };
+            const next = normalizeForces(settings);
             if (Object.keys(next).every((key) => next[key] === forces[key]))
                 return;
             forces = next;
@@ -168,8 +208,33 @@ function createPhysics(onPositions) {
             }
             restart(0.3);
         },
-        reheat() {
-            restart(0.3);
+        // Unpins every node, nudges each by a small deterministic offset that
+        // differs per press, and lets the layout settle again from full heat.
+        rebalance() {
+            unpinAll();
+            rebalances += 1;
+            for (const node of nodes) {
+                const unsigned = hashText(node.id + '\n' + rebalances);
+                const angle = (unsigned / 0x100000000) * Math.PI * 2;
+                const distance = 20 + ((unsigned >>> 16) % 40);
+                node.x += Math.cos(angle) * distance;
+                node.y += Math.sin(angle) * distance;
+                node.vx = 0;
+                node.vy = 0;
+            }
+            restart(1, settleDecay);
+        },
+        // Forgets every saved position and pin, then lays the graph out from the
+        // given starting positions as on first load.
+        reset(data, settings) {
+            unpinAll();
+            savedNodes.clear();
+            nodes = [];
+            edgeCounts = new Map();
+            hasData = false;
+            forces = normalizeForces(settings || {});
+            applyForces();
+            api.setData(data);
         },
         setReducedMotion(value) {
             if (value === reducedMotion) return;
@@ -177,11 +242,12 @@ function createPhysics(onPositions) {
             if (value) restart(0);
         },
     };
+    return api;
 }
 
 let revision = 0;
 let gesture = 0;
-const physics = createPhysics(nodes => self.postMessage({ revision, gesture, nodes }));
+const physics = createPhysics((nodes, alpha) => self.postMessage({ revision, gesture, nodes, alpha }));
 
 self.onmessage = ({ data }) => {
     switch (data.type) {
@@ -199,8 +265,13 @@ self.onmessage = ({ data }) => {
         case 'motion':
             physics.setReducedMotion(data.reduced);
             break;
-        case 'reheat':
-            physics.reheat();
+        case 'rebalance':
+            revision = data.revision;
+            physics.rebalance();
+            break;
+        case 'reset':
+            revision = data.revision;
+            physics.reset(data.graph, data.settings);
             break;
     }
 };
