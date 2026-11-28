@@ -15,97 +15,103 @@
             <span class="wordmark">titan</span>
         </div>
         <h1>Memory graph</h1>
-        <span class="scope">${scope_label}</span>
+        <span class="scope" id="scopeLabel" dir="auto">${scope_label}</span>
     </header>
     <main class="workspace" id="workspace">
         <aside class="memory-sidebar" id="memorySidebar" aria-label="Saved memories">
             <div class="sidebar-heading"><h2>Saved memories</h2><span id="sidebarCount" class="list-count"></span></div>
+            <p class="sidebar-notice" id="sidebarNotice" hidden></p>
             <div class="memory-search">
-                <label for="sidebarSearch">Search memories</label>
-                <input id="sidebarSearch" type="search" aria-label="Search memories" autocomplete="off">
+                <label for="sidebarSearch" class="visually-hidden">Search memories</label>
+                <input id="sidebarSearch" type="search" aria-label="Search memories" placeholder="Search memories" autocomplete="off">
+                <p class="search-hint" id="searchHint" hidden>Search covers the start of long memories.</p>
             </div>
             <div class="memory-filters">
-                <div class="segmented" aria-label="Memory date range" id="memoryViewSwitch">
+                <div class="segmented" role="group" aria-label="Memory date range" id="memoryViewSwitch">
                     <button type="button" data-view="recent" aria-pressed="true" title="Past 24 hours">Recent</button>
                     <button type="button" data-view="all" aria-pressed="false">All</button>
                 </div>
-                <div class="memory-type">
-                    <label for="typeFilter">Type</label>
-                    <select id="typeFilter" aria-label="Filter by memory type"><option value="">All types</option></select>
-                </div>
+                <select id="typeFilter" aria-label="Filter by memory type"><option value="">All types</option></select>
             </div>
-            <div id="memoryList" class="memory-list" role="list"></div>
-            <p id="sidebarEmpty" class="sidebar-empty" hidden>No matching memories</p>
+            <a class="skip-link" id="skipToGraph" href="#graph">Skip to graph</a>
+            <div id="memoryList" class="memory-list" role="list" aria-label="Memories"></div>
+            <p id="sidebarEmpty" class="sidebar-empty" hidden></p>
         </aside>
         <div class="sidebar-scrim" id="sidebarScrim" aria-hidden="true" hidden></div>
         <section class="graph-stage" id="graphStage" aria-label="Memory graph">
-            <canvas id="graph" tabindex="0" aria-label="Memory graph. Drag to pan. Use arrow keys to pan and plus or minus to zoom. Use the saved memories list to open a memory."></canvas>
-            <div class="graph-toolbar">
+            <canvas id="graph" tabindex="0" role="application" aria-roledescription="graph" aria-label="Memory graph" aria-describedby="graphDescription"></canvas>
+            <p class="visually-hidden" id="graphDescription"></p>
+            <div class="visually-hidden" id="graphAnnouncer" aria-live="polite"></div>
+            <div class="graph-toolbar" id="graphToolbar">
                 <div class="graph-summary">
-                    <span id="graphStats" role="status"></span>
-                    <div class="focus-context" id="focusContext" hidden><span id="focusAnchor"></span><button type="button" class="focus-reset" id="clearFocus">Clear focus</button></div>
-                </div>
-                <label class="edge-filter"><span>Links</span><select id="relationshipFilter" aria-label="Show links"><option value="all">All</option><option value="similarity">Similarity</option><option value="supersedes">Corrections</option></select></label>
-            </div>
-            <div class="graph-empty" id="graphEmpty" hidden><strong>No memories found</strong><span id="emptyDetail"></span></div>
-            <div class="graph-footer">
-                <div class="graph-key">
-                    <div class="graph-legend" aria-label="Link legend">
-                        <span data-link-kind="similarity"><i class="legend-line" aria-hidden="true"></i>Similarity</span>
-                        <span data-link-kind="supersedes"><i class="legend-line correction-line" aria-hidden="true"></i>Correction</span>
+                    <span id="graphStats"></span>
+                    <div class="graph-legend" id="graphLegend" role="group" aria-label="Legend">
+                        <div class="agent-legend" id="agentLegend" role="group" aria-label="Agents"></div>
+                        <span class="link-keys">
+                            <span class="link-key" data-link-kind="similarity"><i class="legend-line" aria-hidden="true"></i>Similarity</span>
+                            <span class="link-key" data-link-kind="supersedes"><svg class="legend-arrow" viewBox="0 0 22 8" aria-hidden="true"><path d="M1 4H14"/><path d="M14 0.8 21 4 14 7.2Z"/></svg>Correction<span class="legend-hint">replacement → replaced</span></span>
+                        </span>
                     </div>
-                    <details class="graph-layout" id="graphLayout">
-                        <summary>Layout</summary>
-                        <form class="graph-layout-panel" id="graphLayoutForm" aria-label="Graph layout">
-                            <fieldset id="graphForces">
-                                <legend>Forces</legend>
-                                <label>Center force <input name="centerStrength" type="range" min="0" max="1" step="0.01" value="0.1"></label>
-                                <label>Repel force <input name="repelStrength" type="range" min="0" max="20" step="0.1" value="10"></label>
-                                <label>Link force <input name="linkStrength" type="range" min="0" max="1" step="0.01" value="1"></label>
-                                <label>Link distance <input name="linkDistance" type="range" min="30" max="500" value="250"></label>
-                            </fieldset>
-                            <fieldset id="graphDisplay">
-                                <legend>Display</legend>
-                                <label>Node size <input name="nodeSize" type="range" min="0.5" max="2.5" step="0.1" value="1"></label>
-                                <label>Link width <input name="linkWidth" type="range" min="0.5" max="3" step="0.1" value="1"></label>
-                            </fieldset>
-                            <label id="localDepthField" hidden>Neighborhood depth <input name="localDepth" type="range" min="1" max="5" value="1"></label>
-                            <div class="graph-layout-actions">
-                                <button type="button" id="reheatGraph">Rebalance</button>
-                                <button type="reset">Reset</button>
-                            </div>
-                        </form>
-                    </details>
+                    <p class="graph-note" id="capNotice" hidden></p>
+                    <p class="graph-note" id="physicsNotice" hidden>Static layout: the force simulation could not start in this browser.</p>
                 </div>
-                <div class="camera-controls" aria-label="Graph camera controls">
+                <div class="edge-filter"><select id="relationshipFilter" aria-label="Show links"><option value="all">All links</option><option value="similarity">Similarity links</option><option value="supersedes">Corrections</option></select></div>
+                <div class="focus-context" id="focusContext" hidden><span id="focusAnchor"></span><button type="button" class="focus-reset" id="clearFocus">Clear focus</button></div>
+            </div>
+            <div class="graph-empty" id="graphEmpty" hidden><strong id="emptyTitle">No memories yet</strong><span id="emptyDetail"></span><button type="button" class="empty-action" id="clearFilters" hidden>Clear filters</button><button type="button" class="empty-action" id="retryLoad" hidden>Retry</button></div>
+            <div class="graph-footer" id="graphFooter">
+                <details class="graph-layout" id="graphLayout">
+                    <summary>Layout</summary>
+                    <form class="graph-layout-panel" id="graphLayoutForm" aria-label="Graph layout">
+                        <fieldset id="graphForces">
+                            <legend>Forces</legend>
+                            <label>Center force <input name="centerStrength" type="range" min="0" max="1" step="0.01" value="0.1"></label>
+                            <label>Repel force <input name="repelStrength" type="range" min="0" max="20" step="0.1" value="10"></label>
+                            <label>Link force <input name="linkStrength" type="range" min="0" max="1" step="0.01" value="1"></label>
+                            <label>Link distance <input name="linkDistance" type="range" min="30" max="500" value="250"></label>
+                        </fieldset>
+                        <fieldset id="graphDisplay">
+                            <legend>Display</legend>
+                            <label>Node size <input name="nodeSize" type="range" min="0.5" max="2.5" step="0.1" value="1"></label>
+                            <label>Link width <input name="linkWidth" type="range" min="0.5" max="3" step="0.1" value="1"></label>
+                        </fieldset>
+                        <label id="localDepthField" hidden>Neighborhood depth <input name="localDepth" type="range" min="1" max="5" value="1"></label>
+                        <div class="graph-layout-actions">
+                            <button type="button" id="reheatGraph">Rebalance</button>
+                            <button type="button" id="resetLayout">Reset</button>
+                        </div>
+                    </form>
+                </details>
+                <div class="camera-controls" id="cameraControls" role="group" aria-label="Graph camera controls">
                     <button type="button" class="icon-button" id="zoomOut" aria-label="Zoom out" title="Zoom out">−</button>
-                    <span id="zoomValue">100%</span>
+                    <span id="zoomValue" title="Zoom relative to the fitted view">100%</span>
                     <button type="button" class="icon-button" id="zoomIn" aria-label="Zoom in" title="Zoom in">+</button>
                     <button type="button" class="fit-button" id="fitGraph">Fit</button>
                 </div>
             </div>
+            <dialog class="memory-preview" id="memoryPreview" aria-labelledby="memoryPreviewTitle">
+                <header class="preview-header">
+                    <h2 id="memoryPreviewTitle" class="preview-type" tabindex="-1" dir="auto">Memory</h2>
+                    <span class="preview-load-status" id="previewLoadStatus" role="status"></span>
+                    <button class="icon-button" id="memoryPreviewClose" type="button" aria-label="Close details" title="Close (Esc)">×</button>
+                </header>
+                <div class="preview-scroll" id="previewScroll">
+                    <div id="previewContent">
+                        <p class="preview-text" id="memoryPreviewBody" dir="auto"></p>
+                        <dl class="preview-meta" id="memoryPreviewMeta"></dl>
+                        <details class="preview-identifiers"><summary>Memory identifiers</summary><div id="memoryIdentifiers"></div></details>
+                        <p class="preview-note" id="previewScope" hidden>Outside the current graph and list</p>
+                        <p class="preview-note" id="correctionCycle" hidden>These corrections form a loop: memories in it replace each other, so the replacement order is ambiguous.</p>
+                        <div id="memoryPreviewEvidence" hidden></div>
+                        <section id="memoryPreviewConnections" class="preview-section" hidden>
+                            <h3>Similar memories</h3><div id="similarMemories" class="preview-links"></div>
+                        </section>
+                    </div>
+                </div>
+                <footer class="preview-actions" id="previewActions" hidden><span class="focus-note" id="focusNote" hidden>No linked memories in this view</span><button type="button" id="focusMemory">Focus neighborhood</button></footer>
+            </dialog>
         </section>
     </main>
-    <dialog class="memory-preview" id="memoryPreview" aria-labelledby="memoryPreviewTitle">
-        <header class="preview-header">
-            <h2 id="memoryPreviewTitle">Memory</h2>
-            <span class="preview-load-status" id="previewLoadStatus" role="status"></span>
-            <button class="icon-button" id="memoryPreviewClose" type="button" aria-label="Close preview" autofocus>×</button>
-        </header>
-        <div class="preview-scroll" id="previewScroll">
-            <div id="previewContent">
-                <p class="preview-text" id="memoryPreviewBody" tabindex="-1"></p>
-                <dl class="preview-meta" id="memoryPreviewMeta"></dl>
-                <details class="preview-identifiers"><summary>Memory identifiers</summary><div id="memoryIdentifiers"></div></details>
-                <p class="preview-note" id="previewScope" hidden>Outside the current graph and list</p>
-                <div id="memoryPreviewEvidence" hidden></div>
-                <section id="memoryPreviewConnections" class="preview-section" hidden>
-                    <h3>Similar memories</h3><div id="similarMemories" class="preview-links"></div>
-                </section>
-            </div>
-        </div>
-        <footer class="preview-actions" id="previewActions" hidden><button type="button" id="focusMemory">Focus neighborhood</button></footer>
-    </dialog>
     <script id="graphPhysics" type="application/json">${physics_script}</script>
     <script>${canvas_script}</script>
     <script>${client_script}</script>

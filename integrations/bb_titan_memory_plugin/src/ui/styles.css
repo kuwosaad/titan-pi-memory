@@ -111,6 +111,8 @@
   margin-bottom: 14px;
 }
 .titan-field { min-width: 0; }
+/* Long type or agent names must not stretch the toolbar. */
+.titan-field select { max-width: 180px; text-overflow: ellipsis; }
 .titan-field--query { flex: 1 1 190px; }
 .titan-field--date { flex: 0 1 112px; }
 .titan-field input,
@@ -146,6 +148,9 @@
   list-style: none;
 }
 .titan-more-filters summary::-webkit-details-marker { display: none; }
+.titan-field input:disabled,
+.titan-field select:disabled,
+.titan-more-filters summary[aria-disabled="true"] { cursor: not-allowed; opacity: 0.5; }
 .titan-more-filters-content {
   position: absolute;
   z-index: 2;
@@ -162,6 +167,8 @@
 }
 .titan-date-field { display: grid; gap: 4px; min-width: 0; }
 .titan-date-field span { color: var(--muted-foreground); font-size: 12px; }
+.titan-more-filters-content { flex-wrap: wrap; }
+.titan-date-note { flex-basis: 100%; color: var(--warning); font-size: 12px; }
 
 .titan-alert,
 .titan-inline-error {
@@ -233,15 +240,18 @@
   min-height: 180px;
   place-content: center;
   padding: 20px;
+  gap: 4px;
   color: var(--muted-foreground);
   text-align: center;
-  font-size: 11px;
+  font-size: 13px;
 }
+.titan-empty strong { color: var(--ink); font-size: 14px; font-weight: 600; }
 
 .titan-graph-wrap { padding: 12px; }
 
 .titan-memory-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 5px;
   max-height: 490px;
   margin: 0;
@@ -251,7 +261,10 @@
 }
 .titan-memory-row {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   gap: 5px;
   padding: 8px;
   border-radius: 8px;
@@ -268,13 +281,22 @@
   color: var(--subtle-foreground);
   font-size: 12px;
 }
-.titan-memory-row-meta span:first-child { color: var(--primary); }
+.titan-memory-row-meta > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.titan-memory-row-meta > :first-child { color: var(--primary); }
+.titan-memory-row-meta > :last-child { flex-shrink: 0; max-width: 45%; }
 .titan-memory-row-text {
   display: -webkit-box;
   overflow: hidden;
   color: var(--ink);
   font-size: 13px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
@@ -311,7 +333,10 @@
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  unicode-bidi: isolate;
 }
+.titan-memory-row-text--empty,
+.titan-detail-text--empty { color: var(--muted-foreground); font-style: italic; }
 .titan-metadata {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -324,12 +349,13 @@
 .titan-connections { display: grid; gap: 8px; border-top: 1px solid var(--border-hairline); padding-top: 12px; }
 .titan-connection {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 3px;
   padding: 8px;
   border-radius: 8px;
   text-align: left;
 }
-.titan-connection span { color: var(--ink); font-size: 12px; }
+.titan-connection span { min-width: 0; color: var(--ink); font-size: 12px; overflow-wrap: anywhere; unicode-bidi: isolate; }
 .titan-connection small { color: var(--primary); font-size: 11px; }
 
 @container titan-panel (max-width: 650px) {
@@ -349,7 +375,7 @@
 
 .titan-scope-note { padding: 4px 8px; border-left: 2px solid var(--border); color: var(--muted-foreground); font-size: 12px; }
 .titan-correction { display: grid; gap: 4px; }
-.titan-correction .titan-connection { border-inline-start: 2px solid #559ca9; }
+.titan-correction .titan-connection { border-inline-start: 2px solid var(--titan-edge-correction); }
 .titan-evidence { color: var(--muted-foreground); font-size: 12px; overflow-wrap: anywhere; }
 .titan-evidence summary { cursor: pointer; }
 .titan-evidence p { white-space: pre-wrap; line-height: 1.45; }
